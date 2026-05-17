@@ -7,8 +7,19 @@ String safeText(dynamic value, String fallback) {
 }
 
 String formatPrice(dynamic value) {
-  final number = value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
-  return '£${number.toStringAsFixed(number.truncateToDouble() == number ? 0 : 2)}';
+
+  if (value == null) {
+    return '£0.00';
+  }
+
+  final pence =
+      value is num
+          ? value.toDouble()
+          : double.tryParse('$value') ?? 0;
+
+  final pounds = pence / 100;
+
+  return '£${pounds.toStringAsFixed(2)}';
 }
 
 String formatSlotTime(dynamic value) {

@@ -2,20 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
-class BusinessAvailabilityScreen extends StatefulWidget {
+class BusinessAvailabilityScreen
+    extends StatefulWidget {
 
   final String businessId;
-final String staffId;
+  final String staffId;
+  final String staffName;
 
   const BusinessAvailabilityScreen({
-  super.key,
-  required this.businessId,
-  required this.staffId,
-});
+    super.key,
+    required this.businessId,
+    required this.staffId,
+    required this.staffName,
+  });
 
   @override
-  State<BusinessAvailabilityScreen> createState() =>
-      _BusinessAvailabilityScreenState();
+  State<BusinessAvailabilityScreen>
+      createState() =>
+          _BusinessAvailabilityScreenState();
 }
 
 class _BusinessAvailabilityScreenState
@@ -76,10 +80,10 @@ class _BusinessAvailabilityScreenState
 
     final snapshot = await FirebaseFirestore.instance
         .collection('businesses')
-        .doc(widget.businessId)
-        .collection('staff')
-        .doc(widget.staffId)
-        .collection('weeklyAvailability')
+.doc(widget.businessId)
+.collection('staff')
+.doc(widget.staffId)
+.collection('weeklyAvailability')
         .get();
 
     for (final doc in snapshot.docs) {
@@ -161,6 +165,8 @@ class _BusinessAvailabilityScreenState
 
         'closed':
             !(enabledDays[day] ?? false),
+            
+            'staffName': widget.staffName,
       });
     }
 // =====================================
@@ -257,9 +263,8 @@ await callable.call({
 
       appBar: AppBar(
 
-        title: const Text(
-          'Business Availability',
-        ),
+       title:
+    Text('${widget.staffName} Availability'),
 
         actions: [
 

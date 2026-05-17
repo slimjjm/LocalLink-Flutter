@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'business_availability_screen.dart';
+import 'staff_services_screen.dart';
+import 'staff_day_blocks_screen.dart';
 
 class BusinessStaffScreen extends StatefulWidget {
 
@@ -39,24 +41,43 @@ class _BusinessStaffScreenState
 
     if (name.isEmpty) return;
 
-    await FirebaseFirestore.instance
-        .collection('businesses')
-        .doc(widget.businessId)
-        .collection('staff')
-        .add({
+    final existingStaff = await FirebaseFirestore
+    .instance
+    .collection('businesses')
+    .doc(widget.businessId)
+    .collection('staff')
+    .get();
 
-      'name': name,
+final seatRank =
+    existingStaff.docs.length;
 
-      'role':
-          role.isEmpty
-              ? 'Staff'
-              : role,
+await FirebaseFirestore.instance
+    .collection('businesses')
+    .doc(widget.businessId)
+    .collection('staff')
+    .add({
 
-      'isActive': true,
+  'name': name,
 
-      'createdAt':
-          Timestamp.now(),
-    });
+  'role':
+      role.isEmpty
+          ? 'Staff'
+          : role,
+
+  'isActive': true,
+
+  'canTakeBookings': true,
+
+  'bookingCount': 0,
+
+  'seatRank': seatRank,
+
+   'photoUrl': '',
+
+   'serviceIds': [],
+
+  'createdAt': Timestamp.now(),
+});
 
     nameController.clear();
     roleController.clear();
@@ -194,7 +215,7 @@ class _BusinessStaffScreenState
                 .collection('businesses')
                 .doc(widget.businessId)
                 .collection('staff')
-                .orderBy('createdAt')
+               .orderBy('seatRank')
                 .snapshots(),
 
         builder: (context, snapshot) {
@@ -245,7 +266,7 @@ class _BusinessStaffScreenState
                   data['isActive']
                       ?? true;
 
-              return Card(
+                           return Card(
 
                 margin:
                     const EdgeInsets.symmetric(
@@ -253,55 +274,139 @@ class _BusinessStaffScreenState
                   vertical: 8,
                 ),
 
-               child: ListTile(
+                child: ListTile(
 
-  leading: CircleAvatar(
-    child: Text(
-      name
-          .toString()
-          .substring(0, 1)
-          .toUpperCase(),
-    ),
-  ),
+                  leading: CircleAvatar(
+                    child: Text(
+                      name
+                          .toString()
+                          .substring(0, 1)
+                          .toUpperCase(),
+                    ),
+                  ),
 
-  title: Text(name),
+                  title: Text(name),
 
-  subtitle: Text(role),
+                  subtitle: Text(role),
 
-  onTap: () {
+                  onTap: () {
 
-    Navigator.push(
+                    Navigator.push(
 
-      context,
+                      context,
 
-      MaterialPageRoute(
+                      MaterialPageRoute(
 
-        builder: (_) =>
-            BusinessAvailabilityScreen(
+                        builder: (_) =>
+                            BusinessAvailabilityScreen(
 
-          businessId:
-              widget.businessId,
+                          businessId:
+                              widget.businessId,
 
-          staffId:
-              doc.id,
-        ),
-      ),
-    );
-  },
+                          staffId:
+                              doc.id,
 
-  trailing: Switch(
+                          staffName:
+                              name,
+                        ),
+                      ),
+                    );
+                  },
 
-    value: isActive,
+                  trailing: Row(
 
-    onChanged: (_) {
+                    mainAxisSize:
+                        MainAxisSize.min,
 
-      toggleActive(
-        doc.id,
-        isActive,
-      );
-    },
-  ),
-),
+                    children: [
+
+                      // =====================================
+                      // STAFF SERVICES
+                      // =====================================
+
+                      IconButton(
+
+                        icon:
+                            const Icon(Icons.build),
+
+                        onPressed: () {
+
+                          Navigator.push(
+
+                            context,
+
+                            MaterialPageRoute(
+
+                              builder: (_) =>
+                                  StaffServicesScreen(
+
+                                businessId:
+                                    widget.businessId,
+
+                                staffId:
+                                    doc.id,
+
+                                staffName:
+                                    name,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      // =====================================
+                      // STAFF BLOCKS
+                      // =====================================
+
+                      IconButton(
+
+                        icon:
+                            const Icon(Icons.event_busy),
+
+                        onPressed: () {
+
+                          Navigator.push(
+
+                            context,
+
+                            MaterialPageRoute(
+
+                              builder: (_) =>
+                                  StaffDayBlocksScreen(
+
+                                businessId:
+                                    widget.businessId,
+
+                                staffId:
+                                    doc.id,
+
+                                staffName:
+                                    name,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      // =====================================
+                      // ACTIVE SWITCH
+                      // =====================================
+
+                      Switch(
+
+                        value: isActive,
+
+                        onChanged: (_) {
+
+                          toggleActive(
+                            doc.id,
+                            isActive,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               );
             },
           );

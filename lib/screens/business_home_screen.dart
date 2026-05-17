@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'business_bookings_screen.dart';
 import 'business_services_screen.dart';
-import 'business_availability_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'business_staff_screen.dart';
 
 class BusinessHomeScreen extends StatelessWidget {
@@ -54,7 +52,7 @@ class BusinessHomeScreen extends StatelessWidget {
             const SizedBox(height: 10),
 
             const Text(
-              'Manage your bookings and services.',
+              'Manage your bookings, staff and services.',
             ),
 
             const SizedBox(height: 40),
@@ -87,54 +85,36 @@ class BusinessHomeScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 16),
+
+            // =====================================
+            // STAFF
+            // =====================================
+
             ElevatedButton(
 
-  onPressed: () {
+              onPressed: () {
 
-    Navigator.push(
+                Navigator.push(
 
-      context,
+                  context,
 
-      MaterialPageRoute(
+                  MaterialPageRoute(
 
-        builder: (_) =>
-            BusinessStaffScreen(
-          businessId: businessId,
-        ),
-      ),
-    );
-  },
+                    builder: (_) =>
+                        BusinessStaffScreen(
+                      businessId: businessId,
+                    ),
+                  ),
+                );
+              },
 
-  child: const Text('Manage Staff'),
-),
+              child: const Text(
+                'Manage Staff',
+              ),
+            ),
 
-ElevatedButton(
+            const SizedBox(height: 16),
 
-  onPressed: () {
-
-    Navigator.push(
-
-      context,
-
-      MaterialPageRoute(
-
-       builder: (_) =>
-    BusinessAvailabilityScreen(
-  businessId: businessId,
-  staffId:
-      FirebaseAuth
-          .instance
-          .currentUser!
-          .uid,
-),
-      ),
-    );
-  },
-
-  child: const Text(
-    'Manage Availability',
-  ),
-),
             // =====================================
             // SERVICES
             // =====================================

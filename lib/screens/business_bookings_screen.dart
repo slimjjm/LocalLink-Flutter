@@ -113,138 +113,298 @@ class BusinessBookingsScreen extends StatelessWidget {
 
             itemBuilder: (context, index) {
 
-              final booking =
-                  docs[index].data()
-                      as Map<String, dynamic>;
+            final doc = docs[index];
 
-              final customerName =
-                  booking['customerName']
-                      ?? 'Customer';
+final booking =
+    doc.data()
+        as Map<String, dynamic>;
 
-              final serviceName =
-                  booking['serviceName']
-                      ?? 'Service';
+final customerName =
+    booking['customerName']
+        ?? 'Customer';
 
-              final status =
-                  booking['status']
-                      ?? 'unknown';
+final serviceName =
+    booking['serviceName']
+        ?? 'Service';
 
-              final paymentMethod =
-                  booking['paymentMethod']
-                      ?? 'unknown';
+final status =
+    booking['status']
+        ?? 'unknown';
 
-              final price =
-                  booking['price'];
+final paymentMethod =
+    booking['paymentMethod']
+        ?? 'unknown';
 
-              final startDate =
-                  booking['startDate']
-                      as Timestamp?;
+final price =
+    booking['price'];
 
-              return Card(
+final startDate =
+    booking['startDate']
+        as Timestamp?;
 
-                margin:
-                    const EdgeInsets.only(
-                  bottom: 12,
-                ),
+return Card(
 
-                child: Padding(
+  margin:
+      const EdgeInsets.only(
+    bottom: 12,
+  ),
 
-                  padding:
-                      const EdgeInsets.all(16),
+  child: Padding(
 
-                  child: Column(
+    padding:
+        const EdgeInsets.all(16),
 
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+    child: Column(
 
-                    children: [
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
 
-                      Row(
+      children: [
 
-                        children: [
+        // =========================
+        // HEADER
+        // =========================
 
-                          Expanded(
-                            child: Text(
-                              customerName,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight:
-                                    FontWeight.bold,
-                              ),
-                            ),
-                          ),
+        Row(
 
-                          Container(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
 
-                            padding:
-                                const EdgeInsets
-                                    .symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
+          children: [
 
-                            decoration: BoxDecoration(
-                              color:
-                                  statusColor(status),
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      20),
-                            ),
+            Expanded(
 
-                            child: Text(
-                              status,
-                              style:
-                                  const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+              child: Column(
 
-                      const SizedBox(height: 8),
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
 
-                      Text(
-                        serviceName,
-                        style: const TextStyle(
-                          fontSize: 16,
-                        ),
-                      ),
+                children: [
 
-                      const SizedBox(height: 6),
+                  Text(
 
-                      if (startDate != null)
-                        Text(
-                          formatDate(startDate),
-                        ),
+                    customerName,
 
-                      const SizedBox(height: 6),
+                    style:
+                        const TextStyle(
 
-                      Row(
+                      fontSize: 18,
 
-                        children: [
-
-                          Text(
-                            formatPrice(price),
-                            style: const TextStyle(
-                              fontWeight:
-                                  FontWeight.bold,
-                            ),
-                          ),
-
-                          const SizedBox(width: 10),
-
-                          Text(
-                            paymentMethod
-                                .toUpperCase(),
-                          ),
-                        ],
-                      ),
-                    ],
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
                   ),
+
+                  const SizedBox(height: 4),
+
+                  Text(
+                    serviceName,
+                    style:
+                        const TextStyle(
+                      fontSize: 16,
+                    ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  if (startDate != null)
+
+                    Text(
+                      formatDate(
+                        startDate,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // =========================
+            // STATUS CHIP
+            // =========================
+
+            Container(
+
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+
+              decoration: BoxDecoration(
+
+                color:
+                    statusColor(status),
+
+                borderRadius:
+                    BorderRadius.circular(
+                  20,
                 ),
-              );
+              ),
+
+              child: Text(
+
+                status
+                    .replaceAll('_', ' ')
+                    .toUpperCase(),
+
+                style:
+                    const TextStyle(
+
+                  color: Colors.white,
+
+                  fontSize: 11,
+
+                  fontWeight:
+                      FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 12),
+
+        // =========================
+        // PRICE + PAYMENT
+        // =========================
+
+        Row(
+
+          children: [
+
+            Text(
+
+              formatPrice(price),
+
+              style:
+                  const TextStyle(
+
+                fontWeight:
+                    FontWeight.bold,
+
+                fontSize: 16,
+              ),
+            ),
+
+            const SizedBox(width: 10),
+
+            Text(
+              paymentMethod
+                  .toUpperCase(),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 14),
+
+        // =========================
+        // ACTION BUTTONS
+        // =========================
+
+        if (status == 'confirmed')
+
+          Row(
+
+            children: [
+
+              Expanded(
+
+                child: ElevatedButton.icon(
+
+                  icon: const Icon(
+                    Icons.check_circle,
+                  ),
+
+                  label: const Text(
+                    'Complete',
+                  ),
+
+                  style:
+                      ElevatedButton.styleFrom(
+                    backgroundColor:
+                        Colors.green,
+                  ),
+
+                  onPressed: () async {
+
+                    await FirebaseFirestore
+                        .instance
+                        .collection(
+                            'bookings')
+                        .doc(doc.id)
+                        .update({
+
+                      'status':
+                          'completed',
+                    });
+                  },
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              Expanded(
+
+                child: ElevatedButton.icon(
+
+                  icon: const Icon(
+                    Icons.cancel,
+                  ),
+
+                  label: const Text(
+                    'Cancel',
+                  ),
+
+                  style:
+                      ElevatedButton.styleFrom(
+                    backgroundColor:
+                        Colors.red,
+                  ),
+
+                  onPressed: () async {
+
+                    await FirebaseFirestore
+                        .instance
+                        .collection(
+                            'bookings')
+                        .doc(doc.id)
+                        .update({
+
+                      'status':
+                          'cancelled_by_business',
+                    });
+                  },
+                ),
+              ),
+            ],
+          ),
+
+        if (status == 'completed')
+
+          const Text(
+            'Completed ✅',
+            style: TextStyle(
+              color: Colors.green,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+        if (status ==
+                'cancelled_by_business' ||
+            status ==
+                'cancelled_by_customer')
+
+          const Text(
+            'Cancelled ❌',
+            style: TextStyle(
+              color: Colors.red,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+      ],
+    ),
+  ),
+);
             },
           );
         },

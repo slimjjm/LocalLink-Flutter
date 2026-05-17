@@ -27,6 +27,7 @@ class BookingScreen extends StatefulWidget {
 class _BookingScreenState extends State<BookingScreen> {
   // 🔹 SLOT STATE
   List<Map<String, dynamic>> availableSlots = [];
+  List<String> allowedStaffIds = [];
   String? selectedSlotId;
   Map<String, dynamic>? selectedSlot;
 
@@ -35,8 +36,8 @@ class _BookingScreenState extends State<BookingScreen> {
 
   DateTime selectedDate = DateTime.now();
 
-  // 🔹 PAYMENT
- String selectedPaymentMethod = '';
+// 🔹 PAYMENT
+String selectedPaymentMethod = '';
 
  @override
 void initState() {
@@ -49,10 +50,61 @@ void initState() {
   // 🔹 LOAD SLOTS
   // =====================================================
 Future<void> loadSlots() async {
+
   try {
+
     print("🚀 LOAD SLOTS START");
 
     setState(() => isLoadingSlots = true);
+
+    // =====================================
+    // LOAD ALLOWED STAFF
+    // =====================================
+
+    final staffSnapshot =
+        await FirebaseFirestore.instance
+            .collection('businesses')
+            .doc(widget.businessId)
+            .collection('staff')
+            .where(
+              'serviceIds',
+              arrayContains:
+                  widget.serviceId,
+            )
+            .where(
+              'isActive',
+              isEqualTo: true,
+            )
+            .get();
+
+    allowedStaffIds =
+        staffSnapshot.docs
+            .map((doc) => doc.id)
+            .toList();
+
+    print(
+      "👥 ALLOWED STAFF: $allowedStaffIds",
+    );
+
+    // =====================================
+    // NO STAFF CAN PERFORM SERVICE
+    // =====================================
+
+    if (allowedStaffIds.isEmpty) {
+
+      setState(() {
+
+        availableSlots = [];
+
+        isLoadingSlots = false;
+      });
+
+      return;
+    }
+
+    // =====================================
+    // DATE RANGE
+    // =====================================
 
     final startOfDay = DateTime(
       selectedDate.year,
@@ -60,54 +112,103 @@ Future<void> loadSlots() async {
       selectedDate.day,
     );
 
-    final endOfDay = startOfDay.add(const Duration(days: 1));
+    final endOfDay =
+        startOfDay.add(
+          const Duration(days: 1),
+        );
 
-    print("📅 selectedDate: $selectedDate");
-    print("🕐 FROM: $startOfDay");
-    print("🕐 TO:   $endOfDay");
-
-   final snapshot = await FirebaseFirestore.instance
-    .collectionGroup('availableSlots')
-.where('businessId', isEqualTo: widget.businessId)
-        .where('isBooked', isEqualTo: false)
-        .where('startTime', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-        .where('startTime', isLessThan: Timestamp.fromDate(endOfDay))
+    // =====================================
+    // LOAD AVAILABLE SLOTS
+    // =====================================
+final snapshot =
+    await FirebaseFirestore.instance
+        .collectionGroup(
+          'availableSlots',
+        )
+        .where(
+          'businessId',
+          isEqualTo: widget.businessId,
+        )
+        .where(
+          'staffId',
+          whereIn: allowedStaffIds,
+        )
+        .where(
+          'isBooked',
+          isEqualTo: false,
+        )
+        .where(
+          'startTime',
+          isGreaterThanOrEqualTo:
+              Timestamp.fromDate(startOfDay),
+        )
+        .where(
+          'startTime',
+          isLessThan:
+              Timestamp.fromDate(endOfDay),
+        )
         .orderBy('startTime')
         .get();
 
-    print("📦 SLOTS FOUND: ${snapshot.docs.length}");
+final slots =
+    snapshot.docs.map((doc) {
 
-    final slots = snapshot.docs.map((doc) {
-      final data = doc.data();
+  final data =
+      doc.data();
 
-      print("👉 SLOT:");
-      print("   path: ${doc.reference.path}");
-      print("   start: ${(data['startTime'] as Timestamp).toDate()}");
-      print("   staff: ${data['staffId']}");
+  return {
 
-return {
-  'id': doc.id,
-  'slotPath': doc.reference.path,
-  'staffId': data['staffId'],
-  'staffName': data['staffName'],
-  ...data,
-};
-    }).toList();
+    'id': doc.id,
+
+    'slotPath':
+        doc.reference.path,
+
+    'staffId':
+        data['staffId'],
+
+    'staffName':
+        data['staffName'],
+
+    ...data,
+  };
+
+}).toList();
+
+print(
+  "📦 TOTAL SLOTS FOUND: ${snapshot.docs.length}",
+);
+
+print(
+  "✅ FILTERED SLOTS: ${slots.length}",
+);
 
     setState(() {
+
       availableSlots = slots;
+
       isLoadingSlots = false;
     });
 
-    print("✅ LOAD COMPLETE");
-
   } catch (e) {
-    print("🔥 LOAD SLOTS ERROR: $e");
 
-    setState(() => isLoadingSlots = false);
+    print(
+      "🔥 LOAD SLOTS ERROR: $e",
+    );
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error loading slots: $e')),
+    setState(() {
+
+      isLoadingSlots = false;
+    });
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+
+      SnackBar(
+        content:
+            Text(
+              'Error loading slots: $e',
+            ),
+      ),
     );
   }
 }
@@ -121,9 +222,10 @@ List<Map<String, dynamic>> get filteredSlots {
 
   return availableSlots.where((slot) {
 
-    final date =
-        (slot['startTime'] as Timestamp)
-            .toDate();
+   final date =
+    (slot['startTime'] as Timestamp)
+        .toDate()
+        .toLocal();
 
     // SAME DAY FILTER
 
@@ -187,7 +289,11 @@ Future<void> goToNextAvailableDate() async {
   print("✅ NEXT SLOT: $next");
 
   setState(() {
-    selectedDate = DateTime(next.year, next.month, next.day);
+    selectedDate = DateTime(
+  next.toLocal().year,
+  next.toLocal().month,
+  next.toLocal().day,
+);
     selectedSlotId = null;
     selectedSlot = null;
   });
@@ -538,7 +644,16 @@ void showLoginSheet() {
                   );
                 }).toList(),
               ),
-
+if (selectedSlot != null)
+  Padding(
+    padding: const EdgeInsets.only(top: 12),
+    child: Text(
+      'Selected staff: ${selectedSlot!['staffName']}',
+      style: const TextStyle(
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  ),
             const Spacer(),
 
             // PAYMENT
