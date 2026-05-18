@@ -1,15 +1,32 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- LOCATION PERMISSIONS -->
+    <!-- ================================================= -->
+    <!-- PERMISSIONS -->
+    <!-- ================================================= -->
 
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- PUSH NOTIFICATIONS -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="LocalLink"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+
+        <!-- ================================================= -->
+        <!-- FIREBASE MESSAGING -->
+        <!-- ================================================= -->
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="high_importance_channel" />
+
+        <!-- ================================================= -->
+        <!-- MAIN ACTIVITY -->
+        <!-- ================================================= -->
 
         <activity
             android:name=".MainActivity"
@@ -42,7 +59,9 @@
 
     </application>
 
-    <!-- Text processing -->
+    <!-- ================================================= -->
+    <!-- TEXT PROCESSING -->
+    <!-- ================================================= -->
 
     <queries>
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'business_bookings_screen.dart';
 import 'business_services_screen.dart';
 import 'business_staff_screen.dart';
+import 'business_calendar_screen.dart';
 
 class BusinessHomeScreen extends StatelessWidget {
 
@@ -114,6 +115,29 @@ class BusinessHomeScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 16),
+
+            ElevatedButton(
+
+  onPressed: () {
+
+    Navigator.push(
+
+      context,
+
+      MaterialPageRoute(
+
+        builder: (_) =>
+            BusinessCalendarScreen(
+              businessId: businessId,
+            ),
+      ),
+    );
+  },
+
+  child: const Text(
+    'Calendar',
+  ),
+),
 
             // =====================================
             // SERVICES

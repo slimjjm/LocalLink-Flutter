@@ -229,19 +229,21 @@ class _AddBlockTimeScreenState
       });
 
       await FirebaseFirestore.instance
-          .collection('businesses')
-          .doc(widget.businessId)
-          .collection('timeBlocks')
-          .add({
+    .collection('businesses')
+    .doc(widget.businessId)
+    .collection('staff')
+    .doc(widget.staffId)
+    .collection('dayBlocks')
+    .add({
 
         'staffId':
             widget.staffId,
 
-        'startTime':
-            Timestamp.fromDate(startTime),
+      'startDate':
+    Timestamp.fromDate(startTime),
 
-        'endTime':
-            Timestamp.fromDate(endTime),
+'endDate':
+    Timestamp.fromDate(endTime),
 
         'title':
             selectedReason,

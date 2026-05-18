@@ -105,11 +105,12 @@ class BusinessDetailScreen extends StatelessWidget {
                                 {};
 
                         return ServiceCard(
-                          businessId: businessId,
-                          serviceId: services[index].id,
-                          serviceData: data,
-                          paymentMethods: paymentMethods,
-                        );
+  businessId: businessId,
+  businessName: name,
+  serviceId: services[index].id,
+  serviceData: data,
+  paymentMethods: paymentMethods,
+);
                       },
                     );
                   },
@@ -132,11 +133,13 @@ class ServiceCard extends StatelessWidget {
   final String serviceId;
   final Map<String, dynamic> serviceData;
   final List<String> paymentMethods;
+    final String businessName;
 
   const ServiceCard({
-    super.key,
-    required this.businessId,
-    required this.serviceId,
+  super.key,
+  required this.businessId,
+  required this.businessName,
+  required this.serviceId,
     required this.serviceData,
     required this.paymentMethods,
   });
@@ -188,6 +191,7 @@ class ServiceCard extends StatelessWidget {
             MaterialPageRoute(
               builder: (_) => BookingScreen(
                 businessId: businessId,
+                businessName: businessName,
                 serviceId: serviceId,
                 serviceData: serviceData,
                 paymentMethods: paymentMethods,

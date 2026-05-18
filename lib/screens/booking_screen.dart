@@ -11,6 +11,7 @@ class BookingScreen extends StatefulWidget {
   final String serviceId;
   final Map<String, dynamic> serviceData;
   final List<String> paymentMethods;
+final String businessName;
 
   const BookingScreen({
   super.key,
@@ -18,6 +19,7 @@ class BookingScreen extends StatefulWidget {
   required this.serviceId,
   required this.serviceData,
   required this.paymentMethods,
+  required this.businessName,
 });
 
   @override
@@ -33,7 +35,13 @@ class _BookingScreenState extends State<BookingScreen> {
 
   bool isLoadingSlots = true;
   bool isProcessingBooking = false;
+final TextEditingController
+    nameController =
+        TextEditingController();
 
+final TextEditingController
+    addressController =
+        TextEditingController();
   DateTime selectedDate = DateTime.now();
 
 // 🔹 PAYMENT
@@ -149,7 +157,6 @@ final snapshot =
         )
         .orderBy('startTime')
         .get();
-
 final slots =
     snapshot.docs.map((doc) {
 
@@ -173,6 +180,19 @@ final slots =
   };
 
 }).toList();
+
+slots.sort((a, b) {
+
+  final aTime =
+      (a['startTime'] as Timestamp)
+          .toDate();
+
+  final bTime =
+      (b['startTime'] as Timestamp)
+          .toDate();
+
+  return aTime.compareTo(bTime);
+});
 
 print(
   "📦 TOTAL SLOTS FOUND: ${snapshot.docs.length}",
@@ -215,6 +235,47 @@ print(
   // =====================================================
   // 🔹 FILTER BY DATE
   // =====================================================
+bool hasEnoughConsecutiveSlots(
+  Map<String, dynamic> slot,
+) {
+
+  final durationMinutes =
+      widget.serviceData['durationMinutes'] ?? 30;
+
+  final slotsRequired =
+      (durationMinutes / 30).ceil();
+
+  final start =
+      (slot['startTime'] as Timestamp)
+          .toDate();
+
+  final staffId =
+      slot['staffId'];
+
+  for (int i = 1; i < slotsRequired; i++) {
+
+    final nextStart =
+        start.add(Duration(minutes: i * 30));
+
+    final exists =
+        availableSlots.any((s) {
+
+      final sStart =
+          (s['startTime'] as Timestamp)
+              .toDate();
+
+      return
+          s['staffId'] == staffId &&
+          sStart == nextStart;
+    });
+
+    if (!exists) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 List<Map<String, dynamic>> get filteredSlots {
 
@@ -252,7 +313,9 @@ List<Map<String, dynamic>> get filteredSlots {
     if (date.isBefore(minimumBookingTime)) {
       return false;
     }
-
+if (!hasEnoughConsecutiveSlots(slot)) {
+  return false;
+}
     return true;
   }).toList();
 }
@@ -266,19 +329,29 @@ Future<void> goToNextAvailableDate() async {
 
  final snapshot = await FirebaseFirestore.instance
     .collectionGroup('availableSlots')
-    .where('businessId', isEqualTo: widget.businessId)
     .where(
-  'startTime',
-  isGreaterThan:
-      Timestamp.fromDate(
-        DateTime.now()
-            .add(const Duration(hours: 2)),
-      ),
-)
+      'businessId',
+      isEqualTo: widget.businessId,
+    )
+    .where(
+      'staffId',
+      whereIn: allowedStaffIds,
+    )
+    .where(
+      'isBooked',
+      isEqualTo: false,
+    )
+    .where(
+      'startTime',
+      isGreaterThan:
+          Timestamp.fromDate(
+            DateTime.now()
+                .add(const Duration(hours: 2)),
+          ),
+    )
     .orderBy('startTime')
     .limit(1)
     .get();
-
   if (snapshot.docs.isEmpty) {
     print("❌ No future slots");
     return;
@@ -363,8 +436,11 @@ await callable.call({
 
   'paymentMethod': 'cash',
 
-  'customerName': '...',
-  'customerAddress': '...',
+ 'customerName':
+    nameController.text.trim(),
+
+'customerAddress':
+    addressController.text.trim(),
 });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -376,7 +452,7 @@ await callable.call({
   MaterialPageRoute(
     builder: (_) => BookingSuccessScreen(
       serviceName: widget.serviceData['name'] ?? 'Service',
-      businessName: 'Business',
+      businessName: widget.businessName,
       bookingDate:
           (selectedSlot!['startTime'] as Timestamp).toDate(),
       isCashBooking: true,
@@ -442,7 +518,7 @@ final result = await callable.call({
   MaterialPageRoute(
     builder: (_) => BookingSuccessScreen(
       serviceName: widget.serviceData['name'] ?? 'Service',
-      businessName: 'Business',
+      businessName: widget.businessName,
       bookingDate:
           (selectedSlot!['startTime'] as Timestamp).toDate(),
       isCashBooking: false,
@@ -631,8 +707,8 @@ void showLoginSheet() {
                   final isSelected = selectedSlotId == slot['id'];
 
                   return ChoiceChip(
-                    label: Text(
-  '$time • ${slot['staffName'] ?? 'Staff'}',
+                   label: Text(
+  '$time • ${slot['staffName']} • ${duration}m',
 ),
                     selected: isSelected,
                     onSelected: (_) {
@@ -655,7 +731,42 @@ if (selectedSlot != null)
     ),
   ),
             const Spacer(),
+const SizedBox(height: 20),
 
+const Text(
+  'Your details',
+  style: TextStyle(
+    fontWeight: FontWeight.bold,
+  ),
+),
+
+const SizedBox(height: 10),
+
+TextField(
+
+  controller: nameController,
+
+  decoration: const InputDecoration(
+    labelText: 'Your name',
+    border: OutlineInputBorder(),
+  ),
+),
+
+const SizedBox(height: 12),
+
+TextField(
+
+  controller: addressController,
+
+  decoration: const InputDecoration(
+    labelText: 'Address',
+    border: OutlineInputBorder(),
+  ),
+
+  maxLines: 2,
+),
+
+const SizedBox(height: 20),
             // PAYMENT
             const Text('Select payment method',
                 style: TextStyle(fontWeight: FontWeight.bold)),
