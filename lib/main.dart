@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'core/auth_gate.dart';
 import 'firebase_options.dart';
 import 'services/notification_service.dart';
 
+import 'screens/inbox_screen.dart';
+import 'screens/enquiry_chat_screen.dart';
+import 'screens/customer_bookings_screen.dart';
+import 'screens/customer_booking_detail_screen.dart';
+import 'screens/business_booking_detail_screen.dart';
+
 // =====================================================
 // BACKGROUND NOTIFICATION HANDLER
 // =====================================================
 
+@pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(
   RemoteMessage message,
 ) async {
@@ -46,7 +52,7 @@ void main() async {
     firebaseMessagingBackgroundHandler,
   );
 
-  await NotificationService.initialize();
+  await NotificationService.shared.initialise();
 
   // =====================================================
   // STRIPE
@@ -75,9 +81,93 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
 
-    return const MaterialApp(
+    return MaterialApp(
+
+      navigatorKey: navigatorKey,
+
       debugShowCheckedModeBanner: false,
-      home: AuthGate(),
+
+      home: const AuthGate(),
+
+      routes: {
+
+  '/home': (_) =>
+      const AuthGate(),
+
+  // =====================================================
+  // INBOX
+  // =====================================================
+
+ '/inbox': (_) =>
+
+    InboxScreen(
+      currentRole: 'customer',
+    ),
+
+  // =====================================================
+  // BOOKINGS
+  // =====================================================
+
+  '/bookings': (_) =>
+      const CustomerBookingsScreen(),
+
+  // =====================================================
+  // CHAT
+  // =====================================================
+
+  '/chat': (context) {
+
+    final args =
+        ModalRoute.of(context)!
+            .settings
+            .arguments
+            as Map<String, dynamic>;
+
+    return EnquiryChatScreen(
+
+      businessId:
+          args['businessId'],
+
+      customerId:
+          args['customerId'],
+    );
+  },
+
+  // =====================================================
+  // BOOKING DETAIL
+  // =====================================================
+
+  '/booking': (context) {
+
+    final args =
+        ModalRoute.of(context)!
+            .settings
+            .arguments
+            as Map<String, dynamic>;
+
+    final bookingId =
+        args['bookingId'];
+
+    final businessId =
+        args['businessId'];
+
+    // If businessId exists,
+    // assume business-side detail screen
+
+    if (businessId != null) {
+
+      return BusinessBookingDetailScreen(
+        bookingId: bookingId,
+      );
+    }
+
+    // Otherwise customer detail screen
+
+    return CustomerBookingDetailScreen(
+      bookingId: bookingId,
+    );
+  },
+},
     );
   }
 }

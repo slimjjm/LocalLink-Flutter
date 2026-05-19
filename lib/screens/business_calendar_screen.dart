@@ -33,66 +33,110 @@ class _BusinessCalendarScreenState
 loadStaff();
   }
 
-  // =====================================================
-  // LOAD BOOKINGS
-  // =====================================================
+// =====================================================
+// LOAD BOOKINGS + DAY BLOCKS
+// =====================================================
 
-  Future<void> loadBookings() async {
+List<QueryDocumentSnapshot> dayBlocks = [];
 
-    try {
+Future<void> loadBookings() async {
 
-      setState(() {
-        isLoading = true;
-      });
+  try {
 
-      final startOfDay = DateTime(
-        selectedDate.year,
-        selectedDate.month,
-        selectedDate.day,
-      );
+    setState(() {
+      isLoading = true;
+    });
 
-      final endOfDay =
-          startOfDay.add(
-            const Duration(days: 1),
-          );
+    final startOfDay = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+    );
 
-      final snapshot =
+    final endOfDay =
+        startOfDay.add(
+          const Duration(days: 1),
+        );
+
+     
+
+    // =====================================================
+    // LOAD BOOKINGS
+    // =====================================================
+
+    final bookingSnapshot =
+        await FirebaseFirestore.instance
+            .collection('bookings')
+            .where(
+              'businessId',
+              isEqualTo: widget.businessId,
+            )
+            .where(
+              'startDate',
+              isGreaterThanOrEqualTo:
+                  Timestamp.fromDate(startOfDay),
+            )
+            .where(
+              'startDate',
+              isLessThan:
+                  Timestamp.fromDate(endOfDay),
+            )
+            .orderBy('startDate')
+            .get();
+
+    // =====================================================
+    // LOAD STAFF DAY BLOCKS
+    // =====================================================
+
+    List<QueryDocumentSnapshot> allBlocks = [];
+
+    for (final staffDoc in staff) {
+
+      final blockSnapshot =
           await FirebaseFirestore.instance
-              .collection('bookings')
-              .where(
-                'businessId',
-                isEqualTo: widget.businessId,
-              )
-              .where(
-                'startDate',
-                isGreaterThanOrEqualTo:
-                    Timestamp.fromDate(startOfDay),
-              )
+              .collection('businesses')
+              .doc(widget.businessId)
+              .collection('staff')
+              .doc(staffDoc.id)
+              .collection('dayBlocks')
               .where(
                 'startDate',
                 isLessThan:
                     Timestamp.fromDate(endOfDay),
               )
-              .orderBy('startDate')
+              .where(
+                'endDate',
+                isGreaterThanOrEqualTo:
+                    Timestamp.fromDate(startOfDay),
+              )
               .get();
 
-      setState(() {
-
-        bookings = snapshot.docs;
-
-        isLoading = false;
-      });
-
-    } catch (e) {
-
-      print("🔥 CALENDAR LOAD ERROR: $e");
-
-      setState(() {
-        isLoading = false;
-      });
+      allBlocks.addAll(blockSnapshot.docs);
     }
+
+    setState(() {
+
+      bookings =
+          bookingSnapshot.docs;
+
+      dayBlocks =
+          allBlocks;
+
+      isLoading = false;
+    });
+
+  } catch (e) {
+
+    print(
+      "🔥 CALENDAR LOAD ERROR: $e",
+    );
+
+    setState(() {
+      isLoading = false;
+    });
   }
-Future<void> loadStaff() async {
+}
+   Future<void> loadStaff() async {
 
   final snapshot =
       await FirebaseFirestore.instance
@@ -322,6 +366,108 @@ floatingActionButton:
             ),
 
             const SizedBox(height: 20),
+
+            // =====================================================
+// DAY BLOCKS
+// =====================================================
+
+if (!isLoading && dayBlocks.isNotEmpty)
+
+  Container(
+
+    margin:
+        const EdgeInsets.only(
+      bottom: 20,
+    ),
+
+    child: Column(
+
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+
+        const Text(
+
+          'Staff Time Off',
+
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight:
+                FontWeight.bold,
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        ...dayBlocks.map((doc) {
+
+          final data =
+              doc.data()
+                  as Map<String, dynamic>;
+
+          final staffName =
+              data['staffName']
+                  ?? 'Staff';
+
+          final type =
+              data['type']
+                  ?? 'blocked';
+
+          final reason =
+              data['reason']
+                  ?? '';
+
+          Color color;
+
+          switch (type) {
+
+            case 'holiday':
+              color = Colors.purple;
+              break;
+
+            case 'sick':
+              color = Colors.red;
+              break;
+
+            case 'training':
+              color = Colors.indigo;
+              break;
+
+            default:
+              color = Colors.orange;
+          }
+
+          return Card(
+
+            child: ListTile(
+
+              leading: CircleAvatar(
+
+                backgroundColor: color,
+
+                child: const Icon(
+                  Icons.block,
+                  color: Colors.white,
+                ),
+              ),
+
+              title: Text(staffName),
+
+              subtitle: Text(
+                type.toUpperCase(),
+              ),
+
+              trailing:
+                  reason.isEmpty
+                      ? null
+                      : Text(reason),
+            ),
+          );
+        }),
+      ],
+    ),
+  ),
 
             if (isLoading)
               const Expanded(

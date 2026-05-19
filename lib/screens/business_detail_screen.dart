@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/helpers.dart';
 import 'booking_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import 'enquiry_chat_screen.dart';
 
 class BusinessDetailScreen extends StatelessWidget {
   final String businessId;
@@ -54,6 +57,53 @@ class BusinessDetailScreen extends StatelessWidget {
                     Text(category),
                     const SizedBox(height: 4),
                     Text('Payment: ${paymentMethods.join(", ")}'),
+                    const SizedBox(height: 16),
+
+SizedBox(
+
+  width: double.infinity,
+
+  child: ElevatedButton.icon(
+
+    icon: const Icon(
+      Icons.chat_bubble_outline,
+    ),
+
+    label: const Text(
+      'Ask a Question',
+    ),
+
+    onPressed: () {
+
+      final customerId =
+          FirebaseAuth
+              .instance
+              .currentUser
+              ?.uid;
+
+      if (customerId == null) {
+        return;
+      }
+
+      Navigator.push(
+
+        context,
+
+        MaterialPageRoute(
+          builder: (_) =>
+              EnquiryChatScreen(
+
+            businessId:
+                businessId,
+
+            customerId:
+                customerId,
+          ),
+        ),
+      );
+    },
+  ),
+),
                   ],
                 ),
               ),

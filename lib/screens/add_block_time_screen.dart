@@ -228,7 +228,41 @@ class _AddBlockTimeScreenState
         isSaving = true;
       });
 
-      await FirebaseFirestore.instance
+    final staffDoc =
+    await FirebaseFirestore.instance
+        .collection('businesses')
+        .doc(widget.businessId)
+        .collection('staff')
+        .doc(widget.staffId)
+        .get();
+
+final staffData =
+    staffDoc.data() ?? {};
+
+final staffName =
+    staffData['name'] ?? 'Staff';
+
+String blockType;
+
+switch (selectedReason.toLowerCase()) {
+
+  case 'holiday':
+    blockType = 'holiday';
+    break;
+
+  case 'sick':
+    blockType = 'sick';
+    break;
+
+  case 'training':
+    blockType = 'training';
+    break;
+
+  default:
+    blockType = 'blocked';
+}
+
+await FirebaseFirestore.instance
     .collection('businesses')
     .doc(widget.businessId)
     .collection('staff')
@@ -236,21 +270,30 @@ class _AddBlockTimeScreenState
     .collection('dayBlocks')
     .add({
 
-        'staffId':
-            widget.staffId,
+  'staffId':
+      widget.staffId,
 
-      'startDate':
-    Timestamp.fromDate(startTime),
+  'staffName':
+      staffName,
 
-'endDate':
-    Timestamp.fromDate(endTime),
+  'type':
+      blockType,
 
-        'title':
-            selectedReason,
+  'reason':
+      selectedReason,
 
-        'createdAt':
-            Timestamp.now(),
-      });
+  'isAllDay':
+      false,
+
+  'startDate':
+      Timestamp.fromDate(startTime),
+
+  'endDate':
+      Timestamp.fromDate(endTime),
+
+  'createdAt':
+      Timestamp.now(),
+});
 
       // =====================================
       // REGENERATE AVAILABILITY
