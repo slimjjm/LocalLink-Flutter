@@ -10,6 +10,9 @@
     <!-- PUSH NOTIFICATIONS -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- INTERNET -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="LocalLink"
         android:name="${applicationName}"
@@ -20,9 +23,9 @@
         <!-- FIREBASE MESSAGING -->
         <!-- ================================================= -->
 
-       <meta-data
-    android:name="com.google.firebase.messaging.default_notification_channel_id"
-    android:value="locallink_notifications" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="locallink_notifications" />
 
         <!-- ================================================= -->
         <!-- MAIN ACTIVITY -->
@@ -38,20 +41,49 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
 
-            <!-- Flutter launch theme -->
+            <!-- ================================================= -->
+            <!-- FLUTTER NORMAL THEME -->
+            <!-- ================================================= -->
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
+            <!-- ================================================= -->
+            <!-- APP LAUNCH -->
+            <!-- ================================================= -->
+
             <intent-filter>
+
                 <action android:name="android.intent.action.MAIN"/>
+
                 <category android:name="android.intent.category.LAUNCHER"/>
+
+            </intent-filter>
+
+            <!-- ================================================= -->
+            <!-- CLAIM BUSINESS DEEP LINKS -->
+            <!-- ================================================= -->
+
+            <intent-filter android:autoVerify="true">
+
+                <action android:name="android.intent.action.VIEW"/>
+
+                <category android:name="android.intent.category.DEFAULT"/>
+
+                <category android:name="android.intent.category.BROWSABLE"/>
+
+                <data
+                    android:scheme="locallink"
+                    android:host="claim" />
+
             </intent-filter>
 
         </activity>
 
-        <!-- Flutter embedding -->
+        <!-- ================================================= -->
+        <!-- FLUTTER EMBEDDING -->
+        <!-- ================================================= -->
 
         <meta-data
             android:name="flutterEmbedding"
@@ -66,8 +98,11 @@
     <queries>
 
         <intent>
+
             <action android:name="android.intent.action.PROCESS_TEXT"/>
+
             <data android:mimeType="text/plain"/>
+
         </intent>
 
     </queries>

@@ -14,6 +14,10 @@ class BusinessDashboardModel {
   final bool hasAvailability;
   final bool hasStaff;
 
+  // NEW
+  final bool hasPhotos;
+  final bool profileComplete;
+
   BusinessDashboardModel({
 
     required this.todayBookings,
@@ -29,6 +33,10 @@ class BusinessDashboardModel {
     required this.hasServices,
     required this.hasAvailability,
     required this.hasStaff,
+
+    // NEW
+    required this.hasPhotos,
+    required this.profileComplete,
   });
 
   // =====================================
@@ -40,16 +48,20 @@ class BusinessDashboardModel {
 
   String get healthTitle {
 
-    if (!hasServices || !hasStaff) {
-      return 'Needs Setup';
+    if (!hasServices ||
+        !hasStaff ||
+        !hasPhotos) {
+
+      return 'Needs Attention';
     }
 
     if (!hasAvailability ||
         !stripeConnected) {
+
       return 'Almost Ready';
     }
 
-    return 'Ready';
+    return 'Operational';
   }
 
   bool get isHealthy {
@@ -58,6 +70,7 @@ class BusinessDashboardModel {
         hasStaff &&
         hasAvailability &&
         stripeConnected &&
+        hasPhotos &&
         !restrictionMode;
   }
 }

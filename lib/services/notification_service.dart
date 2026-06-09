@@ -22,7 +22,6 @@ Future<void> firebaseMessagingBackgroundHandler(
     '${message.messageId}',
   );
 }
-}
 
 class NotificationService {
   NotificationService._();

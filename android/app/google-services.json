@@ -48,6 +48,50 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:126981571024:android:8b89de9bad8e4e6ebd39d5",
+        "android_client_info": {
+          "package_name": "com.locallink.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "126981571024-p285pbfqb3jnnieke58li7jranfbhl06.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.locallink.app",
+            "certificate_hash": "722582e5f8f8e35fd1388147d1d1098e34a7feb9"
+          }
+        },
+        {
+          "client_id": "126981571024-6vu9oo2a0ebp4q588u06ksjeaplaiq6c.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA5g8flHbKSgSotjo3APx4XUJqckVTlbTk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "126981571024-6vu9oo2a0ebp4q588u06ksjeaplaiq6c.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "126981571024-62arcbtugm9s8pvvcqgeancj6j9u504i.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "Canine-Connections.LocalLink2"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

@@ -5,47 +5,80 @@ import 'package:geolocator/geolocator.dart';
 import '../models/business.dart';
 import '../services/location_service.dart';
 import '../utils/distance_helper.dart';
+import '../widgets/business_card.dart';
 
-import 'package:locallink_flutter/widgets/business_card.dart';
 
 class BusinessListScreen extends StatefulWidget {
+  final String? initialPostcode;
+  final String? initialCategory;
+  final bool useCurrentLocation;
 
-  const BusinessListScreen({super.key});
+  const BusinessListScreen({
+    super.key,
+    this.initialPostcode,
+    this.initialCategory,
+    this.useCurrentLocation = false,
+  });
 
   @override
-  State<BusinessListScreen> createState() =>
-      _BusinessListScreenState();
+  State<BusinessListScreen> createState() => _BusinessListScreenState();
 }
 
-class _BusinessListScreenState
-    extends State<BusinessListScreen> {
+class _BusinessListScreenState extends State<BusinessListScreen> {
+  final TextEditingController searchController = TextEditingController();
+  final TextEditingController postcodeController = TextEditingController();
 
   Position? userPosition;
 
   String searchText = '';
-
+  String postcodeText = '';
   String? selectedCategory;
-final categories = [
-  'Cleaner',
-  'Barber',
-  'Nails',
-  'Dog Walker',
-  'Gardener',
-  'Personal Trainer',
-];
+
+  final List<String> categories = const [
+    'Aesthetics',
+    'Beauty',
+    'Brows & Lashes',
+    'Hair Salon',
+    'Barber',
+    'Nails',
+    'Massage',
+    'Skin Clinic',
+    'Cleaner',
+    'Dog Groomer',
+    'Dog Walker',
+    'Gardener',
+    'Handyman',
+    'Mobile Valeting',
+    'Pressure Washing',
+    'Specialist Services',
+  ];
 
   @override
   void initState() {
     super.initState();
 
-    loadLocation();
+    selectedCategory = widget.initialCategory;
+
+    if (widget.initialPostcode != null &&
+        widget.initialPostcode!.trim().isNotEmpty) {
+      postcodeText = widget.initialPostcode!.trim();
+      postcodeController.text = postcodeText;
+    }
+
+    if (widget.useCurrentLocation) {
+      loadLocation();
+    }
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    postcodeController.dispose();
+    super.dispose();
   }
 
   Future<void> loadLocation() async {
-
-    final position =
-        await LocationService()
-            .getCurrentLocation();
+    final position = await LocationService().getCurrentLocation();
 
     if (!mounted) return;
 
@@ -54,144 +87,267 @@ final categories = [
     });
   }
 
+  String _normalise(String value) {
+    return value.toLowerCase().replaceAll(' ', '').trim();
+  }
+
+  bool _matchesPostcodeOrArea({
+    required Map<String, dynamic> data,
+    required String postcode,
+  }) {
+    final normalisedPostcode = _normalise(postcode);
+
+    if (normalisedPostcode.isEmpty) return true;
+
+    final fieldsToCheck = [
+      data['postcode'],
+      data['businessPostcode'],
+      data['address'],
+      data['town'],
+      data['city'],
+      data['county'],
+    ];
+
+    for (final field in fieldsToCheck) {
+      if (field == null) continue;
+
+      final value = _normalise(field.toString());
+
+      if (value.contains(normalisedPostcode) ||
+          normalisedPostcode.contains(value)) {
+        return true;
+      }
+    }
+
+    final listFieldsToCheck = [
+      data['servicePostcodes'],
+      data['coveredPostcodes'],
+      data['serviceTowns'],
+      data['areasCovered'],
+      data['locationKeywords'],
+    ];
+
+    for (final field in listFieldsToCheck) {
+      if (field is! List) continue;
+
+      for (final item in field) {
+        final value = _normalise(item.toString());
+
+        if (value.contains(normalisedPostcode) ||
+            normalisedPostcode.contains(value)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool _matchesSearch({
+    required BusinessModel business,
+    required Map<String, dynamic> data,
+    required String query,
+  }) {
+    final value = query.toLowerCase().trim();
+
+    if (value.isEmpty) return true;
+
+    final searchableText = [
+      business.name,
+      data['businessName'],
+      data['category'],
+      data['address'],
+      data['town'],
+      data['city'],
+      data['description'],
+    ]
+        .whereType<Object>()
+        .map((item) => item.toString().toLowerCase())
+        .join(' ');
+
+    return searchableText.contains(value);
+  }
+
+  bool _matchesCategory({
+    required Map<String, dynamic> data,
+    required String? category,
+  }) {
+    if (category == null || category.isEmpty) return true;
+
+    final businessCategory = data['category']?.toString() ?? '';
+
+    return businessCategory == category;
+  }
+
+  double? _distanceFor(BusinessModel business) {
+    if (userPosition == null ||
+        business.latitude == null ||
+        business.longitude == null) {
+      return null;
+    }
+
+    return calculateDistanceMiles(
+      startLat: userPosition!.latitude,
+      startLng: userPosition!.longitude,
+      endLat: business.latitude!,
+      endLng: business.longitude!,
+    );
+  }
+
+  void _clearPostcode() {
+    setState(() {
+      postcodeText = '';
+      postcodeController.clear();
+    });
+  }
+
+  void _applyPostcodeSearch() {
+    setState(() {
+      postcodeText = postcodeController.text.trim();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasPostcode = postcodeText.trim().isNotEmpty;
 
     return Scaffold(
-
       appBar: AppBar(
         title: const Text('Businesses'),
         centerTitle: true,
+        actions: [
+          if (userPosition == null)
+            IconButton(
+              tooltip: 'Use current location',
+              onPressed: loadLocation,
+              icon: const Icon(Icons.near_me_outlined),
+            ),
+        ],
       ),
-
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: TextField(
+              controller: postcodeController,
+              textCapitalization: TextCapitalization.characters,
+              keyboardType: TextInputType.streetAddress,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _applyPostcodeSearch(),
+              decoration: InputDecoration(
+                hintText: 'Search by postcode e.g. WS7 3AF',
+                prefixIcon: const Icon(Icons.location_on_outlined),
+                suffixIcon: hasPostcode
+                    ? IconButton(
+                        onPressed: _clearPostcode,
+                        icon: const Icon(Icons.close),
+                      )
+                    : IconButton(
+                        onPressed: _applyPostcodeSearch,
+                        icon: const Icon(Icons.search),
+                      ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
 
-          // SEARCH BAR
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: TextField(
+              controller: searchController,
+              decoration: InputDecoration(
+                hintText: 'Search business name or service',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  searchText = value.toLowerCase();
+                });
+              },
+            ),
+          ),
 
-         // SEARCH BAR
+          SizedBox(
+            height: 50,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                final category = categories[index];
 
-Padding(
-  padding: const EdgeInsets.all(16),
+                final isSelected = selectedCategory == category;
 
-  child: TextField(
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(category),
+                    selected: isSelected,
+                    onSelected: (_) {
+                      setState(() {
+                        if (isSelected) {
+                          selectedCategory = null;
+                        } else {
+                          selectedCategory = category;
+                        }
+                      });
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
 
-    decoration: InputDecoration(
-      hintText: 'Search businesses',
-
-      prefixIcon:
-          const Icon(Icons.search),
-
-      border: OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(12),
-      ),
-    ),
-
-    onChanged: (value) {
-
-      setState(() {
-        searchText =
-            value.toLowerCase();
-      });
-    },
-  ),
-),
-
-// CATEGORY CHIPS
-
-SizedBox(
-  height: 50,
-
-  child: ListView.builder(
-
-    scrollDirection:
-        Axis.horizontal,
-
-    padding:
-        const EdgeInsets.symmetric(
-      horizontal: 16,
-    ),
-
-    itemCount:
-        categories.length,
-
-    itemBuilder:
-        (context, index) {
-
-      final category =
-          categories[index];
-
-      final isSelected =
-          selectedCategory ==
-              category;
-
-      return Padding(
-
-        padding:
-            const EdgeInsets.only(
-          right: 8,
-        ),
-
-        child: FilterChip(
-
-          label: Text(category),
-
-          selected: isSelected,
-
-          onSelected: (_) {
-
-            setState(() {
-
-              if (isSelected) {
-
-                selectedCategory =
-                    null;
-
-              } else {
-
-                selectedCategory =
-                    category;
-              }
-            });
-          },
-        ),
-      );
-    },
-  ),
-),
-
+          if (hasPostcode)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.location_on_outlined,
+                    size: 18,
+                    color: Colors.black54,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Showing businesses matching $postcodeText',
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           Expanded(
-            child:
-                StreamBuilder<QuerySnapshot>(
-
-              stream:
-                  FirebaseFirestore.instance
-                      .collection('businesses')
-                      .where(
-                        'isActive',
-                        isEqualTo: true,
-                      )
-                      .snapshots(),
-
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('businesses')
+                  .where(
+                    'isActive',
+                    isEqualTo: true,
+                  )
+                  .where(
+                    'isClaimed',
+                    isEqualTo: true,
+                  )
+                  .snapshots(),
               builder: (context, snapshot) {
-
-                // LOADING
-
-                if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
-
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
-                    child:
-                        CircularProgressIndicator(),
+                    child: CircularProgressIndicator(),
                   );
                 }
 
-                // ERROR
-
                 if (snapshot.hasError) {
-
                   return Center(
                     child: Text(
                       'Error: ${snapshot.error}',
@@ -199,209 +355,118 @@ SizedBox(
                   );
                 }
 
-                final docs =
-                    snapshot.data?.docs ?? [];
+                final docs = snapshot.data?.docs ?? [];
 
-                // CONVERT
+                final originalDataById = <String, Map<String, dynamic>>{};
 
-                List<BusinessModel>
-                    businesses = docs
-                        .map((doc) {
+                List<BusinessModel> businesses = docs.map((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
 
-                  return BusinessModel
-                      .fromFirestore(
+                  originalDataById[doc.id] = data;
+
+                  return BusinessModel.fromFirestore(
                     doc.id,
-                    doc.data()
-                        as Map<String, dynamic>,
+                    data,
                   );
                 }).toList();
 
-                // REMOVE BUSINESSES
-                // THAT CANNOT TAKE BOOKINGS
-
                 businesses = businesses
                     .where(
-                      (b) =>
-                          b.canTakeBookings,
+                      (business) => business.canTakeBookings,
                     )
                     .toList();
 
-                // SEARCH FILTER
+                businesses = businesses.where((business) {
+                  final data = originalDataById[business.id];
 
-                if (searchText.isNotEmpty) {
+                  if (data == null) return false;
 
-                  businesses = businesses
-                      .where(
-                        (b) => b.name
-                            .toLowerCase()
-                            .contains(
-                              searchText,
-                            ),
-                      )
-                      .toList();
-                }
+                  return _matchesSearch(
+                        business: business,
+                        data: data,
+                        query: searchText,
+                      ) &&
+                      _matchesCategory(
+                        data: data,
+                        category: selectedCategory,
+                      ) &&
+                      _matchesPostcodeOrArea(
+                        data: data,
+                        postcode: postcodeText,
+                      );
+                }).toList();
 
-                // CATEGORY FILTER
+              if (userPosition != null) {
 
-if (selectedCategory != null) {
+  businesses = businesses.where((business) {
 
-  businesses = businesses.where(
-    (b) {
+    final distance = _distanceFor(business);
 
-      final originalDoc =
-          docs.firstWhere(
-        (doc) => doc.id == b.id,
-      );
+    if (distance == null) return false;
 
-      final data =
-          originalDoc.data()
-              as Map<String, dynamic>;
+    return distance <= 10;
 
-      final category =
-          data['category'] ?? '';
+  }).toList();
 
-      return category ==
-          selectedCategory;
-    },
-  ).toList();
+  businesses.sort((a, b) {
+
+    final aDistance = _distanceFor(a);
+    final bDistance = _distanceFor(b);
+
+    if (aDistance == null && bDistance == null) return 0;
+    if (aDistance == null) return 1;
+    if (bDistance == null) return -1;
+
+    return aDistance.compareTo(bDistance);
+
+  });
 }
 
-                // SORT BY DISTANCE
-
-                if (userPosition != null) {
-
-                  businesses.sort((a, b) {
-
-                    final aDistance =
-                        calculateDistanceMiles(
-                      startLat:
-                          userPosition!
-                              .latitude,
-
-                      startLng:
-                          userPosition!
-                              .longitude,
-
-                      endLat:
-                          a.latitude ?? 0,
-
-                      endLng:
-                          a.longitude ?? 0,
-                    );
-
-                    final bDistance =
-                        calculateDistanceMiles(
-                      startLat:
-                          userPosition!
-                              .latitude,
-
-                      startLng:
-                          userPosition!
-                              .longitude,
-
-                      endLat:
-                          b.latitude ?? 0,
-
-                      endLng:
-                          b.longitude ?? 0,
-                    );
-
-                    return aDistance.compareTo(
-                      bDistance,
-                    );
-                  });
-                }
-
-                // EMPTY
-
                 if (businesses.isEmpty) {
-
-                  return const Center(
-                    child: Text(
-                      'No businesses found',
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        hasPostcode
+                            ? 'No businesses found for $postcodeText yet.'
+                            : 'No businesses found.',
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   );
                 }
 
                 return ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: businesses.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final business = businesses[index];
 
-                  padding:
-                      const EdgeInsets.all(16),
+                    final data = originalDataById[business.id] ?? {};
 
-                  itemCount:
-                      businesses.length,
+                    final distance = _distanceFor(business);
 
-                  separatorBuilder:
-                      (_, __) =>
-                          const SizedBox(
-                    height: 12,
-                  ),
-
-itemBuilder: (context, index) {
-
-  final business =
-      businesses[index];
-
-  // FIND ORIGINAL FIRESTORE DOC
-
-  final originalDoc =
-      docs.firstWhere(
-    (doc) => doc.id == business.id,
-  );
-
-  final data =
-      originalDoc.data()
-          as Map<String, dynamic>;
-
-  double? distance;
-
-  if (userPosition != null &&
-      business.latitude != null &&
-      business.longitude != null) {
-
-    distance =
-        calculateDistanceMiles(
-      startLat:
-          userPosition!.latitude,
-
-      startLng:
-          userPosition!.longitude,
-
-      endLat:
-          business.latitude!,
-
-      endLng:
-          business.longitude!,
-    );
-  }
-
-  return Column(
-    crossAxisAlignment:
-        CrossAxisAlignment.start,
-
-    children: [
-
-      if (distance != null)
-
-        Padding(
-          padding:
-              const EdgeInsets.only(
-            bottom: 6,
-            left: 4,
-          ),
-
-          child: Text(
-            '${distance.toStringAsFixed(1)} miles away',
-          ),
-        ),
-
-      BusinessCard(
-        businessId: business.id,
-        businessData: data,
-      ),
-    ],
-  );
-},
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (distance != null)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: 6,
+                              left: 4,
+                            ),
+                            child: Text(
+                              '${distance.toStringAsFixed(1)} miles away',
+                            ),
+                          ),
+                        BusinessCard(
+                          businessId: business.id,
+                          businessData: data,
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             ),

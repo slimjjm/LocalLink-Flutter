@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -7,13 +10,41 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val keystoreProperties = Properties().apply {
+    load(FileInputStream(rootProject.file("key.properties")))
+}
+
 android {
 
-    namespace = "com.example.locallink_flutter"
+    namespace = "com.locallink.app"
 
     compileSdk = flutter.compileSdkVersion
 
     ndkVersion = flutter.ndkVersion
+
+    // =====================================================
+    // SIGNING CONFIGS
+    // =====================================================
+
+    signingConfigs {
+
+        create("release") {
+
+            storeFile =
+                file(
+                    keystoreProperties["storeFile"] as String
+                )
+
+            storePassword =
+                keystoreProperties["storePassword"] as String
+
+            keyAlias =
+                keystoreProperties["keyAlias"] as String
+
+            keyPassword =
+                keystoreProperties["keyPassword"] as String
+        }
+    }
 
     // =====================================================
     // JAVA / DESUGARING
@@ -41,8 +72,7 @@ android {
 
     defaultConfig {
 
-        applicationId =
-            "com.example.locallink_flutter"
+       applicationId = "com.locallink.app"
 
         minSdk =
             flutter.minSdkVersion
@@ -67,7 +97,7 @@ android {
 
             signingConfig =
                 signingConfigs.getByName(
-                    "debug"
+                    "release"
                 )
         }
     }

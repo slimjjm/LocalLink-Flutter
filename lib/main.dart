@@ -12,6 +12,7 @@ import 'screens/enquiry_chat_screen.dart';
 import 'screens/customer_bookings_screen.dart';
 import 'screens/customer_booking_detail_screen.dart';
 import 'screens/business_booking_detail_screen.dart';
+import 'screens/claim_business_screen.dart';
 
 // =====================================================
 // BACKGROUND NOTIFICATION HANDLER
@@ -21,6 +22,10 @@ import 'screens/business_booking_detail_screen.dart';
 Future<void> firebaseMessagingBackgroundHandler(
   RemoteMessage message,
 ) async {
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   print(
     '🔔 Background message: '
@@ -87,12 +92,15 @@ class MyApp extends StatelessWidget {
 
       debugShowCheckedModeBanner: false,
 
-      home: const AuthGate(),
+     home: const AuthGate(),
 
       routes: {
 
   '/home': (_) =>
       const AuthGate(),
+
+      '/claim-business': (_) =>
+    const ClaimBusinessScreen(),
 
   // =====================================================
   // INBOX

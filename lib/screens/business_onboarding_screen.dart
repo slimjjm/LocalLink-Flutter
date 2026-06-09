@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../theme/app_colors.dart';
 import 'business_home_screen.dart';
 
 class BusinessOnboardingScreen extends StatefulWidget {
-
   final bool isAssisted;
 
   const BusinessOnboardingScreen({
@@ -43,13 +43,14 @@ class _BusinessOnboardingScreenState
   final categories = [
     'Cleaner',
     'Dog Walker',
-    'Hairdresser',
+    'Hair Salon',
     'Barber',
     'Dog Groomer',
     'Gardener',
     'Nails',
     'Personal Trainer',
-    'Hair Salon',
+    'Mobile Valeting',
+    'Massage',
   ];
 
   String serviceMode = 'premises';
@@ -113,9 +114,7 @@ class _BusinessOnboardingScreenState
 
   Future<void> createBusiness() async {
 
-    if (!formIsValid) {
-      return;
-    }
+    if (!formIsValid) return;
 
     final user =
         FirebaseAuth.instance.currentUser;
@@ -146,10 +145,6 @@ class _BusinessOnboardingScreenState
 
       final data = {
 
-        // =====================================
-        // CORE
-        // =====================================
-
         'businessName':
             businessNameController.text.trim(),
 
@@ -158,10 +153,6 @@ class _BusinessOnboardingScreenState
 
         'category':
             selectedCategory,
-
-        // =====================================
-        // OWNERSHIP
-        // =====================================
 
         'createdBy': user.uid,
 
@@ -181,18 +172,10 @@ class _BusinessOnboardingScreenState
         'claimCode':
             claimCode,
 
-        // =====================================
-        // STATUS
-        // =====================================
-
         'isActive': true,
 
         'createdAt':
             FieldValue.serverTimestamp(),
-
-        // =====================================
-        // PAYMENTS
-        // =====================================
 
         'paymentMethods':
             selectedPaymentMethods,
@@ -200,10 +183,6 @@ class _BusinessOnboardingScreenState
         'stripeConnected': false,
 
         'stripeChargesEnabled': false,
-
-        // =====================================
-        // BUSINESS MODE
-        // =====================================
 
         'serviceMode': serviceMode,
 
@@ -214,23 +193,23 @@ class _BusinessOnboardingScreenState
       await docRef.set(data);
 
       await FirebaseFirestore.instance
-    .collection('businesses')
-    .doc(docRef.id)
-    .collection('staff')
-    .doc(user.uid)
-    .set({
+          .collection('businesses')
+          .doc(docRef.id)
+          .collection('staff')
+          .doc(user.uid)
+          .set({
 
-  'name': 'Owner',
+        'name': 'Owner',
 
-  'email': user.email,
+        'email': user.email,
 
-  'isActive': true,
+        'isActive': true,
 
-  'seatRank': 0,
+        'seatRank': 0,
 
-  'createdAt':
-      FieldValue.serverTimestamp(),
-});
+        'createdAt':
+            FieldValue.serverTimestamp(),
+      });
 
       if (!mounted) return;
 
@@ -270,387 +249,1027 @@ class _BusinessOnboardingScreenState
 
     return Scaffold(
 
-      appBar: AppBar(
-        title: Text(
-          widget.isAssisted
-              ? 'Add Business'
-              : 'Create Business',
-        ),
-      ),
+      backgroundColor: AppColors.background,
 
-      body: SingleChildScrollView(
+      body: SafeArea(
 
-        padding: const EdgeInsets.all(20),
+        child: SingleChildScrollView(
 
-        child: Column(
+          padding: const EdgeInsets.fromLTRB(
+            20,
+            18,
+            20,
+            40,
+          ),
 
-          crossAxisAlignment:
-              CrossAxisAlignment.stretch,
+          child: Column(
 
-          children: [
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
 
-            // =====================================
-            // HEADER
-            // =====================================
+            children: [
 
-            Text(
+              // =====================================
+              // HEADER
+              // =====================================
 
-              widget.isAssisted
-                  ? 'Add a business'
-                  : 'Create your business',
-
-              style: const TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            const Text(
-              'Start taking bookings in minutes.',
-            ),
-
-            const SizedBox(height: 30),
-
-            // =====================================
-            // BUSINESS NAME
-            // =====================================
-
-            TextField(
-
-              controller:
-                  businessNameController,
-
-              decoration: const InputDecoration(
-                labelText: 'Business Name',
-                border: OutlineInputBorder(),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // =====================================
-            // CLAIM EMAIL
-            // =====================================
-
-            if (widget.isAssisted)
-              Column(
+              Row(
 
                 children: [
 
-                  TextField(
+                  GestureDetector(
 
-                    controller:
-                        claimEmailController,
+                    onTap: () {
+                      Navigator.pop(context);
+                    },
 
-                    decoration:
-                        const InputDecoration(
-                      labelText:
-                          'Owner Email',
-                      border:
-                          OutlineInputBorder(),
+                    child: Container(
+
+                      padding:
+                          const EdgeInsets.all(12),
+
+                      decoration: BoxDecoration(
+
+                        color: Colors.white,
+
+                        borderRadius:
+                            BorderRadius.circular(
+                          16,
+                        ),
+
+                        boxShadow: [
+
+                          BoxShadow(
+
+                            color: Colors.black
+                                .withOpacity(0.05),
+
+                            blurRadius: 10,
+
+                            offset:
+                                const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+
+                      child: const Icon(
+                        Icons.arrow_back,
+                      ),
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(width: 14),
+
+                  const Expanded(
+
+                    child: Text(
+
+                      'LocalLink',
+
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.charcoal,
+                      ),
+                    ),
+                  ),
                 ],
               ),
 
-            // =====================================
-            // ADDRESS
-            // =====================================
+              const SizedBox(height: 24),
 
-            TextField(
+              // =====================================
+              // HERO CARD
+              // =====================================
 
-              controller:
-                  addressController,
+              Container(
 
-              decoration: const InputDecoration(
-                labelText: 'Business Address',
-                border: OutlineInputBorder(),
+                width: double.infinity,
+
+                padding: const EdgeInsets.all(24),
+
+                decoration: BoxDecoration(
+
+                  gradient: const LinearGradient(
+
+                    colors: [
+                      AppColors.primary,
+                      Color(0xFFFF7A3D),
+                    ],
+                  ),
+
+                  borderRadius:
+                      BorderRadius.circular(30),
+
+                  boxShadow: [
+
+                    BoxShadow(
+
+                      color: AppColors.primary
+                          .withOpacity(0.25),
+
+                      blurRadius: 22,
+
+                      offset:
+                          const Offset(0, 12),
+                    ),
+                  ],
+                ),
+
+                child: Column(
+
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+
+                  children: [
+
+                    const Text(
+
+                      'LOCAL LINK',
+
+                      style: TextStyle(
+                        color: Colors.white70,
+                        letterSpacing: 3,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Text(
+
+                      widget.isAssisted
+                          ? 'Add a business'
+                          : 'Launch your business nearby',
+
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    const Text(
+
+                      'Start taking bookings, appear in nearby searches, and grow your customer base.',
+
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 30),
+
+              // =====================================
+              // BUSINESS DETAILS
+              // =====================================
+
+              const _SectionTitle(
+                'Business Details',
+              ),
+
+              const SizedBox(height: 16),
+
+              _ModernField(
+                controller: businessNameController,
+                hint: 'Business Name',
+                icon: Icons.storefront_outlined,
+              ),
+
+              const SizedBox(height: 16),
+
+              if (widget.isAssisted)
+                Column(
+
+                  children: [
+
+                    _ModernField(
+                      controller:
+                          claimEmailController,
+                      hint: 'Owner Email',
+                      icon: Icons.email_outlined,
+                    ),
+
+                    const SizedBox(height: 16),
+                  ],
+                ),
+
+              _ModernField(
+                controller: addressController,
+                hint: 'Business Address',
+                icon: Icons.location_on_outlined,
+              ),
+
+              const SizedBox(height: 28),
+
+              // =====================================
+              // CATEGORY
+              // =====================================
+
+              const _SectionTitle(
+                'Choose Category',
+              ),
+
+              const SizedBox(height: 14),
+
+              Wrap(
+
+                spacing: 10,
+                runSpacing: 10,
+
+                children: categories.map((category) {
+
+                  final selected =
+                      selectedCategory ==
+                          category;
+
+                  return GestureDetector(
+
+                    onTap: () {
+
+                      setState(() {
+                        selectedCategory =
+                            category;
+                      });
+                    },
+
+                    child: Container(
+
+                      padding:
+                          const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 14,
+                      ),
+
+                      decoration: BoxDecoration(
+
+                        color: selected
+                            ? AppColors.primary
+                            : Colors.white,
+
+                        borderRadius:
+                            BorderRadius.circular(
+                          999,
+                        ),
+
+                        border: Border.all(
+
+                          color: selected
+                              ? AppColors.primary
+                              : Colors.grey.shade200,
+                        ),
+                      ),
+
+                      child: Text(
+
+                        category,
+
+                        style: TextStyle(
+
+                          fontWeight:
+                              FontWeight.w700,
+
+                          color: selected
+                              ? Colors.white
+                              : AppColors.charcoal,
+                        ),
+                      ),
+                    ),
+                  );
+
+                }).toList(),
+              ),
+
+              const SizedBox(height: 34),
+
+              // =====================================
+              // SERVICE MODE
+              // =====================================
+
+             const _SectionTitle(
+  'How customers book you',
+),
+
+const SizedBox(height: 16),
+
+Container(
+
+  padding: const EdgeInsets.all(18),
+
+  decoration: BoxDecoration(
+
+    color: Colors.white,
+
+    borderRadius:
+        BorderRadius.circular(24),
+
+    border: Border.all(
+      color: Colors.grey.shade200,
+    ),
+  ),
+
+  child: Column(
+
+    children: [
+
+      SegmentedButton<String>(
+
+        style: ButtonStyle(
+
+          visualDensity:
+              VisualDensity.compact,
+        ),
+
+        segments: const [
+
+         ButtonSegment(
+  value: 'premises',
+  icon: Icon(Icons.store),
+  label: Text('Shop'),
+),
+
+          ButtonSegment(
+            value: 'mobile',
+            icon: Icon(Icons.near_me),
+            label: Text('Mobile'),
+          ),
+
+          ButtonSegment(
+            value: 'hybrid',
+            icon: Icon(Icons.sync),
+            label: Text('Both'),
+          ),
+        ],
+
+        selected: {serviceMode},
+
+        onSelectionChanged:
+            (selection) {
+
+          setState(() {
+            serviceMode =
+                selection.first;
+          });
+        },
+      ),
+
+      const SizedBox(height: 16),
+
+      Text(
+
+        serviceMode ==
+                'premises'
+            ? 'Customers visit your business.'
+            : serviceMode ==
+                    'mobile'
+                ? 'You travel directly to customers.'
+                : 'Customers can visit you or book mobile services.',
+
+        textAlign: TextAlign.center,
+
+        style: TextStyle(
+          color:
+              Colors.grey.shade700,
+          height: 1.4,
+        ),
+      ),
+    ],
+  ),
+),
+
+              // =====================================
+              // RADIUS
+              // =====================================
+
+              if (serviceMode == 'mobile' ||
+                  serviceMode == 'hybrid')
+                Column(
+
+                  children: [
+
+                    const SizedBox(height: 28),
+
+                    Container(
+
+                      padding:
+                          const EdgeInsets.all(20),
+
+                      decoration: BoxDecoration(
+
+                        color: Colors.white,
+
+                        borderRadius:
+                            BorderRadius.circular(
+                          24,
+                        ),
+
+                        border: Border.all(
+                          color:
+                              Colors.grey.shade200,
+                        ),
+                      ),
+
+                      child: Column(
+
+                        crossAxisAlignment:
+                            CrossAxisAlignment
+                                .start,
+
+                        children: [
+
+                          Row(
+
+                            children: [
+
+                              const Text(
+
+                                'Travel Radius',
+
+                                style: TextStyle(
+                                  fontWeight:
+                                      FontWeight
+                                          .w800,
+                                  fontSize: 18,
+                                ),
+                              ),
+
+                              const Spacer(),
+
+                              Text(
+
+                                '${serviceRadiusMiles.toInt()} miles',
+
+                                style:
+                                    const TextStyle(
+                                  fontWeight:
+                                      FontWeight
+                                          .w800,
+                                  color: AppColors
+                                      .primary,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          Text(
+
+                            'You’ll appear to customers within your selected service area.',
+
+                            style: TextStyle(
+                              color: Colors
+                                  .grey.shade700,
+                            ),
+                          ),
+
+                          Slider(
+
+                            value:
+                                serviceRadiusMiles,
+
+                            min: 1,
+                            max: 50,
+
+                            divisions: 49,
+
+                            activeColor:
+                                AppColors.primary,
+
+                            label:
+                                '${serviceRadiusMiles.toInt()}',
+
+                            onChanged: (value) {
+
+                              setState(() {
+                                serviceRadiusMiles =
+                                    value;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+              const SizedBox(height: 32),
+
+              // =====================================
+              // PAYMENTS
+              // =====================================
+
+              const _SectionTitle(
+                'Payment Methods',
+              ),
+
+              const SizedBox(height: 14),
+
+              _PaymentCard(
+
+                title: 'Cash Payments',
+
+                subtitle:
+                    'Accept cash in person',
+
+                icon: Icons.payments_outlined,
+
+                selected: acceptsCash,
+
+                onTap: () {
+
+                  setState(() {
+                    acceptsCash = !acceptsCash;
+                  });
+                },
+              ),
+
+              const SizedBox(height: 12),
+
+              _PaymentCard(
+
+                title: 'Card Payments',
+
+                subtitle:
+                    'Take secure Stripe payments',
+
+                icon: Icons.credit_card_outlined,
+
+                selected: acceptsStripe,
+
+                onTap: () {
+
+                  setState(() {
+                    acceptsStripe =
+                        !acceptsStripe;
+                  });
+                },
+              ),
+
+              const SizedBox(height: 30),
+
+              // =====================================
+              // SUMMARY
+              // =====================================
+
+              Container(
+
+                width: double.infinity,
+
+                padding: const EdgeInsets.all(20),
+
+                decoration: BoxDecoration(
+
+                  color: Colors.white,
+
+                  borderRadius:
+                      BorderRadius.circular(24),
+
+                  border: Border.all(
+                    color: Colors.grey.shade200,
+                  ),
+                ),
+
+                child: Column(
+
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+
+                  children: [
+
+                    const Text(
+
+                      'Business Summary',
+
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.charcoal,
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    _SummaryRow(
+                      'Category',
+                      selectedCategory ??
+                          'Not selected',
+                    ),
+
+                   _SummaryRow(
+  'Business Type',
+
+  serviceMode == 'premises'
+      ? 'SHOP'
+      : serviceMode == 'mobile'
+          ? 'MOBILE'
+          : 'BOTH',
+),
+
+if (serviceMode == 'mobile' ||
+    serviceMode == 'hybrid')
+
+  _SummaryRow(
+    'Travel Radius',
+    '${serviceRadiusMiles.toInt()} miles',
+  ),
+
+                    _SummaryRow(
+                      'Payments',
+                      selectedPaymentMethods
+                          .join(', ')
+                          .toUpperCase(),
+                    ),
+                  ],
+                ),
+              ),
+
+              // =====================================
+              // ERROR
+              // =====================================
+
+              if (bannerMessage != null)
+                Padding(
+
+                  padding:
+                      const EdgeInsets.only(
+                    top: 20,
+                  ),
+
+                  child: Container(
+
+                    padding:
+                        const EdgeInsets.all(16),
+
+                    decoration: BoxDecoration(
+
+                      color: AppColors.error,
+
+                      borderRadius:
+                          BorderRadius.circular(
+                        18,
+                      ),
+                    ),
+
+                    child: Text(
+
+                      bannerMessage!,
+
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight:
+                            FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 34),
+
+              // =====================================
+              // CTA
+              // =====================================
+
+              SizedBox(
+
+                width: double.infinity,
+
+                child: ElevatedButton(
+
+                  onPressed:
+                      isSaving
+                          ? null
+                          : createBusiness,
+
+                  style:
+                      ElevatedButton.styleFrom(
+
+                    backgroundColor:
+                        AppColors.primary,
+
+                    foregroundColor:
+                        Colors.white,
+
+                    elevation: 0,
+
+                    padding:
+                        const EdgeInsets.symmetric(
+                      vertical: 20,
+                    ),
+
+                    shape:
+                        RoundedRectangleBorder(
+
+                      borderRadius:
+                          BorderRadius.circular(
+                        22,
+                      ),
+                    ),
+                  ),
+
+                  child:
+                      isSaving
+
+                          ? const SizedBox(
+
+                              width: 24,
+                              height: 24,
+
+                              child:
+                                  CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
+                            )
+
+                          : Text(
+
+                              widget.isAssisted
+                                  ? 'Add Business'
+                                  : 'Create My Business',
+
+                              style:
+                                  const TextStyle(
+                                fontSize: 17,
+                                fontWeight:
+                                    FontWeight.w800,
+                              ),
+                            ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =====================================================
+// MODERN FIELD
+// =====================================================
+
+class _ModernField extends StatelessWidget {
+
+  final TextEditingController controller;
+  final String hint;
+  final IconData icon;
+
+  const _ModernField({
+    required this.controller,
+    required this.hint,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+
+    return Container(
+
+      decoration: BoxDecoration(
+
+        color: Colors.white,
+
+        borderRadius:
+            BorderRadius.circular(22),
+
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+
+        boxShadow: [
+
+          BoxShadow(
+
+            color:
+                Colors.black.withOpacity(0.04),
+
+            blurRadius: 14,
+
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+
+      child: TextField(
+
+        controller: controller,
+
+        decoration: InputDecoration(
+
+          hintText: hint,
+
+          prefixIcon: Icon(icon),
+
+          border: InputBorder.none,
+
+          contentPadding:
+              const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 20,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =====================================================
+// SECTION TITLE
+// =====================================================
+
+class _SectionTitle extends StatelessWidget {
+
+  final String title;
+
+  const _SectionTitle(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+
+    return Text(
+
+      title,
+
+      style: const TextStyle(
+        fontSize: 24,
+        fontWeight: FontWeight.w900,
+        color: AppColors.charcoal,
+      ),
+    );
+  }
+}
+
+// =====================================================
+// PAYMENT CARD
+// =====================================================
+
+class _PaymentCard extends StatelessWidget {
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PaymentCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+
+    return GestureDetector(
+
+      onTap: onTap,
+
+      child: Container(
+
+        padding: const EdgeInsets.all(18),
+
+        decoration: BoxDecoration(
+
+          color: selected
+              ? AppColors.primary
+                  .withOpacity(0.08)
+              : Colors.white,
+
+          borderRadius:
+              BorderRadius.circular(22),
+
+          border: Border.all(
+
+            color: selected
+                ? AppColors.primary
+                : Colors.grey.shade200,
+          ),
+        ),
+
+        child: Row(
+
+          children: [
+
+            Icon(
+
+              icon,
+
+              color: selected
+                  ? AppColors.primary
+                  : Colors.black54,
+            ),
+
+            const SizedBox(width: 16),
+
+            Expanded(
+
+              child: Column(
+
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+
+                children: [
+
+                  Text(
+
+                    title,
+
+                    style: const TextStyle(
+                      fontWeight:
+                          FontWeight.w800,
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  Text(
+
+                    subtitle,
+
+                    style: TextStyle(
+                      color:
+                          Colors.grey.shade600,
+                    ),
+                  ),
+                ],
               ),
             ),
 
-            const SizedBox(height: 20),
+            Icon(
 
-            // =====================================
-            // CATEGORY
-            // =====================================
+              selected
+                  ? Icons.check_circle
+                  : Icons.circle_outlined,
 
-            DropdownButtonFormField<String>(
-
-              value: selectedCategory,
-
-              decoration: const InputDecoration(
-                labelText: 'Category',
-                border: OutlineInputBorder(),
-              ),
-
-              items: categories.map((category) {
-
-                return DropdownMenuItem(
-                  value: category,
-                  child: Text(category),
-                );
-
-              }).toList(),
-
-              onChanged: (value) {
-
-                setState(() {
-                  selectedCategory = value;
-                });
-              },
+              color: selected
+                  ? AppColors.primary
+                  : Colors.grey,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-            const SizedBox(height: 30),
+// =====================================================
+// SUMMARY ROW
+// =====================================================
 
-            // =====================================
-            // BUSINESS TYPE
-            // =====================================
+class _SummaryRow extends StatelessWidget {
 
-            const Text(
+  final String label;
+  final String value;
 
-              'Business Type',
+  const _SummaryRow(
+    this.label,
+    this.value,
+  );
 
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+  @override
+  Widget build(BuildContext context) {
 
-            const SizedBox(height: 12),
+    return Padding(
 
-            SegmentedButton<String>(
+      padding:
+          const EdgeInsets.only(bottom: 12),
 
-              segments: const [
+      child: Row(
 
-                ButtonSegment(
-                  value: 'premises',
-                  label: Text('Premises'),
-                ),
+        children: [
 
-                ButtonSegment(
-                  value: 'mobile',
-                  label: Text('Mobile'),
-                ),
+          Expanded(
 
-                ButtonSegment(
-                  value: 'hybrid',
-                  label: Text('Both'),
-                ),
-              ],
+            child: Text(
 
-              selected: {serviceMode},
-
-              onSelectionChanged: (selection) {
-
-                setState(() {
-                  serviceMode = selection.first;
-                });
-              },
-            ),
-
-            const SizedBox(height: 12),
-
-            Text(
-
-              serviceMode == 'premises'
-                  ? 'Customers visit your business.'
-                  : serviceMode == 'mobile'
-                      ? 'You travel to customers.'
-                      : 'Customers can visit you or book mobile services.',
+              label,
 
               style: TextStyle(
                 color: Colors.grey.shade700,
               ),
             ),
+          ),
 
-            // =====================================
-            // RADIUS
-            // =====================================
+          Text(
 
-            if (serviceMode == 'mobile' ||
-                serviceMode == 'hybrid')
-              Column(
+            value,
 
-                children: [
-
-                  const SizedBox(height: 24),
-
-                  Row(
-
-                    children: [
-
-                      const Text(
-                        'Travel Radius',
-                      ),
-
-                      const Spacer(),
-
-                      Text(
-                        '${serviceRadiusMiles.toInt()} miles',
-                      ),
-                    ],
-                  ),
-
-                  Slider(
-
-                    value: serviceRadiusMiles,
-
-                    min: 1,
-                    max: 50,
-
-                    divisions: 49,
-
-                    label:
-                        '${serviceRadiusMiles.toInt()}',
-
-                    onChanged: (value) {
-
-                      setState(() {
-                        serviceRadiusMiles = value;
-                      });
-                    },
-                  ),
-                ],
-              ),
-
-            const SizedBox(height: 30),
-
-            // =====================================
-            // PAYMENT METHODS
-            // =====================================
-
-            const Text(
-
-              'Payment Methods',
-
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: AppColors.charcoal,
             ),
-
-            CheckboxListTile(
-
-              value: acceptsCash,
-
-              title: const Text(
-                'Accept Cash',
-              ),
-
-              onChanged: (value) {
-
-                setState(() {
-                  acceptsCash =
-                      value ?? false;
-                });
-              },
-            ),
-
-            CheckboxListTile(
-
-              value: acceptsStripe,
-
-              title: const Text(
-                'Accept Card Payments (Stripe)',
-              ),
-
-              onChanged: (value) {
-
-                setState(() {
-                  acceptsStripe =
-                      value ?? false;
-                });
-              },
-            ),
-
-            const SizedBox(height: 20),
-
-            // =====================================
-            // INFO BOX
-            // =====================================
-
-            Container(
-
-              padding: const EdgeInsets.all(16),
-
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius:
-                    BorderRadius.circular(12),
-              ),
-
-              child: const Text(
-                'Create profile • Add services • Connect payments later',
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // =====================================
-            // ERROR / BANNER
-            // =====================================
-
-            if (bannerMessage != null)
-
-              Container(
-
-                padding: const EdgeInsets.all(14),
-
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius:
-                      BorderRadius.circular(12),
-                ),
-
-                child: Text(
-
-                  bannerMessage!,
-
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
-                ),
-              ),
-
-            const SizedBox(height: 30),
-
-            // =====================================
-            // CREATE BUTTON
-            // =====================================
-
-            ElevatedButton(
-
-              onPressed:
-                  isSaving
-                      ? null
-                      : createBusiness,
-
-              style: ElevatedButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(
-                  vertical: 18,
-                ),
-              ),
-
-              child:
-                  isSaving
-
-                      ? const CircularProgressIndicator()
-
-                      : Text(
-                          widget.isAssisted
-                              ? 'Add Business'
-                              : 'Create Business',
-                        ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -52,7 +52,10 @@ String? error;
 
       if (!mounted) return;
 
-      Navigator.pop(context);
+      Navigator.pushReplacementNamed(
+  context,
+  '/',
+);
 
     } catch (e) {
 
@@ -107,7 +110,10 @@ String? error;
 
       if (!mounted) return;
 
-      Navigator.pop(context);
+     Navigator.pushReplacementNamed(
+  context,
+  '/',
+);
 
     } catch (e) {
 
@@ -270,7 +276,10 @@ SizedBox(
 
         if (!mounted) return;
 
-        Navigator.pop(context);
+        Navigator.pushReplacementNamed(
+  context,
+  '/',
+);
 
       } catch (e) {
 

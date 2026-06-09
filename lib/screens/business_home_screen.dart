@@ -8,7 +8,15 @@ import 'business_services_screen.dart';
 import 'business_staff_screen.dart';
 import 'business_calendar_screen.dart';
 import 'business_subscription_screen.dart';
+import 'business_profile_screen.dart';
 import 'inbox_screen.dart';
+
+import '../theme/app_colors.dart';
+
+import 'package:geolocator/geolocator.dart';
+
+import '../services/location_service.dart';
+import '../services/distance_service.dart';
 
 class BusinessHomeScreen extends StatefulWidget {
 
@@ -33,7 +41,6 @@ class _BusinessHomeScreenState
   @override
   void initState() {
     super.initState();
-
     loadDashboard();
   }
 
@@ -46,23 +53,32 @@ class _BusinessHomeScreenState
     );
   }
 
+  Future<void> _refresh() async {
+
+    setState(() {
+      loadDashboard();
+    });
+
+    await dashboardFuture;
+  }
+
   @override
   Widget build(BuildContext context) {
 
     return Scaffold(
 
       backgroundColor:
-          const Color(0xFFF9F6F2),
+          AppColors.background,
 
       appBar: AppBar(
 
         elevation: 0,
 
         backgroundColor:
-            const Color(0xFFF9F6F2),
+            AppColors.background,
 
         foregroundColor:
-            const Color(0xFF1E1E1E),
+            AppColors.charcoal,
 
         title: const Text(
 
@@ -82,9 +98,7 @@ class _BusinessHomeScreenState
 
         builder: (context, snapshot) {
 
-          // =====================================
           // LOADING
-          // =====================================
 
           if (snapshot.connectionState ==
               ConnectionState.waiting) {
@@ -95,9 +109,7 @@ class _BusinessHomeScreenState
             );
           }
 
-          // =====================================
           // ERROR
-          // =====================================
 
           if (snapshot.hasError) {
 
@@ -167,9 +179,7 @@ class _BusinessHomeScreenState
             );
           }
 
-          // =====================================
           // EMPTY
-          // =====================================
 
           if (!snapshot.hasData) {
 
@@ -184,12 +194,7 @@ class _BusinessHomeScreenState
 
           return RefreshIndicator(
 
-            onRefresh: () async {
-
-              setState(() {
-                loadDashboard();
-              });
-            },
+            onRefresh: _refresh,
 
             child: ListView(
 
@@ -200,9 +205,7 @@ class _BusinessHomeScreenState
 
               children: [
 
-                // =====================================
                 // HERO HEADER
-                // =====================================
 
                 Container(
 
@@ -217,7 +220,7 @@ class _BusinessHomeScreenState
                         const LinearGradient(
 
                       colors: [
-                        Color(0xFFF26A2E),
+                        AppColors.primary,
                         Color(0xFFE65100),
                       ],
 
@@ -259,12 +262,12 @@ class _BusinessHomeScreenState
 
                       const Text(
 
-                        'Dashboard Overview',
+                        'Dashboard',
 
                         style: TextStyle(
                           color:
                               Colors.white,
-                          fontSize: 32,
+                          fontSize: 30,
                           fontWeight:
                               FontWeight.bold,
                         ),
@@ -292,9 +295,7 @@ class _BusinessHomeScreenState
 
                 const SizedBox(height: 24),
 
-                // =====================================
                 // STATS
-                // =====================================
 
                 Row(
 
@@ -319,7 +320,7 @@ class _BusinessHomeScreenState
                     Expanded(
                       child: _StatCard(
                         title:
-                            'Revenue',
+                            'Today',
                         value:
                             '£${(dashboard.todayRevenue / 100).toStringAsFixed(2)}',
                         icon:
@@ -338,7 +339,7 @@ class _BusinessHomeScreenState
                     Expanded(
                       child: _StatCard(
                         title:
-                            'Active Staff',
+                            'Staff',
                         value: dashboard
                             .activeStaff
                             .toString(),
@@ -350,28 +351,25 @@ class _BusinessHomeScreenState
                     const SizedBox(
                       width: 12,
                     ),
-Expanded(
-  child: _StatCard(
-    title: 'Business Health',
 
-    value:
-        dashboard.healthTitle,
-
-    icon:
-        dashboard.isHealthy
-            ? Icons.check_circle
-            : Icons.warning_amber_rounded,
-  ),
-),
+                    Expanded(
+                      child: _StatCard(
+                        title:
+                            'Health',
+                        value:
+                            dashboard.healthTitle,
+                        icon:
+                            dashboard.isHealthy
+                                ? Icons.check_circle
+                                : Icons.warning_amber_rounded,
+                      ),
+                    ),
                   ],
                 ),
 
                 const SizedBox(height: 28),
-const SizedBox(height: 28),
 
-                // =====================================
                 // WARNINGS
-                // =====================================
 
                 if (!dashboard
                     .stripeConnected)
@@ -398,172 +396,213 @@ const SizedBox(height: 28),
                     .restrictionMode)
                   const _WarningCard(
                     text:
-                        'Restriction mode is active.',
+                       'Subscription action required.'
                   ),
 
                 const SizedBox(height: 30),
-const Text(
 
-  'Management',
+                // MANAGEMENT
 
-  style: TextStyle(
-    fontSize: 24,
-    fontWeight:
-        FontWeight.bold,
-    color:
-        Color(0xFF1E1E1E),
-  ),
-),
+                const Text(
 
-const SizedBox(height: 20),
+                  'Management',
 
-_StatusRow(
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight:
+                        FontWeight.bold,
+                    color:
+                        AppColors.charcoal,
+                  ),
+                ),
 
-  title: 'Services',
+                const SizedBox(height: 20),
 
-  subtitle:
-      dashboard.hasServices
-          ? 'Pricing live'
-          : 'Add your first service',
+                _StatusRow(
 
-  icon: Icons.cut,
+                  title: 'Services',
 
-  color:
-      dashboard.hasServices
-          ? Colors.green
-          : Colors.red,
+                  subtitle:
+                      dashboard.hasServices
+                          ? 'Pricing live'
+                          : 'Add your first service',
 
-  onTap: () {
+                  icon: Icons.cut,
 
-    Navigator.push(
+                  color:
+                      dashboard.hasServices
+                          ? Colors.green
+                          : Colors.red,
 
-      context,
+                  onTap: () {
 
-      MaterialPageRoute(
-        builder: (_) =>
-            BusinessServicesScreen(
-          businessId:
-              widget.businessId,
-        ),
-      ),
-    );
-  },
-),
+                    Navigator.push(
 
-const SizedBox(height: 12),
+                      context,
 
-const SizedBox(height: 12),
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessServicesScreen(
+                          businessId:
+                              widget.businessId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
 
-_StatusRow(
+                const SizedBox(height: 12),
 
-  title: 'Staff',
+                _StatusRow(
 
-  subtitle:
-      dashboard.activeStaff >=
-              dashboard.allowedStaff
-          ? 'Staff limit reached'
-          : dashboard.hasStaff
-              ? '${dashboard.activeStaff}/${dashboard.allowedStaff} staff used'
-              : 'Add team members',
+                  title: 'Staff',
 
-  icon: Icons.people_alt,
+                  subtitle:
+                      dashboard.activeStaff >=
+                              dashboard.allowedStaff
+                          ? 'Staff limit reached'
+                          : '${dashboard.activeStaff}/${dashboard.allowedStaff} staff used',
 
-  color:
-      dashboard.activeStaff >=
-              dashboard.allowedStaff
-          ? Colors.orange
-          : dashboard.hasStaff
-              ? Colors.green
-              : Colors.red,
+                  icon:
+                      Icons.people_alt,
 
-  onTap: () {
+                  color:
+                      dashboard.activeStaff >=
+                              dashboard.allowedStaff
+                          ? Colors.orange
+                          : Colors.green,
 
-    Navigator.push(
+                  onTap: () {
 
-      context,
+                    Navigator.push(
 
-      MaterialPageRoute(
-        builder: (_) =>
-            BusinessStaffScreen(
-          businessId:
-              widget.businessId,
-        ),
-      ),
-    );
-  },
-),
-const SizedBox(height: 12),
+                      context,
 
-_StatusRow(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessStaffScreen(
+                          businessId:
+                              widget.businessId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
 
-  title: 'Availability',
+                const SizedBox(height: 12),
 
-  subtitle:
-      dashboard.hasAvailability
-          ? 'Ready for bookings'
-          : 'Generate slots',
+                _StatusRow(
 
-  icon: Icons.schedule,
+                  title: 'Availability',
 
-  color:
-      dashboard.hasAvailability
-          ? Colors.green
-          : Colors.orange,
+                  subtitle:
+                      dashboard.hasAvailability
+                          ? 'Ready for bookings'
+                          : 'Generate slots',
 
-  onTap: () {
+                  icon: Icons.schedule,
 
-    Navigator.push(
+                  color:
+                      dashboard.hasAvailability
+                          ? Colors.green
+                          : Colors.orange,
 
-      context,
+                  onTap: () {
 
-      MaterialPageRoute(
-        builder: (_) =>
-            BusinessCalendarScreen(
-          businessId:
-              widget.businessId,
-        ),
-      ),
-    );
-  },
-),
+                    Navigator.push(
 
-const SizedBox(height: 12),
+                      context,
 
-_StatusRow(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessCalendarScreen(
+                          businessId:
+                              widget.businessId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
 
-  title: 'Stripe',
+                const SizedBox(height: 12),
 
-  subtitle:
-      dashboard.stripeConnected
-          ? 'Billing active'
-          : 'Setup incomplete',
+                _StatusRow(
 
-  icon: Icons.credit_card,
+                  title: 'Stripe',
 
-  color:
-      dashboard.stripeConnected
-          ? Colors.green
-          : Colors.orange,
+                  subtitle:
+                      dashboard.stripeConnected
+                          ? 'Billing active'
+                          : 'Setup incomplete',
 
-  onTap: () {
+                  icon: Icons.credit_card,
 
-    Navigator.push(
+                  color:
+                      dashboard.stripeConnected
+                          ? Colors.green
+                          : Colors.orange,
 
-      context,
+                  onTap: () {
 
-      MaterialPageRoute(
-        builder: (_) =>
-            BusinessSubscriptionScreen(
-          businessId:
-              widget.businessId,
-        ),
-      ),
-    );
-  },
-),
-                // =====================================
+                    Navigator.push(
+
+                      context,
+
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessSubscriptionScreen(
+                          businessId:
+                              widget.businessId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 12),
+
+                _StatusRow(
+
+                  title:
+                      'Business Profile',
+
+                subtitle:
+    dashboard.profileComplete
+        ? 'Profile complete'
+        : dashboard.hasPhotos
+            ? 'Add more business info'
+            : 'Add photos and details',
+
+                  icon:
+                      Icons.storefront,
+
+                 color:
+    dashboard.profileComplete
+        ? AppColors.success
+        : dashboard.hasPhotos
+            ? AppColors.primary
+            : AppColors.error,
+
+                  onTap: () {
+
+                    Navigator.push(
+
+                      context,
+
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessProfileScreen(
+                          businessId:
+                              widget.businessId,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 30),
+
                 // QUICK ACTIONS
-                // =====================================
 
                 const Text(
 
@@ -574,7 +613,7 @@ _StatusRow(
                     fontWeight:
                         FontWeight.bold,
                     color:
-                        Color(0xFF1E1E1E),
+                        AppColors.charcoal,
                   ),
                 ),
 
@@ -615,8 +654,7 @@ _StatusRow(
                             builder: (_) =>
                                 BusinessBookingsScreen(
                               businessId:
-                                  widget
-                                      .businessId,
+                                  widget.businessId,
                             ),
                           ),
                         );
@@ -641,8 +679,7 @@ _StatusRow(
                             builder: (_) =>
                                 BusinessCalendarScreen(
                               businessId:
-                                  widget
-                                      .businessId,
+                                  widget.businessId,
                             ),
                           ),
                         );
@@ -667,40 +704,20 @@ _StatusRow(
                             builder: (_) =>
                                 BusinessStaffScreen(
                               businessId:
-                                  widget
-                                      .businessId,
+                                  widget.businessId,
                             ),
                           ),
                         );
                       },
                     ),
-_ActionCard(
 
-  title: 'Inbox',
-
-  icon: Icons.chat_bubble_outline,
-
-  onTap: () {
-
-    Navigator.push(
-
-      context,
-
-      MaterialPageRoute(
-        builder: (_) => InboxScreen(
-          businessId: widget.businessId,
-          currentRole: 'business',
-        ),
-      ),
-    );
-  },
-),
                     _ActionCard(
 
                       title:
-                          'Services',
+                          'Inbox',
 
-                      icon: Icons.cut,
+                      icon:
+                          Icons.chat_bubble_outline,
 
                       onTap: () {
 
@@ -710,10 +727,11 @@ _ActionCard(
 
                           MaterialPageRoute(
                             builder: (_) =>
-                                BusinessServicesScreen(
+                                InboxScreen(
                               businessId:
-                                  widget
-                                      .businessId,
+                                  widget.businessId,
+                              currentRole:
+                                  'business',
                             ),
                           ),
                         );
@@ -732,9 +750,9 @@ _ActionCard(
   }
 }
 
-// =====================================
+// =====================================================
 // STAT CARD
-// =====================================
+// =====================================================
 
 class _StatCard extends StatelessWidget {
 
@@ -791,7 +809,7 @@ class _StatCard extends StatelessWidget {
             icon,
             size: 28,
             color:
-                const Color(0xFFF26A2E),
+                AppColors.primary,
           ),
 
           const SizedBox(height: 20),
@@ -805,7 +823,7 @@ class _StatCard extends StatelessWidget {
               fontWeight:
                   FontWeight.bold,
               color:
-                  Color(0xFF1E1E1E),
+                  AppColors.charcoal,
             ),
           ),
 
@@ -823,9 +841,9 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// =====================================
+// =====================================================
 // WARNING CARD
-// =====================================
+// =====================================================
 
 class _WarningCard extends StatelessWidget {
 
@@ -886,6 +904,10 @@ class _WarningCard extends StatelessWidget {
     );
   }
 }
+
+// =====================================================
+// STATUS ROW
+// =====================================================
 
 class _StatusRow extends StatelessWidget {
 
@@ -960,10 +982,14 @@ class _StatusRow extends StatelessWidget {
                     BoxDecoration(
 
                   color:
-                      color.withOpacity(0.12),
+                      color.withOpacity(
+                    0.12,
+                  ),
 
                   borderRadius:
-                      BorderRadius.circular(16),
+                      BorderRadius.circular(
+                    16,
+                  ),
                 ),
 
                 child: Icon(
@@ -979,7 +1005,8 @@ class _StatusRow extends StatelessWidget {
                 child: Column(
 
                   crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      CrossAxisAlignment
+                          .start,
 
                   children: [
 
@@ -1015,8 +1042,6 @@ class _StatusRow extends StatelessWidget {
                 color:
                     Colors.grey.shade400,
               ),
-
-              const SizedBox(width: 4),
             ],
           ),
         ),
@@ -1024,9 +1049,10 @@ class _StatusRow extends StatelessWidget {
     );
   }
 }
-// =====================================
+
+// =====================================================
 // ACTION CARD
-// =====================================
+// =====================================================
 
 class _ActionCard extends StatelessWidget {
 
@@ -1111,9 +1137,10 @@ class _ActionCard extends StatelessWidget {
                     BoxDecoration(
 
                   color:
-                      const Color(
-                    0xFFF26A2E,
-                  ).withOpacity(0.12),
+                      AppColors.primary
+                          .withOpacity(
+                    0.12,
+                  ),
 
                   borderRadius:
                       BorderRadius.circular(
@@ -1128,9 +1155,7 @@ class _ActionCard extends StatelessWidget {
                   size: 34,
 
                   color:
-                      const Color(
-                    0xFFF26A2E,
-                  ),
+                      AppColors.primary,
                 ),
               ),
 
@@ -1147,57 +1172,13 @@ class _ActionCard extends StatelessWidget {
                   fontWeight:
                       FontWeight.bold,
                   color:
-                      Color(0xFF1E1E1E),
+                      AppColors.charcoal,
                 ),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-class _MiniStat extends StatelessWidget {
-
-  final String label;
-  final String value;
-
-  const _MiniStat({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-
-    return Column(
-
-      children: [
-
-        Text(
-
-          value,
-
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight:
-                FontWeight.bold,
-            color:
-                Color(0xFF1E1E1E),
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-
-          label,
-
-          style: const TextStyle(
-            color: Colors.grey,
-          ),
-        ),
-      ],
     );
   }
 }

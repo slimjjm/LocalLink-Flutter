@@ -144,6 +144,26 @@ class BusinessDashboardService {
     final businessData =
         businessSnap.data() ?? {};
 
+        final photoURLs =
+    List<String>.from(
+  businessData['photoURLs'] ?? [],
+);
+
+final hasPhotos =
+    photoURLs.isNotEmpty;
+
+final profileComplete =
+    hasPhotos &&
+    (businessData['businessName'] ?? '')
+        .toString()
+        .isNotEmpty &&
+    (businessData['address'] ?? '')
+        .toString()
+        .isNotEmpty &&
+    (businessData['category'] ?? '')
+        .toString()
+        .isNotEmpty;
+
     final stripeConnected =
         businessData[
             'stripeConnected'] ==
@@ -212,6 +232,9 @@ class BusinessDashboardService {
 
       hasStaff:
           staffSnap.docs.isNotEmpty,
+
+          hasPhotos: hasPhotos,
+profileComplete: profileComplete,
     );
   }
 }
