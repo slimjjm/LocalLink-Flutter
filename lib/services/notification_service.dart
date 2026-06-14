@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 
 final GlobalKey<NavigatorState> navigatorKey =
     GlobalKey<NavigatorState>();
@@ -47,7 +48,9 @@ class NotificationService {
     await _requestPermission();
     await _setupAndroidChannel();
     await _setupLocalNotifications();
-    await saveFcmTokenForCurrentUser();
+  if (!Platform.isIOS || !kDebugMode) {
+  await saveFcmTokenForCurrentUser();
+}
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
@@ -150,13 +153,19 @@ class NotificationService {
     );
   }
 
-  Future<void> saveFcmTokenForCurrentUser() async {
+ Future<void> saveFcmTokenForCurrentUser() async {
+  try {
     final token = await _messaging.getToken();
 
     if (token == null) return;
 
     await _saveToken(token);
+  } catch (e) {
+    print(
+      'FCM token unavailable: $e',
+    );
   }
+}
 
   Future<void> _saveToken(String token) async {
     final user = FirebaseAuth.instance.currentUser;

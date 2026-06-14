@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../theme/app_colors.dart';
 import 'package:geolocator/geolocator.dart';
+import '../services/address_search_service.dart';
 
 class CreateOpportunityScreen extends StatefulWidget {
   const CreateOpportunityScreen({super.key});
@@ -28,6 +29,11 @@ class _CreateOpportunityScreenState
 
   final locationController =
       TextEditingController();
+
+      final addressService =
+    AddressSearchService();
+
+List<String> suggestions = [];
 
   final ImagePicker picker =
       ImagePicker();
@@ -70,7 +76,41 @@ Future<void> pickTime() async {
     selectedTime = picked;
   });
 }
+Future<void> getCurrentLocation() async {
 
+  try {
+
+    final position =
+        await Geolocator
+            .getCurrentPosition();
+
+    setState(() {
+
+      selectedLatitude =
+          position.latitude;
+
+      selectedLongitude =
+          position.longitude;
+
+      locationController.text =
+          '${position.latitude.toStringAsFixed(4)}, '
+          '${position.longitude.toStringAsFixed(4)}';
+    });
+
+  } catch (e) {
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Unable to get location',
+        ),
+      ),
+    );
+  }
+}
   @override
   void dispose() {
     titleController.dispose();
@@ -97,9 +137,19 @@ Future<void> pickTime() async {
 
   Future<void> saveOpportunity() async {
 
-    if (titleController.text
+  if (titleController.text
     .trim()
     .isEmpty) {
+
+  ScaffoldMessenger.of(context)
+      .showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Please enter a title',
+      ),
+    ),
+  );
+
   return;
 }
 
@@ -198,7 +248,11 @@ final longitude =
       longitude,
 
       'eventDate':
-    selectedDate,
+    selectedDate == null
+        ? null
+        : Timestamp.fromDate(
+            selectedDate!,
+          ),
 
 'eventTime':
     selectedTime == null
@@ -279,17 +333,71 @@ final longitude =
 
             const SizedBox(height: 16),
 
-            TextField(
-              controller:
-                  locationController,
-              decoration:
-                  const InputDecoration(
-                labelText:
-                    'Where Is it?',
-              ),
-            ),
+          Column(
+  children: [
+    TextField(
+      controller: locationController,
+      decoration: const InputDecoration(
+        labelText: 'Where Is it?',
+      ),
+      onChanged: (value) async {
+        final results =
+            await addressService.search(value);
 
-            const SizedBox(height: 16),
+        if (!mounted) return;
+
+        setState(() {
+          suggestions = results;
+        });
+      },
+    ),
+
+    if (suggestions.isNotEmpty)
+      Container(
+        margin: const EdgeInsets.only(
+          top: 8,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.grey.shade300,
+          ),
+        ),
+        child: Column(
+          children: suggestions.map(
+            (suggestion) {
+              return ListTile(
+                title: Text(suggestion),
+                onTap: () {
+                  setState(() {
+                    locationController.text =
+                        suggestion;
+
+                    suggestions = [];
+                  });
+                },
+              );
+            },
+          ).toList(),
+        ),
+      ),
+  ],
+),
+
+const SizedBox(height: 12),
+
+OutlinedButton.icon(
+  onPressed: getCurrentLocation,
+  icon: const Icon(
+    Icons.my_location,
+  ),
+  label: const Text(
+    'Use Current Location',
+  ),
+),
+
+const SizedBox(height: 16),
 
             GestureDetector(
   onTap: pickDate,
