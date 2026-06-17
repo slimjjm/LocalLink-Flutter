@@ -3,10 +3,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_secrets.dart';
+import '../models/address_result.dart';
 
 class AddressSearchService {
 
-  Future<List<String>> search(
+  Future<List<AddressResult>> search(
     String query,
   ) async {
 
@@ -36,10 +37,52 @@ class AddressSearchService {
         data['predictions'] as List;
 
     return predictions
-        .map<String>(
-          (e) => e['description']
-              .toString(),
+        .map<AddressResult>(
+          (e) => AddressResult(
+            description:
+                e['description'],
+            placeId:
+                e['place_id'],
+          ),
         )
         .toList();
+  }
+
+  Future<Map<String, double>?>
+      getCoordinates(
+    String placeId,
+  ) async {
+
+    final url =
+        'https://maps.googleapis.com/maps/api/place/details/json'
+        '?place_id=$placeId'
+        '&fields=geometry'
+        '&key=${AppSecrets.googleApiKey}';
+
+    final response =
+        await http.get(
+      Uri.parse(url),
+    );
+
+    if (response.statusCode != 200) {
+      return null;
+    }
+
+    final data =
+        jsonDecode(response.body);
+
+    final location =
+        data['result']
+            ['geometry']
+            ['location'];
+
+    return {
+      'lat':
+          location['lat']
+              .toDouble(),
+      'lng':
+          location['lng']
+              .toDouble(),
+    };
   }
 }

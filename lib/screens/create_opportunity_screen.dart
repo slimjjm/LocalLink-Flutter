@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../theme/app_colors.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/address_search_service.dart';
+import '../models/address_result.dart';
 
 class CreateOpportunityScreen extends StatefulWidget {
   const CreateOpportunityScreen({super.key});
@@ -33,7 +34,7 @@ class _CreateOpportunityScreenState
       final addressService =
     AddressSearchService();
 
-List<String> suggestions = [];
+List<AddressResult> suggestions = [];
 
   final ImagePicker picker =
       ImagePicker();
@@ -365,21 +366,39 @@ final longitude =
           ),
         ),
         child: Column(
-          children: suggestions.map(
-            (suggestion) {
-              return ListTile(
-                title: Text(suggestion),
-                onTap: () {
-                  setState(() {
-                    locationController.text =
-                        suggestion;
+        children: suggestions.map(
+  (suggestion) {
+    return ListTile(
+      title: Text(
+        suggestion.description,
+      ),
+      onTap: () async {
 
-                    suggestions = [];
-                  });
-                },
-              );
-            },
-          ).toList(),
+        final coords =
+            await addressService
+                .getCoordinates(
+          suggestion.placeId,
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+
+          selectedLatitude =
+              coords?['lat'];
+
+          selectedLongitude =
+              coords?['lng'];
+
+          locationController.text =
+              suggestion.description;
+
+          suggestions = [];
+        });
+      },
+    );
+  },
+).toList(),
         ),
       ),
   ],

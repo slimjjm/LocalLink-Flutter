@@ -2064,13 +2064,12 @@ const SizedBox(height: 12),
              final filteredDocs =
     docs.where((doc) {
 
-  final data =
-      doc.data()
-          as Map<String, dynamic>;
+final data =
+    doc.data()
+        as Map<String, dynamic>;
 
-  final category =
-      data['category']
-          ?.toString() ?? '';
+final category =
+    data['category'] ?? '';
 
   final title =
       data['title']
@@ -2175,14 +2174,20 @@ const SizedBox(height: 12),
               return Column(
                 children:
                     filteredDocs.map((doc) {
-                  final data =
-                      doc.data()
-                          as Map<String, dynamic>;
+             final data =
+    doc.data()
+        as Map<String, dynamic>;
 
-                  final category =
-                      data['category'] ?? '';
+final category =
+    data['category'] ?? '';
 
-                      final eventDate =
+final attendeeCount =
+    data['attendeeCount'] ?? 0;
+
+final commentCount =
+    data['commentCount'] ?? 0;
+
+final eventDate =
     data['eventDate'];
 
 String dateBadge = '';
@@ -2469,19 +2474,14 @@ if (userPosition != null &&
                                   const SizedBox(
                                     height: 8,
                                   ),
-
-                                  Text(
-                                    '${data['attendeeCount'] ?? 0} going',
-                                    style:
-                                        const TextStyle(
-                                      color:
-                                          AppColors
-                                              .primary,
-                                      fontWeight:
-                                          FontWeight
-                                              .w800,
-                                    ),
-                                  ),
+Text(
+  '$attendeeCount going • $commentCount comments',
+  style: const TextStyle(
+    color: AppColors.primary,
+    fontWeight: FontWeight.w800,
+  ),
+),
+            
                                 ],
                               ),
                             ),

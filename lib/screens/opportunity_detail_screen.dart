@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../theme/app_colors.dart';
+import '../services/comment_service.dart';
+import '../services/attendee_service.dart';
 
 class OpportunityDetailScreen extends StatefulWidget {
   final String opportunityId;
@@ -24,6 +26,16 @@ class _OpportunityDetailScreenState
   bool isJoining = false;
   bool isGoing = false;
   int attendeeCount = 0;
+
+  final commentService =
+    CommentService();
+
+    final attendeeService =
+    AttendeeService();
+
+
+final commentController =
+    TextEditingController();
 
   @override
   void initState() {
@@ -85,10 +97,14 @@ Future<void> joinOpportunity() async {
     final attendeeDoc = await attendeeRef.get();
 
     if (!attendeeDoc.exists) {
-      await attendeeRef.set({
-        'userId': user.uid,
-        'joinedAt': Timestamp.now(),
-      });
+     await attendeeRef.set({
+  'userId': user.uid,
+  'userName':
+      user.displayName ?? 'User',
+  'photoUrl':
+      user.photoURL,
+  'joinedAt': Timestamp.now(),
+});
 
       await opportunityRef.update({
         'attendeeCount': FieldValue.increment(1),
@@ -126,7 +142,53 @@ Future<void> joinOpportunity() async {
   }
 }
 
+Future<void> _postComment() async {
 
+  final text =
+      commentController.text.trim();
+
+  if (text.isEmpty) return;
+
+  final user =
+      FirebaseAuth.instance.currentUser;
+
+  if (user == null) return;
+
+  await commentService.addComment(
+    opportunityId: widget.opportunityId,
+    userId: user.uid,
+    userName: user.displayName ?? 'User',
+    text: text,
+  );
+
+  commentController.clear();
+}
+String formatTimestamp(Timestamp timestamp) {
+
+  final date =
+      timestamp.toDate();
+
+  final difference =
+      DateTime.now().difference(date);
+
+  if (difference.inMinutes < 1) {
+    return 'Just now';
+  }
+
+  if (difference.inMinutes < 60) {
+    return '${difference.inMinutes} mins ago';
+  }
+
+  if (difference.inHours < 24) {
+    return '${difference.inHours} hrs ago';
+  }
+
+  if (difference.inDays < 7) {
+    return '${difference.inDays} days ago';
+  }
+
+  return '${date.day}/${date.month}/${date.year}';
+}
   @override
   Widget build(BuildContext context) {
     final opportunity = widget.opportunity;
@@ -216,13 +278,23 @@ Future<void> joinOpportunity() async {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Text(
-                    category,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                 Container(
+  padding: const EdgeInsets.symmetric(
+    horizontal: 10,
+    vertical: 6,
+  ),
+  decoration: BoxDecoration(
+    color: Colors.white.withOpacity(0.15),
+    borderRadius: BorderRadius.circular(999),
+  ),
+  child: Text(
+    category,
+    style: const TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+    ),
+  ),
+),
                 ],
               ),
             ),
@@ -255,11 +327,118 @@ Future<void> joinOpportunity() async {
             const SizedBox(height: 12),
 
             _InfoTile(
-              icon: Icons.people,
-              title: 'Attending',
-              value: '$attendeeCount people',
-            ),
+  icon: Icons.people,
+  title: 'Attending',
+  value: attendeeCount == 0
+      ? 'No attendees yet'
+      : attendeeCount == 1
+          ? '1 attendee'
+          : '$attendeeCount attendees',
+),
+const SizedBox(height: 12),
 
+const Text(
+  'Who\'s Going',
+  style: TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
+  ),
+),
+
+const SizedBox(height: 12),
+StreamBuilder<QuerySnapshot>(
+  stream: attendeeService.attendeesStream(
+    widget.opportunityId,
+  ),
+  builder: (context, snapshot) {
+
+    if (!snapshot.hasData) {
+      return const SizedBox();
+    }
+
+    final attendees =
+        snapshot.data!.docs;
+
+    if (attendees.isEmpty) {
+      return const SizedBox();
+    }
+
+    return SizedBox(
+      height: 70,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: attendees.length,
+        itemBuilder: (context, index) {
+
+          final data =
+              attendees[index].data()
+                  as Map<String, dynamic>;
+
+       final fullName =
+    data['userName'] ?? 'User';
+
+final name =
+    fullName.split(' ').first;
+
+          final photoUrl =
+              data['photoUrl'];
+
+          return Padding(
+            padding:
+                const EdgeInsets.only(
+              right: 12,
+            ),
+            child: Column(
+              children: [
+
+                photoUrl != null &&
+                        photoUrl
+                            .toString()
+                            .isNotEmpty
+                    ? CircleAvatar(
+                        radius: 28,
+                        backgroundImage:
+                            NetworkImage(
+                          photoUrl,
+                        ),
+                      )
+                    : CircleAvatar(
+                        radius: 22,
+                        child: Text(
+                          name
+                              .substring(0, 1)
+                              .toUpperCase(),
+                        ),
+                      ),
+
+                const SizedBox(
+                  height: 4,
+                ),
+
+                SizedBox(
+                  width: 50,
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow:
+                        TextOverflow
+                            .ellipsis,
+                    textAlign:
+                        TextAlign.center,
+                    style:
+                        const TextStyle(
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  },
+),
             const SizedBox(height: 24),
 
             const Text(
@@ -282,89 +461,264 @@ Future<void> joinOpportunity() async {
 
             const SizedBox(height: 32),
 
-            const Text(
-              'Discussion',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
+const SizedBox(height: 24),
 
-            const SizedBox(height: 16),
+const Text(
+  'Discussion',
+  style: TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.bold,
+  ),
+),
 
-            const _CommentTile(
-              name: 'Sarah',
-              comment: 'Can beginners come along?',
-            ),
+const SizedBox(height: 12),
 
-            const SizedBox(height: 12),
+StreamBuilder<QuerySnapshot>(
 
-            const _CommentTile(
-              name: 'Burntwood Runners',
-              comment: 'Absolutely. All abilities welcome.',
-            ),
+  stream: commentService.commentsStream(
+    widget.opportunityId,
+  ),
 
-            const SizedBox(height: 12),
+  builder: (context, snapshot) {
 
-            const _CommentTile(
-              name: 'Tom',
-              comment: 'Where do we park?',
-            ),
+    if (!snapshot.hasData) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
 
-            const SizedBox(height: 12),
+    final comments =
+        snapshot.data!.docs;
 
-            const _CommentTile(
-              name: 'Burntwood Runners',
-              comment: 'Visitor centre car park.',
-            ),
+    if (comments.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          'Be the first to comment',
+        ),
+      );
+    }
 
-            const SizedBox(height: 24),
+    return ListView.builder(
+      shrinkWrap: true,
+      physics:
+          const NeverScrollableScrollPhysics(),
+      itemCount: comments.length,
+      itemBuilder: (context, index) {
 
-           Row(
+        final data =
+            comments[index].data()
+                as Map<String, dynamic>;
+final commentId =
+    comments[index].id;
+
+final currentUser =
+    FirebaseAuth.instance.currentUser;
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+
+              Row(
+  mainAxisAlignment:
+      MainAxisAlignment.spaceBetween,
   children: [
-    Expanded(
-      child: TextField(
-        decoration: InputDecoration(
-          hintText: 'Write a comment...',
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius:
-                BorderRadius.circular(16),
-            borderSide: BorderSide.none,
+
+  Text(
+    data['userName'] ?? '',
+    style: const TextStyle(
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+
+  if (currentUser?.uid == data['userId'])
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+
+        IconButton(
+          icon: const Icon(
+            Icons.edit_outlined,
           ),
+          onPressed: () async {
+
+            final controller =
+                TextEditingController(
+              text: data['text'] ?? '',
+            );
+
+            final save =
+                await showDialog<bool>(
+              context: context,
+              builder: (context) {
+                return AlertDialog(
+                  title: const Text(
+                    'Edit Comment',
+                  ),
+                  content: TextField(
+                    controller: controller,
+                    maxLines: 4,
+                  ),
+                  actions: [
+
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(
+                          context,
+                          false,
+                        );
+                      },
+                      child: const Text(
+                        'Cancel',
+                      ),
+                    ),
+
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(
+                          context,
+                          true,
+                        );
+                      },
+                      child: const Text(
+                        'Save',
+                      ),
+                    ),
+
+                  ],
+                );
+              },
+            );
+
+            if (save != true) return;
+
+            await commentService
+                .updateComment(
+              opportunityId:
+                  widget.opportunityId,
+              commentId:
+                  commentId,
+              text:
+                  controller.text.trim(),
+            );
+          },
         ),
-      ),
+
+        IconButton(
+          icon: const Icon(
+            Icons.delete_outline,
+          ),
+          onPressed: () async {
+
+            final confirm =
+                await showDialog<bool>(
+              context: context,
+              builder: (context) {
+                return AlertDialog(
+                  title: const Text(
+                    'Delete Comment?',
+                  ),
+                  content: const Text(
+                    'This cannot be undone.',
+                  ),
+                  actions: [
+
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(
+                          context,
+                          false,
+                        );
+                      },
+                      child: const Text(
+                        'Cancel',
+                      ),
+                    ),
+
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(
+                          context,
+                          true,
+                        );
+                      },
+                      child: const Text(
+                        'Delete',
+                      ),
+                    ),
+
+                  ],
+                );
+              },
+            );
+
+            if (confirm != true) return;
+
+            await commentService
+                .deleteComment(
+              opportunityId:
+                  widget.opportunityId,
+              commentId:
+                  commentId,
+            );
+          },
+        ),
+      ],
     ),
 
-    const SizedBox(width: 8),
-
-    Container(
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        shape: BoxShape.circle,
-      ),
-      child: IconButton(
-        icon: const Icon(
-          Icons.send,
-          color: Colors.white,
-        ),
-        onPressed: () {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Comments coming soon',
-              ),
-            ),
-          );
-        },
-      ),
-    ),
   ],
 ),
 
-            const SizedBox(height: 12),
+const SizedBox(height: 6),
+
+                Text(
+                  data['text'] ?? '',
+                ),
+
+                const SizedBox(height: 8),
+
+                Text(
+                  formatTimestamp(
+                    data['createdAt']
+                        as Timestamp,
+                  ),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  },
+),
+
+const SizedBox(height: 16),
+
+TextField(
+  controller: commentController,
+  decoration: InputDecoration(
+    hintText: 'Write a comment',
+    border: const OutlineInputBorder(),
+    suffixIcon: IconButton(
+      icon: const Icon(Icons.send),
+      onPressed: () async {
+        await _postComment();
+      },
+    ),
+  ),
+),
+
+const SizedBox(height: 16),
+
+
 
             SizedBox(
               width: double.infinity,
