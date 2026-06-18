@@ -21,6 +21,8 @@ import 'opportunity_detail_screen.dart';
 import 'create_opportunity_screen.dart';
 import 'my_opportunities_screen.dart';
 
+import 'notifications_screen.dart';
+
 
 class CustomerHomeScreen extends StatefulWidget {
   const CustomerHomeScreen({super.key});
@@ -357,18 +359,108 @@ class _WelcomeHeader extends StatelessWidget {
 
         const SizedBox(width: 12),
 
-        Column(
-          children: [
+      Column(
+  children: [
 
-            _HeaderIconButton(
-              icon: Icons.settings_outlined,
-              onTap: onSettingsTap,
+    _HeaderIconButton(
+      icon: Icons.settings_outlined,
+      onTap: onSettingsTap,
+    ),
+
+    const SizedBox(height: 10),
+
+  StreamBuilder<QuerySnapshot>(
+  stream: FirebaseFirestore.instance
+      .collection('users')
+      .doc(
+        FirebaseAuth
+            .instance
+            .currentUser!
+            .uid,
+      )
+      .collection(
+        'notifications',
+      )
+      .where(
+        'isRead',
+        isEqualTo: false,
+      )
+      .snapshots(),
+  builder: (
+    context,
+    snapshot,
+  ) {
+
+    final unread =
+        snapshot.data?.docs.length ??
+            0;
+
+    return GestureDetector(
+      onTap: () {
+
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                const NotificationsScreen(),
+          ),
+        );
+
+      },
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+
+          const _HeaderIconButton(
+            icon:
+                Icons.notifications_outlined,
+          ),
+
+          if (unread > 0)
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 3,
+                ),
+                decoration:
+                    BoxDecoration(
+                  color:
+                      AppColors.error,
+                  borderRadius:
+                      BorderRadius.circular(
+                    999,
+                  ),
+                ),
+                child: Text(
+                  unread > 99
+                      ? '99+'
+                      : unread
+                          .toString(),
+                  style:
+                      const TextStyle(
+                    color:
+                        Colors.white,
+                    fontSize: 11,
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+              ),
             ),
+        ],
+      ),
+    );
+  },
+),
 
-            const SizedBox(height: 10),
+    const SizedBox(height: 10),
 
-            GestureDetector(
-              onTap: onMessagesTap,
+    GestureDetector(
+      onTap: onMessagesTap,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -2064,9 +2156,24 @@ const SizedBox(height: 12),
              final filteredDocs =
     docs.where((doc) {
 
-final data =
+      final data =
     doc.data()
         as Map<String, dynamic>;
+
+final eventDate =
+    data['eventDate'];
+
+if (eventDate != null) {
+
+  final eventDay =
+      eventDate.toDate();
+
+  if (eventDay.isBefore(
+    DateTime.now(),
+  )) {
+    return false;
+  }
+}
 
 final category =
     data['category'] ?? '';

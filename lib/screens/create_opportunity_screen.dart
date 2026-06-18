@@ -234,7 +234,7 @@ final longitude =
   'attendeeCount': 0,
 
   'organiserName':
-      user?.email ?? 'LocalLink',
+    user?.displayName ?? 'User',
 
   'createdBy':
       user?.uid,

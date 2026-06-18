@@ -8,6 +8,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
+import '../screens/notifications_screen.dart';
+
 final GlobalKey<NavigatorState> navigatorKey =
     GlobalKey<NavigatorState>();
 
@@ -185,22 +187,33 @@ class NotificationService {
     final type = data['type'];
 
     switch (type) {
-      case 'new_message':
-        _openChat(data);
-        break;
 
-      case 'new_booking':
-      case 'booking_confirmed':
-      case 'booking_cancelled':
-      case 'payment_failed':
-        _openBooking(data);
-        break;
+  case 'new_message':
+    _openChat(data);
+    break;
 
-      default:
-        navigatorKey.currentState?.pushNamed('/home');
-    }
+  case 'new_booking':
+  case 'booking_confirmed':
+  case 'booking_cancelled':
+  case 'payment_failed':
+    _openBooking(data);
+    break;
+
+  case 'follow':
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) =>
+            const NotificationsScreen(),
+      ),
+    );
+    break;
+
+  default:
+    navigatorKey.currentState?.pushNamed(
+      '/home',
+    );
+}
   }
-
   void _openChat(Map<String, dynamic> data) {
     final businessId = data['businessId'];
     final customerId = data['customerId'];

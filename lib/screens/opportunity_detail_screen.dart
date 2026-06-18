@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 import '../services/comment_service.dart';
 import '../services/attendee_service.dart';
+import 'profile_screen.dart';
+import '../services/review_service.dart';
 
 class OpportunityDetailScreen extends StatefulWidget {
   final String opportunityId;
@@ -33,6 +35,8 @@ class _OpportunityDetailScreenState
     final attendeeService =
     AttendeeService();
 
+final reviewService =
+    ReviewService();
 
 final commentController =
     TextEditingController();
@@ -199,6 +203,8 @@ String formatTimestamp(Timestamp timestamp) {
     final location = opportunity['location'] ?? '';
     final organiser = opportunity['organiserName'] ?? '';
     final eventDate = opportunity['eventDate'];
+    final eventTime =
+    opportunity['eventTime'] ?? '';
     final photoUrl =
     opportunity['photoUrl'];
 
@@ -229,10 +235,276 @@ String formatTimestamp(Timestamp timestamp) {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
+     appBar: AppBar(
+  backgroundColor: AppColors.background,
+  elevation: 0,
+  actions: [
+if (FirebaseAuth.instance.currentUser?.uid ==
+    widget.opportunity['createdBy'])
+
+  IconButton(
+    icon: const Icon(
+      Icons.edit,
+    ),
+    onPressed: () async {
+
+      final titleController =
+          TextEditingController(
+        text: widget.opportunity['title'],
+      );
+
+      final descriptionController =
+          TextEditingController(
+        text: widget.opportunity['description'],
+      );
+
+      final save =
+          await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text(
+              'Edit Opportunity',
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize:
+                    MainAxisSize.min,
+                children: [
+
+                  TextField(
+                    controller:
+                        titleController,
+                    decoration:
+                        const InputDecoration(
+                      labelText: 'Title',
+                    ),
+                  ),
+
+                  const SizedBox(
+                    height: 12,
+                  ),
+
+                  TextField(
+                    controller:
+                        descriptionController,
+                    maxLines: 4,
+                    decoration:
+                        const InputDecoration(
+                      labelText:
+                          'Description',
+                    ),
+                  ),
+                  const SizedBox(
+  height: 12,
+),
+
+ElevatedButton.icon(
+  icon: const Icon(
+    Icons.calendar_month,
+  ),
+  label: const Text(
+    'Change Date',
+  ),
+  onPressed: () async {
+
+    final picked =
+        await showDatePicker(
+      context: context,
+      initialDate:
+          DateTime.now(),
+      firstDate:
+          DateTime.now(),
+      lastDate:
+          DateTime(2035),
+    );
+
+    if (picked == null) return;
+
+    await FirebaseFirestore.instance
+        .collection(
+          'opportunities',
+        )
+        .doc(
+          widget.opportunityId,
+        )
+        .update({
+
+      'eventDate':
+          Timestamp.fromDate(
+        picked,
       ),
+
+    });
+  },
+),
+
+ElevatedButton.icon(
+  icon: const Icon(
+    Icons.access_time,
+  ),
+  label: const Text(
+    'Change Time',
+  ),
+  onPressed: () async {
+
+    final picked =
+        await showTimePicker(
+      context: context,
+      initialTime:
+          TimeOfDay.now(),
+    );
+
+    if (picked == null) return;
+
+    await FirebaseFirestore.instance
+        .collection(
+          'opportunities',
+        )
+        .doc(
+          widget.opportunityId,
+        )
+        .update({
+
+      'eventTime':
+          picked.format(
+        context,
+      ),
+
+    });
+  },
+),
+                ],
+              ),
+            ),
+            actions: [
+
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(
+                    context,
+                    false,
+                  );
+                },
+                child: const Text(
+                  'Cancel',
+                ),
+              ),
+
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(
+                    context,
+                    true,
+                  );
+                },
+                child: const Text(
+                  'Save',
+                ),
+              ),
+
+            ],
+          );
+        },
+      );
+
+      if (save != true) return;
+
+      await FirebaseFirestore.instance
+          .collection(
+            'opportunities',
+          )
+          .doc(
+            widget.opportunityId,
+          )
+          .update({
+
+        'title':
+            titleController.text
+                .trim(),
+
+        'description':
+            descriptionController
+                .text
+                .trim(),
+
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Opportunity updated',
+          ),
+        ),
+      );
+    },
+  ),
+
+IconButton(
+  icon: const Icon(
+    Icons.delete_outline,
+  ),
+  onPressed: () async {
+
+    final confirm =
+        await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            'Delete Opportunity?',
+          ),
+          content: const Text(
+            'This cannot be undone.',
+          ),
+          actions: [
+
+            TextButton(
+              onPressed: () {
+                Navigator.pop(
+                  context,
+                  false,
+                );
+              },
+              child: const Text(
+                'Cancel',
+              ),
+            ),
+
+            TextButton(
+              onPressed: () {
+                Navigator.pop(
+                  context,
+                  true,
+                );
+              },
+              child: const Text(
+                'Delete',
+              ),
+            ),
+
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    await FirebaseFirestore.instance
+        .collection('opportunities')
+        .doc(widget.opportunityId)
+        .delete();
+
+    if (!mounted) return;
+
+    Navigator.pop(context);
+  },
+),
+  ],
+),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -301,14 +573,23 @@ String formatTimestamp(Timestamp timestamp) {
 
             const SizedBox(height: 24),
 
-            if (formattedDate.isNotEmpty) ...[
-              _InfoTile(
-                icon: Icons.calendar_month,
-                title: 'Date',
-                value: formattedDate,
-              ),
-              const SizedBox(height: 12),
-            ],
+          if (formattedDate.isNotEmpty) ...[
+  _InfoTile(
+    icon: Icons.calendar_month,
+    title: 'Date',
+    value: formattedDate,
+  ),
+  const SizedBox(height: 12),
+],
+
+if (eventTime.toString().isNotEmpty) ...[
+  _InfoTile(
+    icon: Icons.access_time,
+    title: 'Time',
+    value: eventTime.toString(),
+  ),
+  const SizedBox(height: 12),
+],
 
             _InfoTile(
               icon: Icons.location_on,
@@ -318,11 +599,209 @@ String formatTimestamp(Timestamp timestamp) {
 
             const SizedBox(height: 12),
 
-            _InfoTile(
-              icon: Icons.person,
-              title: 'Organiser',
-              value: organiser,
+          _InfoTile(
+  icon: Icons.person,
+  title: 'Organiser',
+  value: organiser,
+),
+
+const SizedBox(height: 12),
+
+SizedBox(
+  width: double.infinity,
+  child: OutlinedButton.icon(
+    icon: const Icon(Icons.star_outline),
+    label: const Text(
+      'Review Organiser',
+    ),
+  onPressed: () async {
+
+  final user =
+      FirebaseAuth.instance.currentUser;
+
+if (user == null) return;
+
+final alreadyReviewed =
+    await reviewService.hasReviewed(
+  organiserId:
+      widget.opportunity['createdBy'],
+  reviewerId:
+      user.uid,
+);
+
+if (alreadyReviewed) {
+
+  if (!mounted) return;
+
+  final attendeeDoc =
+    await FirebaseFirestore.instance
+        .collection('opportunities')
+        .doc(widget.opportunityId)
+        .collection('attendees')
+        .doc(user.uid)
+        .get();
+
+if (!attendeeDoc.exists) {
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context)
+      .showSnackBar(
+    const SnackBar(
+      content: Text(
+        'You must attend before reviewing',
+      ),
+    ),
+  );
+
+  return;
+}
+
+  ScaffoldMessenger.of(context)
+      .showSnackBar(
+    const SnackBar(
+      content: Text(
+        'You have already reviewed this organiser',
+      ),
+    ),
+  );
+
+  return;
+}
+
+int rating = 5;
+
+  final controller =
+      TextEditingController();
+
+  final submit =
+      await showDialog<bool>(
+    context: context,
+    builder: (context) {
+
+      return StatefulBuilder(
+        builder: (
+          context,
+          setDialogState,
+        ) {
+
+          return AlertDialog(
+            title: const Text(
+              'Review Organiser',
             ),
+            content: Column(
+              mainAxisSize:
+                  MainAxisSize.min,
+              children: [
+
+                DropdownButton<int>(
+                  value: rating,
+                  isExpanded: true,
+                  items: [1,2,3,4,5]
+                      .map(
+                        (e) =>
+                            DropdownMenuItem(
+                      value: e,
+                      child: Text(
+                        '$e Stars',
+                      ),
+                    ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+
+                    if (value == null) {
+                      return;
+                    }
+
+                    setDialogState(() {
+                      rating = value;
+                    });
+                  },
+                ),
+
+                const SizedBox(
+                  height: 12,
+                ),
+
+                TextField(
+                  controller:
+                      controller,
+                  maxLines: 4,
+                  decoration:
+                      const InputDecoration(
+                    hintText:
+                        'Write review',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(
+                    context,
+                    false,
+                  );
+                },
+                child: const Text(
+                  'Cancel',
+                ),
+              ),
+
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(
+                    context,
+                    true,
+                  );
+                },
+                child: const Text(
+                  'Submit',
+                ),
+              ),
+
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  if (submit != true) return;
+
+  await reviewService.addReview(
+
+    organiserId:
+        widget.opportunity['createdBy'],
+
+    reviewerId:
+        user.uid,
+
+    reviewerName:
+        user.displayName ??
+            'User',
+
+    rating: rating,
+
+  text:
+    controller.text.trim(),
+  );
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context)
+      .showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Review submitted',
+      ),
+    ),
+  );
+},
+  ),
+),
 
             const SizedBox(height: 12),
 
@@ -351,87 +830,103 @@ StreamBuilder<QuerySnapshot>(
     widget.opportunityId,
   ),
   builder: (context, snapshot) {
-
     if (!snapshot.hasData) {
       return const SizedBox();
     }
 
-    final attendees =
-        snapshot.data!.docs;
+    final attendees = snapshot.data!.docs;
 
     if (attendees.isEmpty) {
       return const SizedBox();
     }
 
     return SizedBox(
-      height: 70,
+      height: 95,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: attendees.length,
         itemBuilder: (context, index) {
-
           final data =
               attendees[index].data()
                   as Map<String, dynamic>;
 
-       final fullName =
-    data['userName'] ?? 'User';
+          final fullName =
+              data['userName'] ?? 'User';
 
-final name =
-    fullName.split(' ').first;
+          final name =
+              fullName.split(' ').first;
 
           final photoUrl =
               data['photoUrl'];
 
-          return Padding(
-            padding:
-                const EdgeInsets.only(
-              right: 12,
-            ),
-            child: Column(
-              children: [
-
-                photoUrl != null &&
-                        photoUrl
-                            .toString()
-                            .isNotEmpty
-                    ? CircleAvatar(
-                        radius: 28,
-                        backgroundImage:
-                            NetworkImage(
-                          photoUrl,
-                        ),
-                      )
-                    : CircleAvatar(
-                        radius: 22,
-                        child: Text(
-                          name
-                              .substring(0, 1)
-                              .toUpperCase(),
-                        ),
-                      ),
-
-                const SizedBox(
-                  height: 4,
-                ),
-
-                SizedBox(
-                  width: 50,
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow:
-                        TextOverflow
-                            .ellipsis,
-                    textAlign:
-                        TextAlign.center,
-                    style:
-                        const TextStyle(
-                      fontSize: 11,
-                    ),
+          return GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ProfileScreen(
+                    userId: data['userId'],
+                    userName:
+                        data['userName'] ??
+                            'User',
+                    photoUrl:
+                        data['photoUrl'],
                   ),
                 ),
-              ],
+              );
+            },
+            child: Padding(
+              padding:
+                  const EdgeInsets.only(
+                right: 12,
+              ),
+              child: Column(
+                children: [
+                  photoUrl != null &&
+                          photoUrl
+                              .toString()
+                              .isNotEmpty
+                      ? CircleAvatar(
+                          radius: 24,
+                          backgroundImage:
+                              NetworkImage(
+                            photoUrl,
+                          ),
+                        )
+                      : CircleAvatar(
+                          radius: 22,
+                          child: Text(
+                            name
+                                .substring(
+                                  0,
+                                  1,
+                                )
+                                .toUpperCase(),
+                          ),
+                        ),
+
+                  const SizedBox(
+                    height: 4,
+                  ),
+
+                  SizedBox(
+                    width: 70,
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow:
+                          TextOverflow
+                              .ellipsis,
+                      textAlign:
+                          TextAlign.center,
+                      style:
+                          const TextStyle(
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },
@@ -439,10 +934,12 @@ final name =
     );
   },
 ),
-            const SizedBox(height: 24),
 
-            const Text(
-              'About',
+const SizedBox(height: 24),
+
+const Text(
+  'About',
+ 
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w900,
@@ -528,12 +1025,31 @@ final currentUser =
       MainAxisAlignment.spaceBetween,
   children: [
 
-  Text(
+  GestureDetector(
+  onTap: () {
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(
+          userId:
+              data['userId'],
+          userName:
+              data['userName'] ??
+                  'User',
+          photoUrl: null,
+        ),
+      ),
+    );
+  },
+  child: Text(
     data['userName'] ?? '',
     style: const TextStyle(
       fontWeight: FontWeight.bold,
+      color: Colors.blue,
     ),
   ),
+),
 
   if (currentUser?.uid == data['userId'])
     Row(

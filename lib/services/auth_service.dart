@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -34,20 +35,51 @@ class AuthService {
   // REGISTER
   // =====================================================
 
-  Future<void> register({
+ Future<void> register({
 
-    required String email,
-    required String password,
+  required String name,
+  required String email,
+  required String password,
 
-  }) async {
+}) async {
 
+ final credential =
     await _auth
         .createUserWithEmailAndPassword(
 
-      email: email.trim(),
+  email: email.trim(),
 
-      password: password.trim(),
-    );
+  password: password.trim(),
+);
+
+await credential.user
+    ?.updateDisplayName(
+  name.trim(),
+);
+
+await FirebaseFirestore.instance
+    .collection('users')
+    .doc(
+      credential.user!.uid,
+    )
+    .set({
+
+  'name': name.trim(),
+
+  'photoUrl': '',
+
+  'bio': '',
+
+  'reviewCount': 0,
+
+  'ratingTotal': 0,
+
+  'averageRating': 0.0,
+
+  'createdAt':
+      Timestamp.now(),
+
+});
   }
 
   // =====================================================

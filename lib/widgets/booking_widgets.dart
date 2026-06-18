@@ -1,7 +1,52 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+String safeText(
+  dynamic value,
+  String fallback,
+) {
+  if (value == null) {
+    return fallback;
+  }
 
+  final text =
+      value.toString().trim();
+
+  return text.isEmpty
+      ? fallback
+      : text;
+}
+
+String formatSlotTime(
+  dynamic timestamp,
+) {
+  if (timestamp == null) {
+    return '';
+  }
+
+  final date =
+      (timestamp as Timestamp)
+          .toDate();
+
+  final hour =
+      date.hour > 12
+          ? date.hour - 12
+          : date.hour == 0
+              ? 12
+              : date.hour;
+
+  final minute =
+      date.minute
+          .toString()
+          .padLeft(2, '0');
+
+  final period =
+      date.hour >= 12
+          ? 'PM'
+          : 'AM';
+
+  return '$hour:$minute $period';
+}
 class BookingServiceSummary extends StatelessWidget {
   final String serviceName;
   final String price;
@@ -185,7 +230,7 @@ class SlotSelector extends StatelessWidget {
     .where('isBooked', isEqualTo: false)
     .where('startTime', isGreaterThan: Timestamp.now())
     .orderBy('startTime')
-    .snapshots()
+    .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
