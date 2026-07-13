@@ -1,0 +1,180 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+          || (
+            request.auth.token.email != null
+            && exists(/databases/$(database)/documents/adminEmails/$(request.auth.token.email))
+            && get(/databases/$(database)/documents/adminEmails/$(request.auth.token.email)).data.enabled != false
+          )
+        );
+    }
+
+    function isNotBanned() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned != true;
+    }
+
+    match /adminEmails/{email} {
+      allow read: if signedIn() && request.auth.token.email == email;
+      allow write: if false;
+    }
+
+    match /analytics/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /founderReports/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /accountDeletionRequests/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /activityDaily/{day}/users/{uid} {
+      allow create, update: if isOwner(uid) && isNotBanned();
+      allow read: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /activityWeekly/{week}/users/{uid} {
+      allow create, update: if isOwner(uid) && isNotBanned();
+      allow read: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /activityMonthly/{month}/users/{uid} {
+      allow create, update: if isOwner(uid) && isNotBanned();
+      allow read: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /reports/{reportId} {
+      allow create: if isNotBanned()
+        && request.resource.data.reporterUserId == request.auth.uid
+        && request.resource.data.status == 'open';
+      allow read, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /shares/{shareId} {
+      allow create: if isNotBanned()
+        && (!('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if false;
+
+      match /notifications/{notificationId} {
+        allow read, update, delete: if isOwner(uid) || isAdmin();
+        allow create: if isAdmin();
+      }
+
+      match /savedOpportunities/{savedId} {
+        allow read, create, update, delete: if isOwner(uid) && isNotBanned();
+      }
+
+      match /blockedUsers/{blockedId} {
+        allow read, create, update, delete: if isOwner(uid) && isNotBanned();
+      }
+
+      match /followers/{followerId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isOwner(followerId) || isOwner(uid) || isAdmin();
+      }
+
+      match /following/{followingId} {
+        allow read: if signedIn();
+        allow create, update, delete: if isOwner(uid) || isAdmin();
+      }
+
+      match /reviews/{reviewId} {
+        allow read: if signedIn();
+        allow create: if isOwner(reviewId) && isNotBanned();
+        allow update, delete: if isOwner(reviewId) || isAdmin();
+      }
+
+      match /{document=**} {
+        allow read, write: if isOwner(uid) || isAdmin();
+      }
+    }
+
+    match /opportunities/{opportunityId} {
+      allow read: if signedIn()
+        && (resource.data.isActive == true || resource.data.createdBy == request.auth.uid || isAdmin());
+      allow create: if isNotBanned()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAdmin()
+        || (isNotBanned() && resource.data.createdBy == request.auth.uid);
+      allow delete: if isAdmin();
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if isNotBanned()
+          && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if isAdmin()
+          || (isNotBanned() && resource.data.userId == request.auth.uid);
+      }
+
+      match /attendees/{uid} {
+        allow read: if signedIn();
+        allow create, update, delete: if isOwner(uid) && isNotBanned();
+      }
+
+      match /{document=**} {
+        allow read: if signedIn();
+        allow write: if isAdmin();
+      }
+    }
+
+    match /businesses/{businessId} {
+      allow read: if signedIn();
+      allow create: if isNotBanned();
+      allow update, delete: if isAdmin()
+        || (signedIn() && resource.data.ownerId == request.auth.uid);
+
+      match /{document=**} {
+        allow read: if signedIn();
+        allow write: if isAdmin()
+          || (signedIn() && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid);
+      }
+    }
+
+    match /bookings/{bookingId} {
+      allow read, update: if isAdmin()
+        || (signedIn()
+          && (resource.data.customerId == request.auth.uid
+            || resource.data.businessOwnerId == request.auth.uid));
+      allow create: if isNotBanned();
+      allow delete: if isAdmin();
+
+      match /{document=**} {
+        allow read, write: if signedIn();
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -150,7 +150,8 @@ async function sendPushToUser(
     });
   }
 }
-
+exports.sendPushToUser =
+  sendPushToUser;
 // =================================================
 // NEW MESSAGE NOTIFICATION
 // =================================================
@@ -403,6 +404,190 @@ exports.notifyNewFollower =
         console.error(
             
           "❌ notifyNewFollower error:",
+          error
+        );
+      }
+    }
+  );
+
+  // =================================================
+// OPPORTUNITY JOIN NOTIFICATION
+// =================================================
+
+exports.notifyOpportunityJoin =
+  onDocumentCreated(
+    {
+      document:
+        "users/{userId}/notifications/{notificationId}",
+      region: "us-central1",
+    },
+    async (event) => {
+      try {
+
+        const notification =
+          event.data?.data();
+
+        if (!notification) return;
+
+        if (
+          notification.type !==
+          "opportunity_join"
+        ) {
+          return;
+        }
+
+        const targetUserId =
+          event.params.userId;
+
+        await sendPushToUser(
+          targetUserId,
+          {
+            title:
+              notification.title ||
+              "New attendee",
+
+            body:
+              notification.body ||
+              "Someone joined your opportunity",
+
+            data: {
+              type:
+                "opportunity_join",
+
+              opportunityId:
+                notification
+                  .opportunityId ||
+                "",
+            },
+          }
+        );
+
+        console.log(
+          "✅ Opportunity join push sent",
+          {
+            targetUserId,
+            opportunityId:
+              notification
+                .opportunityId,
+          }
+        );
+
+      } catch (error) {
+
+        console.error(
+          "❌ notifyOpportunityJoin error:",
+          error
+        );
+      }
+    }
+  );
+
+  // =================================================
+// OPPORTUNITY COMMENT NOTIFICATION
+// =================================================
+
+exports.notifyOpportunityComment =
+  onDocumentCreated(
+    {
+      document:
+        "users/{userId}/notifications/{notificationId}",
+      region: "us-central1",
+    },
+    async (event) => {
+
+      try {
+
+        const notification =
+          event.data?.data();
+
+        if (!notification) {
+          return;
+        }
+
+        if (
+          notification.type !==
+          "opportunity_comment"
+        ) {
+          return;
+        }
+
+        await sendPushToUser(
+          event.params.userId,
+          {
+            title:
+              notification.title,
+
+            body:
+              notification.body,
+
+            data: {
+              type:
+                "opportunity_comment",
+
+              opportunityId:
+                notification
+                  .opportunityId ||
+                "",
+            },
+          }
+        );
+
+      } catch (error) {
+
+        console.error(
+          "❌ notifyOpportunityComment error:",
+          error
+        );
+      }
+    }
+  );
+
+  exports.notifyReview =
+  onDocumentCreated(
+    {
+      document:
+        "users/{userId}/notifications/{notificationId}",
+      region: "us-central1",
+    },
+    async (event) => {
+
+      try {
+
+        const notification =
+          event.data?.data();
+
+        if (!notification) {
+          return;
+        }
+
+        if (
+          notification.type !==
+          "review"
+        ) {
+          return;
+        }
+
+        await sendPushToUser(
+          event.params.userId,
+          {
+            title:
+              notification.title,
+
+            body:
+              notification.body,
+
+            data: {
+              type: "review",
+              reviewerId:
+                notification.reviewerId || "",
+            },
+          }
+        );
+
+      } catch (error) {
+
+        console.error(
+          "❌ notifyReview error:",
           error
         );
       }

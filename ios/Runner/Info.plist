@@ -13,7 +13,7 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 
 	<key>CFBundleDisplayName</key>
-	<string>Locallink Flutter</string>
+	<string>LocalLink</string>
 
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -41,6 +41,15 @@
 
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+
+	<key>NSCameraUsageDescription</key>
+	<string>LocalLink uses your camera when you choose to add a profile or business photo.</string>
+
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>LocalLink uses your location to show nearby opportunities, services and community activity.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>LocalLink uses your photo library when you choose a profile or business image.</string>
 
 	<key>UIApplicationSceneManifest</key>
 	<dict>

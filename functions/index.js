@@ -18,6 +18,12 @@ const STRIPE_API_VERSION = "2023-10-16";
 const notifications =
   require("./notifications");
 
+  const reminders =
+  require("./reminders");
+
+  const recurring =
+  require("./recurring");
+
 let stripeClient = null;
 
 function getStripe() {
@@ -66,6 +72,12 @@ exports.notifyBookingCancelled =
 
 exports.notifyNewFollower =
   notifications.notifyNewFollower;
+
+  exports.sendOpportunityReminders =
+  reminders.sendOpportunityReminders;
+
+  exports.processRecurringOpportunities =
+  recurring.processRecurringOpportunities;
 
 function hoursUntil(timestampValue) {
   const millis = timestampToMillis(timestampValue);
@@ -2667,80 +2679,395 @@ exports.verifyAppleSeatPurchase = onCall(
   }
 );
    
-exports.deleteUserAccount = onCall(async (request) => {
+const ANALYTICS_SUMMARY_REF = db.collection("analytics").doc("summary");
 
-  if (!request.auth) {
-    throw new HttpsError(
-      "unauthenticated",
-      "Login required"
+function startOfDay(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function periodIds(date = new Date()) {
+  const day = startOfDay(date);
+  const year = day.getFullYear();
+  const month = String(day.getMonth() + 1).padStart(2, "0");
+  const dateOfMonth = String(day.getDate()).padStart(2, "0");
+  const firstDay = new Date(year, 0, 1);
+  const pastDays = Math.floor((day - firstDay) / 86400000);
+  const week = String(Math.ceil((pastDays + firstDay.getDay() + 1) / 7)).padStart(2, "0");
+
+  return {
+    day: `${year}-${month}-${dateOfMonth}`,
+    week: `${year}-W${week}`,
+    month: `${year}-${month}`,
+  };
+}
+
+function incrementMap(fields) {
+  return Object.fromEntries(
+    Object.entries(fields).map(([key, value]) => [
+      key,
+      admin.firestore.FieldValue.increment(value),
+    ])
+  );
+}
+
+async function incrementAnalytics(fields, date = new Date()) {
+  const ids = periodIds(date);
+  const increments = incrementMap(fields);
+  const batch = db.batch();
+
+  batch.set(
+    ANALYTICS_SUMMARY_REF,
+    {
+      ...increments,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  for (const [period, id] of Object.entries(ids)) {
+    batch.set(
+      db.collection("analytics").doc("summary").collection(period).doc(id),
+      {
+        ...increments,
+        period,
+        periodId: id,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
     );
+  }
+
+  await batch.commit();
+}
+
+async function deleteCollection(collectionRef, batchSize = 400) {
+  while (true) {
+    const snapshot = await collectionRef.limit(batchSize).get();
+
+    if (snapshot.empty) {
+      return;
+    }
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+  }
+}
+
+async function updateQueryInBatches(query, updateFactory) {
+  const snapshot = await query.get();
+
+  for (let index = 0; index < snapshot.docs.length; index += 400) {
+    const batch = db.batch();
+    const docs = snapshot.docs.slice(index, index + 400);
+
+    docs.forEach((doc) => batch.set(doc.ref, updateFactory(doc), { merge: true }));
+    await batch.commit();
+  }
+}
+
+exports.onUserDocumentCreated = onDocumentCreated("users/{uid}", async (event) => {
+  await incrementAnalytics({
+    "users.totalUsersCreated": 1,
+    "users.activeUsers": 1,
+    "users.newUsers": 1,
+  });
+});
+
+exports.onOpportunityCreatedAnalytics = onDocumentCreated(
+  "opportunities/{opportunityId}",
+  async (event) => {
+    const data = event.data?.data() || {};
+    const category = String(data.category || "Uncategorised");
+    const location = String(data.location || "Unknown");
+
+    await incrementAnalytics({
+      "engagement.opportunitiesCreated": 1,
+      [`community.topCategories.${category}`]: 1,
+      [`community.activeLocations.${location}`]: 1,
+    });
+  }
+);
+
+exports.onCommentCreatedAnalytics = onDocumentCreated(
+  "opportunities/{opportunityId}/comments/{commentId}",
+  async () => {
+    await incrementAnalytics({
+      "engagement.comments": 1,
+    });
+  }
+);
+
+exports.onReviewCreatedAnalytics = onDocumentCreated(
+  "users/{userId}/reviews/{reviewId}",
+  async () => {
+    await incrementAnalytics({
+      "engagement.reviews": 1,
+    });
+  }
+);
+
+exports.onSavedOpportunityAnalytics = onDocumentCreated(
+  "users/{userId}/savedOpportunities/{savedId}",
+  async () => {
+    await incrementAnalytics({
+      "engagement.saves": 1,
+    });
+  }
+);
+
+exports.onShareCreatedAnalytics = onDocumentCreated("shares/{shareId}", async () => {
+  await incrementAnalytics({
+    "engagement.shares": 1,
+  });
+});
+
+exports.onReportCreatedAnalytics = onDocumentCreated("reports/{reportId}", async (event) => {
+  const data = event.data?.data() || {};
+  const reportType = String(data.reportType || "unknown");
+
+  await incrementAnalytics({
+    "moderation.reportsSubmitted": 1,
+    "moderation.pendingReports": 1,
+    [`moderation.reportTypes.${reportType}`]: 1,
+  });
+});
+
+exports.onReportUpdatedAnalytics = onDocumentUpdated("reports/{reportId}", async (event) => {
+  const before = event.data?.before?.data() || {};
+  const after = event.data?.after?.data() || {};
+
+  if (before.status === "open" && after.status && after.status !== "open") {
+    await incrementAnalytics({
+      "moderation.pendingReports": -1,
+      "moderation.reportsResolved": 1,
+    });
+  }
+});
+
+exports.onDailyActiveUser = onDocumentCreated(
+  "activityDaily/{day}/users/{uid}",
+  async () => {
+    await incrementAnalytics({
+      "activity.dailyActiveUsers": 1,
+    });
+  }
+);
+
+exports.onWeeklyActiveUser = onDocumentCreated(
+  "activityWeekly/{week}/users/{uid}",
+  async () => {
+    await incrementAnalytics({
+      "activity.weeklyActiveUsers": 1,
+    });
+  }
+);
+
+exports.onMonthlyActiveUser = onDocumentCreated(
+  "activityMonthly/{month}/users/{uid}",
+  async () => {
+    await incrementAnalytics({
+      "activity.monthlyActiveUsers": 1,
+    });
+  }
+);
+
+exports.generateWeeklyFounderReport = onSchedule(
+  {
+    schedule: "0 18 * * 0",
+    timeZone: "Europe/London",
+    region: "us-central1",
+  },
+  async () => {
+    const ids = periodIds();
+    const summarySnap = await ANALYTICS_SUMMARY_REF.get();
+    const weekSnap = await ANALYTICS_SUMMARY_REF.collection("week").doc(ids.week).get();
+
+    await db.collection("founderReports").doc(ids.week).set(
+      {
+        periodId: ids.week,
+        generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        summary: summarySnap.data() || {},
+        week: weekSnap.data() || {},
+      },
+      { merge: true }
+    );
+  }
+);
+
+exports.deleteUserAccount = onCall({ region: "us-central1", timeoutSeconds: 120, memory: "1GiB" }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Login required.");
   }
 
   const uid = request.auth.uid;
-  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const deletionRef = db.collection("accountDeletionRequests").doc(uid);
+  const now = admin.firestore.FieldValue.serverTimestamp();
 
-  console.log(
-    "🔥 Deleting account for:",
-    uid
-  );
+  await db.runTransaction(async (transaction) => {
+    const deletionSnap = await transaction.get(deletionRef);
+
+    if (deletionSnap.exists && deletionSnap.data()?.status === "completed") {
+      throw new HttpsError("failed-precondition", "Account deletion has already completed.");
+    }
+
+    transaction.set(
+      deletionRef,
+      {
+        uid,
+        status: "processing",
+        startedAt: deletionSnap.exists ? deletionSnap.data()?.startedAt || now : now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  });
 
   try {
+    await userRef.set(
+      {
+        name: "Deleted User",
+        userName: "Deleted User",
+        displayName: "Deleted User",
+        photoUrl: null,
+        profilePhoto: null,
+        profilePhotoUrl: null,
+        bio: "",
+        email: admin.firestore.FieldValue.delete(),
+        phone: admin.firestore.FieldValue.delete(),
+        phoneNumber: admin.firestore.FieldValue.delete(),
+        fcmTokens: admin.firestore.FieldValue.delete(),
+        preferences: admin.firestore.FieldValue.delete(),
+        isDeleted: true,
+        deletedAt: now,
+        deletionStatus: "completed",
+        updatedAt: now,
+      },
+      { merge: true }
+    );
 
-    // =========================
-    // DELETE USER DOC
-    // =========================
+    const subcollections = [
+      "savedOpportunities",
+      "following",
+      "followers",
+      "notifications",
+      "blockedUsers",
+      "preferences",
+      "deviceTokens",
+    ];
 
-    await db
-      .collection("users")
-      .doc(uid)
-      .delete()
-      .catch(() => {});
+    for (const name of subcollections) {
+      await deleteCollection(userRef.collection(name));
+    }
 
-    // =========================
-    // ANONYMISE BOOKINGS
-    // =========================
+    await updateQueryInBatches(
+      db.collectionGroup("following").where("userId", "==", uid),
+      () => ({
+        userName: "Deleted User",
+        photoUrl: null,
+        isDeleted: true,
+      })
+    );
 
-    const bookingsSnap = await db
-      .collection("bookings")
-      .where("customerId", "==", uid)
-      .get();
+    await updateQueryInBatches(
+      db.collectionGroup("followers").where("userId", "==", uid),
+      () => ({
+        userName: "Deleted User",
+        photoUrl: null,
+        isDeleted: true,
+      })
+    );
 
-    const batch = db.batch();
+    await updateQueryInBatches(
+      db.collection("opportunities").where("createdBy", "==", uid),
+      () => ({
+        organiserName: "Deleted User",
+        organiserPhotoUrl: null,
+        creatorName: "Deleted User",
+        creatorPhotoUrl: null,
+        updatedAt: now,
+      })
+    );
 
-    bookingsSnap.forEach((doc) => {
+    await updateQueryInBatches(
+      db.collectionGroup("comments").where("userId", "==", uid),
+      () => ({
+        userName: "Deleted User",
+        photoUrl: null,
+        isDeletedUser: true,
+      })
+    );
 
-      batch.update(doc.ref, {
-        customerName: "Deleted user"
-      });
+    await updateQueryInBatches(
+      db.collectionGroup("reviews").where("reviewerId", "==", uid),
+      () => ({
+        reviewerName: "Deleted User",
+        reviewerPhotoUrl: null,
+        isDeletedUser: true,
+      })
+    );
+
+    await updateQueryInBatches(
+      db.collection("bookings").where("customerId", "==", uid),
+      () => ({
+        customerName: "Deleted User",
+        customerEmail: admin.firestore.FieldValue.delete(),
+        customerPhone: admin.firestore.FieldValue.delete(),
+      })
+    );
+
+    await updateQueryInBatches(
+      db.collection("reports").where("reporterUserId", "==", uid),
+      () => ({
+        reporterUserDeleted: true,
+      })
+    );
+
+    await updateQueryInBatches(
+      db.collection("reports").where("reportedUserId", "==", uid),
+      () => ({
+        reportedUserDeleted: true,
+      })
+    );
+
+    await incrementAnalytics({
+      "users.activeUsers": -1,
+      "users.deletedUsers": 1,
     });
 
-    await batch.commit();
+    await admin.auth().deleteUser(uid).catch((error) => {
+      if (error.code !== "auth/user-not-found") {
+        throw error;
+      }
+    });
 
-    // =========================
-    // DELETE AUTH USER
-    // =========================
-
-    await admin.auth().deleteUser(uid);
-
-    console.log(
-      "✅ Account deleted:",
-      uid
+    await deletionRef.set(
+      {
+        status: "completed",
+        completedAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
     );
 
-    return {
-      success: true
-    };
-
+    return { success: true };
   } catch (error) {
+    console.error("deleteUserAccount failed", error);
 
-    console.error(
-      "❌ deleteUserAccount failed:",
-      error
+    await deletionRef.set(
+      {
+        status: "failed",
+        error: error.message || String(error),
+        updatedAt: now,
+      },
+      { merge: true }
     );
 
-    throw new HttpsError(
-      "internal",
-      error.message
-    );
+    throw new HttpsError("internal", error.message || "Account deletion failed.");
   }
 });
+
+exports.expireOldOpportunities =
+  require("./opportunities")
+    .expireOldOpportunities;

@@ -13,19 +13,23 @@
     <!-- INTERNET -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <application
-        android:label="LocalLink"
-        android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+   <application
+    android:label="LocalLink"
+    android:name="${applicationName}"
+    android:icon="@mipmap/ic_launcher"
+    android:usesCleartextTraffic="false">
 
-        <!-- ================================================= -->
-        <!-- FIREBASE MESSAGING -->
-        <!-- ================================================= -->
+    <!-- GOOGLE MAPS -->
 
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="locallink_notifications" />
+    <meta-data
+        android:name="com.google.android.geo.API_KEY"
+        android:value="AIzaSyArlHe9g6GqxOwrHcir3o2X6fGC31z2hTo" />
+
+    <!-- FIREBASE MESSAGING -->
+
+    <meta-data
+        android:name="com.google.firebase.messaging.default_notification_channel_id"
+        android:value="locallink_notifications" />
 
         <!-- ================================================= -->
         <!-- MAIN ACTIVITY -->

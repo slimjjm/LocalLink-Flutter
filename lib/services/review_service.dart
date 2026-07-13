@@ -54,6 +54,27 @@ class ReviewService {
       'createdAt': Timestamp.now(),
 
     });
+await _firestore
+    .collection('users')
+    .doc(organiserId)
+    .collection('notifications')
+    .add({
+
+  'type': 'review',
+
+  'title': 'New review',
+
+  'body':
+      '$reviewerName left you a $rating★ review',
+
+  'createdAt':
+      Timestamp.now(),
+
+  'isRead': false,
+
+  'reviewerId':
+      reviewerId,
+});
 
     final userRef =
         _firestore

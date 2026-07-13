@@ -43,10 +43,13 @@ List<AddressResult> suggestions = [];
 
   String category = 'Social';
 
+  String repeatType = 'none';
+
   bool saving = false;
 
   DateTime? selectedDate;
 TimeOfDay? selectedTime;
+DateTime? repeatEndDate;
 double? selectedLatitude;
 double? selectedLongitude;
 
@@ -77,6 +80,29 @@ Future<void> pickTime() async {
     selectedTime = picked;
   });
 }
+
+Future<void> pickRepeatEndDate() async {
+
+  final picked = await showDatePicker(
+    context: context,
+    initialDate:
+        repeatEndDate ??
+        selectedDate ??
+        DateTime.now(),
+    firstDate:
+        selectedDate ??
+        DateTime.now(),
+    lastDate:
+        DateTime(2035),
+  );
+
+  if (picked == null) return;
+
+  setState(() {
+    repeatEndDate = picked;
+  });
+}
+
 Future<void> getCurrentLocation() async {
 
   try {
@@ -215,9 +241,12 @@ final longitude =
             await ref.getDownloadURL();
       }
 
-    await FirebaseFirestore.instance
-    .collection('opportunities')
-    .add({
+   final opportunityRef =
+    FirebaseFirestore.instance
+        .collection('opportunities')
+        .doc();
+
+await opportunityRef.set({
 
   'title':
       titleController.text.trim(),
@@ -261,12 +290,48 @@ final longitude =
         : selectedTime!.format(
             context,
           ),
-          
 
-  'isActive': true,
+'isActive': true,
 
-  'createdAt':
-      Timestamp.now(),
+// =========================
+// Recurring Opportunity
+// =========================
+
+'isRecurring': repeatType != 'none',
+
+'repeatType': repeatType,
+
+'repeatEndDate':
+    repeatEndDate == null
+        ? null
+        : Timestamp.fromDate(
+            repeatEndDate!,
+          ),
+
+'seriesId': opportunityRef.id,
+
+'occurrenceNumber': 1,
+
+'previousOccurrenceId': null,
+
+'nextOccurrenceId': null,
+
+'seriesStatus': 'active',
+
+'resumeAfter': null,
+
+'skipNext': false,
+
+'cancelledOccurrence': false,
+
+// =========================
+
+'reminder24hSent': false,
+
+'reminder1hSent': false,
+
+'createdAt':
+    Timestamp.now(),
 });
 
       if (!mounted) return;
@@ -511,10 +576,119 @@ DropdownMenuItem(
               },
             ),
 
-            const SizedBox(height: 20),
+           const SizedBox(height: 20),
 
-            GestureDetector(
-              onTap: pickImage,
+const Align(
+  alignment: Alignment.centerLeft,
+  child: Text(
+    'Repeat',
+    style: TextStyle(
+      fontWeight: FontWeight.bold,
+    ),
+  ),
+),
+
+const SizedBox(height: 10),
+
+Wrap(
+  spacing: 8,
+  runSpacing: 8,
+  children: [
+
+    ChoiceChip(
+      label: const Text('None'),
+      selected: repeatType == 'none',
+      onSelected: (_) {
+        setState(() {
+          repeatType = 'none';
+        });
+      },
+    ),
+
+    ChoiceChip(
+      label: const Text('Daily'),
+      selected: repeatType == 'daily',
+      onSelected: (_) {
+        setState(() {
+          repeatType = 'daily';
+        });
+      },
+    ),
+
+    ChoiceChip(
+      label: const Text('Weekly'),
+      selected: repeatType == 'weekly',
+      onSelected: (_) {
+        setState(() {
+          repeatType = 'weekly';
+        });
+      },
+    ),
+
+    ChoiceChip(
+      label: const Text('Fortnightly'),
+      selected: repeatType == 'fortnightly',
+      onSelected: (_) {
+        setState(() {
+          repeatType = 'fortnightly';
+        });
+      },
+    ),
+
+    ChoiceChip(
+      label: const Text('Monthly'),
+      selected: repeatType == 'monthly',
+      onSelected: (_) {
+        setState(() {
+          repeatType = 'monthly';
+        });
+      },
+    ),
+
+  ],
+),
+
+         if (repeatType != 'none') ...[
+
+  const SizedBox(height: 20),
+
+  const Align(
+    alignment: Alignment.centerLeft,
+    child: Text(
+      'Repeat Until (Optional)',
+      style: TextStyle(
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  ),
+
+  const SizedBox(height: 10),
+
+  GestureDetector(
+    onTap: pickRepeatEndDate,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Colors.grey.shade400,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        repeatEndDate == null
+            ? 'Select End Date'
+            : '${repeatEndDate!.day}/${repeatEndDate!.month}/${repeatEndDate!.year}',
+      ),
+    ),
+  ),
+
+  const SizedBox(height: 20),
+
+],
+
+GestureDetector(
+  onTap: pickImage,
               child: Container(
                 height: 180,
                 width: double.infinity,

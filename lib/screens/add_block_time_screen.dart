@@ -318,7 +318,7 @@ await FirebaseFirestore.instance
 
       } catch (e) {
 
-        print(
+        debugPrint(
           '⚠️ Regen failed: $e',
         );
       }

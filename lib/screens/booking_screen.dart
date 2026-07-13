@@ -50,7 +50,7 @@ String selectedPaymentMethod = '';
  @override
 void initState() {
   super.initState();
-  print("🟢 INIT STATE RUNNING"); // 👈 add this line
+  debugPrint("🟢 INIT STATE RUNNING"); // 👈 add this line
   loadSlots();
 }
 
@@ -61,7 +61,7 @@ Future<void> loadSlots() async {
 
   try {
 
-    print("🚀 LOAD SLOTS START");
+    debugPrint("🚀 LOAD SLOTS START");
 
     setState(() => isLoadingSlots = true);
 
@@ -90,7 +90,7 @@ Future<void> loadSlots() async {
             .map((doc) => doc.id)
             .toList();
 
-    print(
+    debugPrint(
       "👥 ALLOWED STAFF: $allowedStaffIds",
     );
 
@@ -194,11 +194,11 @@ slots.sort((a, b) {
   return aTime.compareTo(bTime);
 });
 
-print(
+debugPrint(
   "📦 TOTAL SLOTS FOUND: ${snapshot.docs.length}",
 );
 
-print(
+debugPrint(
   "✅ FILTERED SLOTS: ${slots.length}",
 );
 
@@ -211,7 +211,7 @@ print(
 
   } catch (e) {
 
-    print(
+    debugPrint(
       "🔥 LOAD SLOTS ERROR: $e",
     );
 
@@ -325,7 +325,7 @@ if (!hasEnoughConsecutiveSlots(slot)) {
   // =====================================================
 
 Future<void> goToNextAvailableDate() async {
-  print("🔎 FINDING NEXT AVAILABLE");
+  debugPrint("🔎 FINDING NEXT AVAILABLE");
 
  final snapshot = await FirebaseFirestore.instance
     .collectionGroup('availableSlots')
@@ -353,13 +353,13 @@ Future<void> goToNextAvailableDate() async {
     .limit(1)
     .get();
   if (snapshot.docs.isEmpty) {
-    print("❌ No future slots");
+    debugPrint("❌ No future slots");
     return;
   }
 
   final next = (snapshot.docs.first['startTime'] as Timestamp).toDate();
 
-  print("✅ NEXT SLOT: $next");
+  debugPrint("✅ NEXT SLOT: $next");
 
   setState(() {
     selectedDate = DateTime(

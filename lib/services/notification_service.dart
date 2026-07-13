@@ -10,49 +10,42 @@ import 'package:flutter/foundation.dart';
 
 import '../screens/notifications_screen.dart';
 
-final GlobalKey<NavigatorState> navigatorKey =
-    GlobalKey<NavigatorState>();
+import '../screens/opportunity_detail_screen.dart';
+import '../screens/profile_screen.dart';
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 @pragma('vm:entry-point')
-Future<void> firebaseMessagingBackgroundHandler(
-  RemoteMessage message,
-) async {
-
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-
-  print(
-    '🔔 Background message: '
-    '${message.messageId}',
-  );
 }
 
 class NotificationService {
   NotificationService._();
 
-  static final NotificationService shared =
-      NotificationService._();
+  static final NotificationService shared = NotificationService._();
 
-  final FirebaseMessaging _messaging =
-      FirebaseMessaging.instance;
+  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
-    'locallink_notifications',
-    'LocalLink Notifications',
-    description: 'Booking and message notifications',
-    importance: Importance.high,
-  );
+        'locallink_notifications',
+        'LocalLink Notifications',
+        description: 'Booking and message notifications',
+        importance: Importance.high,
+      );
 
   Future<void> initialise() async {
     await _requestPermission();
     await _setupAndroidChannel();
     await _setupLocalNotifications();
-  if (!Platform.isIOS || !kDebugMode) {
-  await saveFcmTokenForCurrentUser();
-}
+
+    if (!Platform.isIOS || !kDebugMode) {
+      await saveFcmTokenForCurrentUser();
+    }
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
@@ -60,8 +53,7 @@ class NotificationService {
       _routeFromPayload(message.data);
     });
 
-    final initialMessage =
-        await FirebaseMessaging.instance.getInitialMessage();
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
 
     if (initialMessage != null) {
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -74,36 +66,25 @@ class NotificationService {
     });
   }
 
- Future<void> _requestPermission() async {
-
-  final settings =
-      await _messaging.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
-
-  print(
-    '🔔 Permission status: '
-    '${settings.authorizationStatus}',
-  );
-}
+  Future<void> _requestPermission() async {
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
+  }
 
   Future<void> _setupAndroidChannel() async {
     if (!Platform.isAndroid) return;
 
-    final androidPlugin =
-        _localNotifications.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
 
-    await androidPlugin?.createNotificationChannel(
-      _androidChannel,
-    );
+    await androidPlugin?.createNotificationChannel(_androidChannel);
   }
 
   Future<void> _setupLocalNotifications() async {
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
 
     const iosSettings = DarwinInitializationSettings();
 
@@ -125,17 +106,13 @@ class NotificationService {
     );
   }
 
-  Future<void> _handleForegroundMessage(
-    RemoteMessage message,
-  ) async {
+  Future<void> _handleForegroundMessage(RemoteMessage message) async {
     final notification = message.notification;
     final data = message.data;
 
-    final title =
-        notification?.title ?? data['title'] ?? 'LocalLink';
+    final title = notification?.title ?? data['title'] ?? 'LocalLink';
 
-    final body =
-        notification?.body ?? data['body'] ?? 'You have a new update';
+    final body = notification?.body ?? data['body'] ?? 'You have a new update';
 
     await _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -155,29 +132,22 @@ class NotificationService {
     );
   }
 
- Future<void> saveFcmTokenForCurrentUser() async {
-  try {
-    final token = await _messaging.getToken();
+  Future<void> saveFcmTokenForCurrentUser() async {
+    try {
+      final token = await _messaging.getToken();
 
-    if (token == null) return;
+      if (token == null) return;
 
-    await _saveToken(token);
-  } catch (e) {
-    print(
-      'FCM token unavailable: $e',
-    );
+      await _saveToken(token);
+    } catch (_) {}
   }
-}
 
   Future<void> _saveToken(String token) async {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null || user.isAnonymous) return;
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
       'fcmTokens': FieldValue.arrayUnion([token]),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -187,33 +157,33 @@ class NotificationService {
     final type = data['type'];
 
     switch (type) {
+      case 'new_message':
+        _openChat(data);
+        break;
 
-  case 'new_message':
-    _openChat(data);
-    break;
+      case 'new_booking':
+      case 'booking_confirmed':
+      case 'booking_cancelled':
+      case 'payment_failed':
+        _openBooking(data);
+        break;
 
-  case 'new_booking':
-  case 'booking_confirmed':
-  case 'booking_cancelled':
-  case 'payment_failed':
-    _openBooking(data);
-    break;
+      case 'follow':
+      case 'review':
+        _openProfile(data);
+        break;
 
-  case 'follow':
-    navigatorKey.currentState?.push(
-      MaterialPageRoute(
-        builder: (_) =>
-            const NotificationsScreen(),
-      ),
-    );
-    break;
+      case 'opportunity_join':
+      case 'opportunity_comment':
+      case 'opportunity_reminder':
+        _openOpportunity(data);
+        break;
 
-  default:
-    navigatorKey.currentState?.pushNamed(
-      '/home',
-    );
-}
+      default:
+        navigatorKey.currentState?.pushNamed('/home');
+    }
   }
+
   void _openChat(Map<String, dynamic> data) {
     final businessId = data['businessId'];
     final customerId = data['customerId'];
@@ -225,10 +195,7 @@ class NotificationService {
 
     navigatorKey.currentState?.pushNamed(
       '/chat',
-      arguments: {
-        'businessId': businessId,
-        'customerId': customerId,
-      },
+      arguments: {'businessId': businessId, 'customerId': customerId},
     );
   }
 
@@ -243,10 +210,65 @@ class NotificationService {
 
     navigatorKey.currentState?.pushNamed(
       '/booking',
-      arguments: {
-        'bookingId': bookingId,
-        'businessId': businessId,
-      },
+      arguments: {'bookingId': bookingId, 'businessId': businessId},
+    );
+  }
+
+  Future<void> _openOpportunity(Map<String, dynamic> data) async {
+    final opportunityId = data['opportunityId'];
+
+    if (opportunityId == null) {
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+      );
+      return;
+    }
+
+    final doc = await FirebaseFirestore.instance
+        .collection('opportunities')
+        .doc(opportunityId)
+        .get();
+
+    if (!doc.exists) {
+      return;
+    }
+
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => OpportunityDetailScreen(
+          opportunityId: opportunityId,
+          opportunity: doc.data()!,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openProfile(Map<String, dynamic> data) async {
+    final userId = data['followerId'] ?? data['reviewerId'];
+
+    if (userId == null) {
+      return;
+    }
+
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
+
+    if (!doc.exists) {
+      return;
+    }
+
+    final userData = doc.data()!;
+
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(
+          userId: userId,
+          userName: userData['userName'] ?? 'User',
+          photoUrl: userData['photoUrl'],
+        ),
+      ),
     );
   }
 }

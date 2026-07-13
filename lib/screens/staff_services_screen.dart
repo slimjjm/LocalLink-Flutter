@@ -134,12 +134,12 @@ Future<void> toggleService(
   'staffId': widget.staffId,
 });
 
-    print("✅ SAVED SERVICES");
-    print("📦 SERVICE IDS: $selectedServiceIds");
+    debugPrint("✅ SAVED SERVICES");
+    debugPrint("📦 SERVICE IDS: $selectedServiceIds");
 
   } catch (e) {
 
-    print("❌ SAVE FAILED: $e");
+    debugPrint("❌ SAVE FAILED: $e");
 
     ScaffoldMessenger.of(context)
         .showSnackBar(

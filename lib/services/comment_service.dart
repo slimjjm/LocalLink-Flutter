@@ -24,7 +24,17 @@ class CommentService {
     required String userName,
     required String text,
   }) async {
+final opportunityDoc =
+    await _firestore
+        .collection('opportunities')
+        .doc(opportunityId)
+        .get();
 
+final opportunity =
+    opportunityDoc.data();
+
+final organiserId =
+    opportunity?['createdBy'];
     await _firestore
         .collection('opportunities')
         .doc(opportunityId)
@@ -47,6 +57,37 @@ class CommentService {
           FieldValue.increment(1),
 
     });
+    if (organiserId != null &&
+    organiserId != userId) {
+
+  await _firestore
+      .collection('users')
+      .doc(organiserId)
+      .collection('notifications')
+      .add({
+
+    'type':
+        'opportunity_comment',
+
+    'title':
+        'New comment',
+
+    'body':
+        '$userName commented on your opportunity',
+
+    'opportunityId':
+        opportunityId,
+
+    'userId':
+        userId,
+
+    'isRead':
+        false,
+
+    'createdAt':
+        Timestamp.now(),
+  });
+}
   }
 Future<void> updateComment({
   required String opportunityId,

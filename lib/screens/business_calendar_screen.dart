@@ -127,7 +127,7 @@ Future<void> loadBookings() async {
 
   } catch (e) {
 
-    print(
+    debugPrint(
       "🔥 CALENDAR LOAD ERROR: $e",
     );
 

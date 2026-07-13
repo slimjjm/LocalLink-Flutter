@@ -4,12 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class CustomerUnreadViewModel {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  final FirebaseFirestore _db =
-      FirebaseFirestore.instance;
-
-  final FirebaseAuth _auth =
-      FirebaseAuth.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   StreamSubscription? _subscription;
 
@@ -18,41 +15,30 @@ class CustomerUnreadViewModel {
   Function()? onUpdated;
 
   void startListening() {
-
-    final uid =
-        _auth.currentUser?.uid;
+    final uid = _auth.currentUser?.uid;
 
     if (uid == null) return;
 
     _subscription = _db
         .collection('businessChats')
-        .where(
-          'customerId',
-          isEqualTo: uid,
-        )
+        .where('customerId', isEqualTo: uid)
         .snapshots()
         .listen((snapshot) {
+          int total = 0;
 
-      int total = 0;
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
 
-      for (final doc in snapshot.docs) {
+            total += (data['customerUnreadCount'] ?? 0) as int;
+          }
 
-        final data = doc.data();
+          unreadCount = total;
 
-        total +=
-            (data['customerUnreadCount'] ?? 0)
-                as int;
-      }
-
-      unreadCount = total;
-      print('CUSTOMER UNREAD: $unreadCount');
-
-      onUpdated?.call();
-    });
+          onUpdated?.call();
+        });
   }
 
   void dispose() {
-
     _subscription?.cancel();
   }
 }
