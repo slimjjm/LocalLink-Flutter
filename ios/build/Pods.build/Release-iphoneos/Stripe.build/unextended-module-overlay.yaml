@@ -1,0 +1,23 @@
+{
+  "version": 0,
+  "use-external-names": false,
+  "case-sensitive": false,
+  "roots": [{
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/Stripe/Stripe.framework/Modules",
+    "contents": [{
+      "type": "file",
+      "name": "module.modulemap",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/unextended-module.modulemap",
+    }]
+    },
+    {
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/Stripe/Stripe.framework/Headers",
+    "contents": [{
+      "type": "file",
+      "name": "Stripe-Swift.h",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/unextended-interface-header.h",
+    }]
+  }]
+}

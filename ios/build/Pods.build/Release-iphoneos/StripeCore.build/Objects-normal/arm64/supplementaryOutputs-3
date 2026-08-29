@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeCore/StripeCore/StripeCore/Source/Analytics/Analytic.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeCore.build/Objects-normal/arm64/StripeCore.swiftsourceinfo"
+  }
+}

@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
-class BusinessBookingDetailScreen extends StatefulWidget {
+import '../widgets/booking_message_button.dart';
+import '../widgets/booking_status_chip.dart';
 
+class BusinessBookingDetailScreen extends StatefulWidget {
   final String bookingId;
 
-  const BusinessBookingDetailScreen({
-    super.key,
-    required this.bookingId,
-  });
+  const BusinessBookingDetailScreen({super.key, required this.bookingId});
 
   @override
   State<BusinessBookingDetailScreen> createState() =>
@@ -18,7 +17,6 @@ class BusinessBookingDetailScreen extends StatefulWidget {
 
 class _BusinessBookingDetailScreenState
     extends State<BusinessBookingDetailScreen> {
-
   bool isUpdating = false;
 
   // =====================================================
@@ -26,40 +24,11 @@ class _BusinessBookingDetailScreenState
   // =====================================================
 
   String formatDate(Timestamp timestamp) {
-
     final date = timestamp.toDate().toLocal();
 
-    return
-        '${date.day}/${date.month}/${date.year} '
+    return '${date.day}/${date.month}/${date.year} '
         '${date.hour.toString().padLeft(2, '0')}:'
         '${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  // =====================================================
-  // STATUS COLOR
-  // =====================================================
-
-  Color statusColor(String status) {
-
-    switch (status) {
-
-      case 'confirmed':
-        return Colors.green;
-
-      case 'pending_payment':
-        return Colors.orange;
-
-      case 'completed':
-        return Colors.blue;
-
-      case 'cancelled_by_customer':
-      case 'cancelled_by_business':
-      case 'payment_failed':
-        return Colors.red;
-
-      default:
-        return Colors.grey;
-    }
   }
 
   // =====================================================
@@ -67,45 +36,35 @@ class _BusinessBookingDetailScreenState
   // =====================================================
 
   Future<void> markCompleted() async {
-
     setState(() {
       isUpdating = true;
     });
 
     try {
-
       await FirebaseFirestore.instance
           .collection('bookings')
           .doc(widget.bookingId)
           .update({
-        'status': 'completed',
-      });
+            'status': 'completed',
+            'completedAt': FieldValue.serverTimestamp(),
+          });
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Booking marked completed')));
+    } catch (_) {
+      if (!mounted) return;
 
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text('Booking marked completed'),
-        ),
-      );
-
-    } catch (e) {
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-
-        SnackBar(
-          content:
-              Text('Error: $e'),
+          content: Text('We could not update this booking. Please try again.'),
         ),
       );
     }
 
     if (mounted) {
-
       setState(() {
         isUpdating = false;
       });
@@ -117,28 +76,17 @@ class _BusinessBookingDetailScreenState
   // =====================================================
 
   Future<void> cancelBooking() async {
-
-    final confirm =
-        await showDialog<bool>(
-
+    final confirm = await showDialog<bool>(
       context: context,
 
       builder: (_) {
-
         return AlertDialog(
+          title: const Text('Cancel booking?'),
 
-          title:
-              const Text('Cancel booking?'),
-
-          content:
-              const Text(
-                'This action cannot be undone.',
-              ),
+          content: const Text('This action cannot be undone.'),
 
           actions: [
-
             TextButton(
-
               onPressed: () {
                 Navigator.pop(context, false);
               },
@@ -147,15 +95,11 @@ class _BusinessBookingDetailScreenState
             ),
 
             ElevatedButton(
-
               onPressed: () {
                 Navigator.pop(context, true);
               },
 
-              style:
-                  ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
 
               child: const Text('Yes'),
             ),
@@ -171,42 +115,121 @@ class _BusinessBookingDetailScreenState
     });
 
     try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'cancelBooking',
+      );
 
-      final callable =
-          FirebaseFunctions.instance
-              .httpsCallable(
-                'cancelBooking',
-              );
-
-      await callable.call({
-        'bookingId': widget.bookingId,
-      });
+      await callable.call({'bookingId': widget.bookingId});
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Booking cancelled')));
+    } catch (_) {
+      if (!mounted) return;
 
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text('Booking cancelled'),
-        ),
-      );
-
-    } catch (e) {
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-
-        SnackBar(
-          content:
-              Text('Error: $e'),
+          content: Text('We could not cancel this booking. Please try again.'),
         ),
       );
     }
 
     if (mounted) {
+      setState(() {
+        isUpdating = false;
+      });
+    }
+  }
 
+  Future<void> acceptShortNoticeBooking() async {
+    setState(() {
+      isUpdating = true;
+    });
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'acceptShortNoticeBooking',
+      );
+
+      await callable.call({'bookingId': widget.bookingId});
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Booking accepted')));
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('We could not accept this booking. Please try again.'),
+        ),
+      );
+    }
+
+    if (mounted) {
+      setState(() {
+        isUpdating = false;
+      });
+    }
+  }
+
+  Future<void> declineShortNoticeBooking() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text('Decline booking?'),
+          content: const Text(
+            'The customer will be notified and any card payment will be refunded.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Decline'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      isUpdating = true;
+    });
+
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'declineShortNoticeBooking',
+      );
+
+      await callable.call({'bookingId': widget.bookingId});
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Booking declined')));
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('We could not decline this booking. Please try again.'),
+        ),
+      );
+    }
+
+    if (mounted) {
       setState(() {
         isUpdating = false;
       });
@@ -217,41 +240,24 @@ class _BusinessBookingDetailScreenState
   // INFO ROW
   // =====================================================
 
-  Widget infoRow(
-    String label,
-    String value,
-  ) {
-
+  Widget infoRow(String label, String value) {
     return Padding(
-
-      padding:
-          const EdgeInsets.only(
-        bottom: 14,
-      ),
+      padding: const EdgeInsets.only(bottom: 14),
 
       child: Row(
-
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
 
         children: [
-
           SizedBox(
-
             width: 110,
 
             child: Text(
               label,
-              style: const TextStyle(
-                fontWeight:
-                    FontWeight.bold,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
 
-          Expanded(
-            child: Text(value),
-          ),
+          Expanded(child: Text(value)),
         ],
       ),
     );
@@ -263,198 +269,113 @@ class _BusinessBookingDetailScreenState
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
+      appBar: AppBar(title: const Text('Booking Details')),
 
-      appBar: AppBar(
-        title:
-            const Text('Booking Details'),
-      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('bookings')
+            .doc(widget.bookingId)
+            .snapshots(),
 
-      body:
-          StreamBuilder<DocumentSnapshot>(
-
-        stream:
-            FirebaseFirestore.instance
-                .collection('bookings')
-                .doc(widget.bookingId)
-                .snapshots(),
-
-        builder:
-            (context, snapshot) {
-
+        builder: (context, snapshot) {
           if (!snapshot.hasData) {
-
-            return const Center(
-              child:
-                  CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (!snapshot.data!.exists) {
-
-            return const Center(
-              child:
-                  Text('Booking not found'),
-            );
+            return const Center(child: Text('Booking not found'));
           }
 
-          final data =
-              snapshot.data!.data()
-                  as Map<String, dynamic>;
+          final data = snapshot.data!.data() as Map<String, dynamic>;
 
-          final serviceName =
-              data['serviceName'] ??
-                  'Service';
+          final serviceName = data['serviceName'] ?? 'Service';
 
-          final businessName =
-              data['businessName'] ??
-                  'Business';
+          final businessName = data['businessName'] ?? 'Business';
 
-          final customerName =
-              data['customerName'] ??
-                  'Customer';
+          final customerName = data['customerName'] ?? 'Customer';
 
-          final customerAddress =
-              data['customerAddress'] ??
-                  '';
+          final customerAddress = data['customerAddress'] ?? '';
 
-          final staffName =
-              data['staffName'] ??
-                  'Staff';
+          final staffName = data['staffName'] ?? 'Team member';
 
-          final paymentMethod =
-              data['paymentMethod'] ??
-                  'Unknown';
+          final paymentMethod = data['paymentMethod'] ?? 'Unknown';
 
-          final status =
-              data['status'] ??
-                  'unknown';
+          final status = data['status'] ?? 'unknown';
 
-          final duration =
-              data['durationMinutes'];
+          final duration = data['durationMinutes'];
 
           final startTime =
-              data['startTime']
-                  as Timestamp?;
+              (data['startDate'] ?? data['startTime']) as Timestamp?;
 
           final canManage =
+              status == 'confirmed' || status == 'pending_payment';
+
+          final canConfirmShortNotice =
+              status == 'pending_business_confirmation';
+
+          final canMessage =
               status == 'confirmed' ||
-              status == 'pending_payment';
+              status == 'pending_business_confirmation' ||
+              status == 'completed';
+          final conversationId =
+              (data['conversationId'] as String?) ?? widget.bookingId;
 
           return SingleChildScrollView(
-
-            padding:
-                const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
 
             child: Column(
-
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
 
               children: [
-
                 // =====================================
                 // HEADER
                 // =====================================
-
                 Text(
                   serviceName,
                   style: const TextStyle(
                     fontSize: 28,
-                    fontWeight:
-                        FontWeight.bold,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
 
                 const SizedBox(height: 8),
 
-                Text(
-                  businessName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                  ),
-                ),
+                Text(businessName, style: const TextStyle(fontSize: 18)),
 
                 const SizedBox(height: 16),
 
-                Container(
-
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-
-                  decoration: BoxDecoration(
-                    color:
-                        statusColor(status),
-                    borderRadius:
-                        BorderRadius.circular(20),
-                  ),
-
-                  child: Text(
-
-                    status.replaceAll(
-                      '_',
-                      ' ',
-                    ),
-
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight:
-                          FontWeight.bold,
-                    ),
-                  ),
-                ),
+                BookingStatusChip(status: status),
 
                 const SizedBox(height: 30),
 
                 // =====================================
                 // BOOKING INFO
                 // =====================================
-
                 const Text(
                   'Booking Info',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 16),
 
-                infoRow(
-                  'Customer',
-                  customerName,
-                ),
+                infoRow('Customer', customerName),
 
-                infoRow(
-                  'Staff',
-                  staffName,
-                ),
+                infoRow('With', staffName),
 
                 infoRow(
                   'Date',
-                  startTime == null
-                      ? 'Unknown'
-                      : formatDate(startTime),
+                  startTime == null ? 'Unknown' : formatDate(startTime),
                 ),
 
                 infoRow(
                   'Duration',
-                  duration == null
-                      ? 'Unknown'
-                      : '$duration mins',
+                  duration == null ? 'Unknown' : '$duration mins',
                 ),
 
                 infoRow(
                   'Payment',
-                  paymentMethod
-                              .toString()
-                              .toLowerCase() ==
-                          'stripe'
+                  paymentMethod.toString().toLowerCase() == 'stripe'
                       ? 'Card'
                       : 'Cash',
                 ),
@@ -464,130 +385,135 @@ class _BusinessBookingDetailScreenState
                 // =====================================
                 // CUSTOMER DETAILS
                 // =====================================
-
                 const Text(
                   'Customer Details',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight:
-                        FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
                 const SizedBox(height: 16),
 
-                infoRow(
-                  'Name',
-                  customerName,
-                ),
+                infoRow('Name', customerName),
 
-                infoRow(
-                  'Address',
-                  customerAddress,
-                ),
+                infoRow('Address', customerAddress),
 
                 const SizedBox(height: 40),
 
                 // =====================================
                 // ACTIONS
                 // =====================================
+                if (canMessage) ...[
+                  BookingMessageButton(
+                    bookingId: conversationId,
+                    viewerType: 'business',
+                    label: 'Message Customer',
+                    enabled: canMessage,
+                    onPressed: () {
+                      Navigator.pushNamed(
+                        context,
+                        '/booking-conversation',
+                        arguments: {
+                          'bookingId': widget.bookingId,
+                          'conversationId': conversationId,
+                          'viewerType': 'business',
+                        },
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
-                if (canManage) ...
-
-                [
-
+                if (canConfirmShortNotice) ...[
+                  const Text(
+                    'This short-notice booking needs your confirmation before it becomes final.',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
                   SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: isUpdating ? null : acceptShortNoticeBooking,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                      ),
+                      child: isUpdating
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Accept Booking'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: isUpdating ? null : declineShortNoticeBooking,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
+                      child: const Text('Decline Booking'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
+                if (canManage) ...[
+                  SizedBox(
                     width: double.infinity,
 
                     child: ElevatedButton(
+                      onPressed: isUpdating ? null : markCompleted,
 
-                      onPressed:
-                          isUpdating
-                              ? null
-                              : markCompleted,
-
-                      style:
-                          ElevatedButton.styleFrom(
-                        backgroundColor:
-                            Colors.green,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
                       ),
 
-                      child:
-                          isUpdating
-
-                              ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
-                                  child:
-                                      CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color:
-                                        Colors.white,
-                                  ),
-                                )
-
-                              : const Text(
-                                  'Mark Completed',
-                                ),
+                      child: isUpdating
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Mark Completed'),
                     ),
                   ),
 
                   const SizedBox(height: 12),
 
                   SizedBox(
-
                     width: double.infinity,
 
                     child: ElevatedButton(
+                      onPressed: isUpdating ? null : cancelBooking,
 
-                      onPressed:
-                          isUpdating
-                              ? null
-                              : cancelBooking,
-
-                      style:
-                          ElevatedButton.styleFrom(
-                        backgroundColor:
-                            Colors.red,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
                       ),
 
-                      child:
-                          const Text(
-                            'Cancel Booking',
-                          ),
+                      child: const Text('Cancel Booking'),
                     ),
                   ),
                 ],
 
                 const SizedBox(height: 12),
 
-                SizedBox(
+                if (!canMessage)
+                  SizedBox(
+                    width: double.infinity,
 
-                  width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: null,
 
-                  child: OutlinedButton(
-
-                    onPressed: () {
-
-                      ScaffoldMessenger.of(
-                        context,
-                      ).showSnackBar(
-
-                        const SnackBar(
-                          content: Text(
-                            'Customer messaging coming soon',
-                          ),
-                        ),
-                      );
-                    },
-
-                    child:
-                        const Text(
-                          'Contact Customer',
-                        ),
+                      child: const Text('Message Customer'),
+                    ),
                   ),
-                ),
               ],
             ),
           );

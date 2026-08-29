@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import '../screens/opportunity_detail_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
+import '../utils/distance_helper.dart';
 import 'local_link_surface_card.dart';
 
 class FeaturedCard extends StatelessWidget {
@@ -102,132 +103,127 @@ class FeaturedCard extends StatelessWidget {
                 );
               },
               padding: const EdgeInsets.all(0),
-              radius: 30,
+              radius: 18,
               elevated: true,
-              child: Column(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _FeaturedImage(
-                    photoUrl: photoUrl,
-                    category: data['category']?.toString() ?? '',
+                  SizedBox(
+                    width: 112,
+                    height: 176,
+                    child: _FeaturedImage(
+                      photoUrl: photoUrl,
+                      category: data['category']?.toString() ?? '',
+                    ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 11,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(
-                                  alpha: 0.11,
-                                ),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: const Text(
-                                'FEATURED NEARBY',
-                                style: TextStyle(
-                                  color: AppColors.primary,
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                            const Spacer(),
-                            if (milesAway != null)
-                              _FeaturedMeta(
-                                icon: Icons.near_me_outlined,
-                                label: '${milesAway.toStringAsFixed(1)} mi',
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          data['title'] ?? '',
-                          style: const TextStyle(
-                            color: AppColors.charcoal,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w900,
-                            height: 1.04,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 9,
-                          runSpacing: 8,
-                          children: [
-                            if (dateLabel.isNotEmpty)
-                              _FeaturedMeta(
-                                icon: Icons.calendar_today_outlined,
-                                label: dateLabel,
-                              ),
-                            _FeaturedMeta(
-                              icon: Icons.people_alt_outlined,
-                              label:
-                                  '$attendeeCount ${attendeeCount == 1 ? 'going' : 'going'}',
-                            ),
-                            if ((data['category']?.toString() ?? '').isNotEmpty)
-                              _FeaturedMeta(
-                                icon: Icons.local_activity_outlined,
-                                label: data['category'].toString(),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 15),
-                        Text(
-                          data['description'] ?? '',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 15,
-                            height: 1.42,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          decoration: BoxDecoration(
-                            color: AppColors.charcoal,
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Row(
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
-                              _AvatarStack(count: attendeeCount),
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text(
-                                  'View details and join',
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 11,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary.withValues(
+                                    alpha: 0.11,
+                                  ),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: const Text(
+                                  'FEATURED',
                                   style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
+                                    color: AppColors.primary,
+                                    fontSize: 10.5,
                                     fontWeight: FontWeight.w900,
                                   ),
                                 ),
                               ),
-                              Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(12),
+                              const Spacer(),
+                              if (milesAway != null)
+                                _FeaturedMeta(
+                                  icon: Icons.near_me_outlined,
+                                  label: '${milesAway.toStringAsFixed(1)} mi',
                                 ),
-                                child: const Icon(
-                                  Icons.arrow_forward_rounded,
-                                  color: Colors.white,
-                                  size: 19,
-                                ),
-                              ),
                             ],
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 10),
+                          Text(
+                            data['title'] ?? '',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.charcoal,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              height: 1.08,
+                            ),
+                          ),
+                          const SizedBox(height: 9),
+                          Wrap(
+                            spacing: 7,
+                            runSpacing: 6,
+                            children: [
+                              if (dateLabel.isNotEmpty)
+                                _FeaturedMeta(
+                                  icon: Icons.calendar_today_outlined,
+                                  label: dateLabel,
+                                ),
+                              _FeaturedMeta(
+                                icon: Icons.people_alt_outlined,
+                                label:
+                                    '$attendeeCount ${attendeeCount == 1 ? 'going' : 'going'}',
+                              ),
+                              if ((data['category']?.toString() ?? '')
+                                  .isNotEmpty)
+                                _FeaturedMeta(
+                                  icon: Icons.local_activity_outlined,
+                                  label: data['category'].toString(),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.charcoal,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text(
+                                    'View details',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  width: 28,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: Colors.white,
+                                    size: 17,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -267,13 +263,12 @@ class FeaturedCard extends StatelessWidget {
       return null;
     }
 
-    return Geolocator.distanceBetween(
-          userPosition.latitude,
-          userPosition.longitude,
-          lat,
-          lng,
-        ) /
-        1609.34;
+    return calculateDistanceMiles(
+      startLat: userPosition.latitude,
+      startLng: userPosition.longitude,
+      endLat: lat,
+      endLng: lng,
+    );
   }
 }
 
@@ -286,14 +281,17 @@ class _FeaturedImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (photoUrl.isNotEmpty) {
-      return AspectRatio(
-        aspectRatio: 1.62,
+      return SizedBox.expand(
         child: Stack(
           fit: StackFit.expand,
           children: [
             Image.network(
               photoUrl,
               fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return _FeaturedFallback(category: category);
+              },
               errorBuilder: (context, error, stackTrace) {
                 return _FeaturedFallback(category: category);
               },
@@ -323,8 +321,7 @@ class _FeaturedFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1.62,
+    return SizedBox.expand(
       child: Container(
         decoration: const BoxDecoration(color: AppColors.surface),
         child: Stack(
@@ -401,48 +398,6 @@ class _FeaturedMeta extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AvatarStack extends StatelessWidget {
-  final int count;
-
-  const _AvatarStack({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleCount = count.clamp(1, 3);
-
-    return SizedBox(
-      width: 26.0 + (visibleCount * 18),
-      height: 32,
-      child: Stack(
-        children: [
-          for (var index = 0; index < visibleCount; index += 1)
-            Positioned(
-              left: index * 18,
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: index.isEven
-                      ? Colors.white
-                      : Colors.white.withValues(alpha: 0.18),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.charcoal, width: 1.4),
-                ),
-                child: Icon(
-                  index.isEven
-                      ? Icons.person_outline_rounded
-                      : Icons.favorite_border_rounded,
-                  size: 15,
-                  color: index.isEven ? AppColors.primary : Colors.white,
-                ),
-              ),
-            ),
         ],
       ),
     );

@@ -3,19 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>126981571024-p0fsgkrrkb3865j6f37utjiks4f29fk8.apps.googleusercontent.com</string>
+	<string>126981571024-hjpfhln362q2iadd2mp9gblvg2sjnfll.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.126981571024-p0fsgkrrkb3865j6f37utjiks4f29fk8</string>
-	<key>ANDROID_CLIENT_ID</key>
-	<string>126981571024-gm2hkrd7b4692jk884hd51gena3qe4a1.apps.googleusercontent.com</string>
+	<string>com.googleusercontent.apps.126981571024-hjpfhln362q2iadd2mp9gblvg2sjnfll</string>
 	<key>API_KEY</key>
-	<string>AIzaSyApwXO62bvgmF7OdscIs4uGkgYSftsX-Jg</string>
+	<string>AIzaSyBg751i899gDAlKIR1U2e0I1oi9Ib7phIA</string>
 	<key>GCM_SENDER_ID</key>
 	<string>126981571024</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.locallinkFlutter</string>
+	<string>Canine-Connections.LocalLink</string>
 	<key>PROJECT_ID</key>
 	<string>locallink-995a5</string>
 	<key>STORAGE_BUCKET</key>
@@ -31,6 +29,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:126981571024:ios:4bd4e6b2b8e78485bd39d5</string>
+	<string>1:126981571024:ios:bdd17ecadbdd6895bd39d5</string>
 </dict>
 </plist>

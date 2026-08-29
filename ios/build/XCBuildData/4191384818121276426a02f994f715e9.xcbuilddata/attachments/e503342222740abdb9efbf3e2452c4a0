@@ -1,0 +1,71 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing-primary.swiftdeps"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/PKAddPaymentPassRequest+Stripe_Error.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/PKAddPaymentPassRequest+Stripe_Error.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/PKAddPaymentPassRequest+Stripe_Error.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/PKAddPaymentPassRequest+Stripe_Error.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPAPIClient+PushProvisioning.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPAPIClient+PushProvisioning.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPAPIClient+PushProvisioning.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPAPIClient+PushProvisioning.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPEphemeralKey.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKey.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKey.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKey.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPEphemeralKeyManager.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyManager.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyManager.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyManager.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPEphemeralKeyProvider.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyProvider.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyProvider.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPEphemeralKeyProvider.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPFakeAddPaymentPassViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPFakeAddPaymentPassViewController.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPFakeAddPaymentPassViewController.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPFakeAddPaymentPassViewController.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPPinManagementService.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPinManagementService.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPinManagementService.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPinManagementService.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPPushProvisioningContext.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningContext.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningContext.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningContext.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPPushProvisioningDetails.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetails.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetails.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetails.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/STPPushProvisioningDetailsParams.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetailsParams.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetailsParams.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/STPPushProvisioningDetailsParams.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/StripeIssuing+Import.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing+Import.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing+Import.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing+Import.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeIssuing/StripeIssuing/StripeIssuing/Source/StripeIssuing.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeIssuing.build/Objects-normal/arm64/StripeIssuing.o"
+  }
+}

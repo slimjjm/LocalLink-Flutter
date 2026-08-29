@@ -1,0 +1,42 @@
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AddressSheetFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/AddressSheet/AddressSheetUtils.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/AddressSheet/AddressSheetView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AddToWalletButtonFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/pushprovisioning/AddToWalletButtonView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/ApplePayButtonView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/ApplePayUtils.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/ApplePayViewController.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AuBECSDebitFormFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/AuBECSDebitFormView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/CardFieldFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/CardFieldView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/CardFormFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/CardFormView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingViewController.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingViewManager.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/CustomerSheet/CustomerSheetUtils.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/EmbeddedPaymentElementView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/Errors.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/FinancialConnections.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/Mappers.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/NavigationBarManager.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/NavigationBarView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/PaymentMethodFactory.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/PaymentOptionDisplayData+ReactNative.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/PaymentPassFinder.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/PaymentSheetAppearance.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/pushprovisioning/PushProvisioningUtils.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/RCTBridge.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/RCTPresentedViewController.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/CustomerSheet/ReactNativeCustomerAdapter.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeContainerView.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripeIosPlugin.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripePlugin.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripePlugin+PayPlugin.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeSdkEmitter.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeSdkImpl.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeSdkImpl+CustomerSheet.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeSdkImpl+Embedded.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/StripeSdkImpl+PaymentSheet.swift
+/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe\ Sdk/UIColorExtension.swift

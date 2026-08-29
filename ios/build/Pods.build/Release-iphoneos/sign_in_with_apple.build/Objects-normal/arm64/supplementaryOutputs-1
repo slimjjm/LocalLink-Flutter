@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/sign_in_with_apple-6.1.4/ios/Classes/SignInWithAppleAvailablePlugin.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/sign_in_with_apple.build/Objects-normal/arm64/sign_in_with_apple.swiftsourceinfo"
+  }
+}

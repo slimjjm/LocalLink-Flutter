@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../screens/opportunity_detail_screen.dart';
+import '../screens/post_service_request_screen.dart';
+import '../services/location_service.dart';
 import '../theme/app_colors.dart';
-
-import 'map/map_marker_controller.dart';
-
 
 class OpportunityMapView extends StatefulWidget {
   const OpportunityMapView({super.key});
@@ -18,19 +18,14 @@ class OpportunityMapView extends StatefulWidget {
 class _OpportunityMapViewState extends State<OpportunityMapView> {
   GoogleMapController? _mapController;
 
-  final MapMarkerController _markerController =
-    MapMarkerController();
+  Set<Marker> _markers = {};
 
-Set<Marker> _markers = {};
-
-
-  String? _selectedOpportunityId;
+  String? _selectedItemKey;
   bool _showSearchThisArea = false;
+  Position? _currentPosition;
+  bool _locationLookupInProgress = false;
 
-  static const LatLng _defaultCenter = LatLng(
-    52.6816,
-    -1.8260,
-  );
+  static const LatLng _ukFallbackCenter = LatLng(54.5, -3.0);
 
   Stream<QuerySnapshot<Map<String, dynamic>>> get _opportunityStream {
     return FirebaseFirestore.instance
@@ -39,27 +34,75 @@ Set<Marker> _markers = {};
         .snapshots();
   }
 
-@override
-void dispose() {
-  _markerController.clear();
-  _mapController?.dispose();
-  super.dispose();
-}
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _communityHelpStream {
+    return FirebaseFirestore.instance
+        .collection('communityHelpPosts')
+        .where('type', isEqualTo: 'lost_found')
+        .where('isActive', isEqualTo: true)
+        .snapshots();
+  }
 
-  double? _readDouble(
-    Map<String, dynamic> data,
-    String key,
-  ) {
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentLocation(animate: false);
+  }
+
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  Future<Position?> _loadCurrentLocation({required bool animate}) async {
+    if (_locationLookupInProgress) {
+      return _currentPosition;
+    }
+
+    setState(() {
+      _locationLookupInProgress = true;
+    });
+
+    try {
+      final position = await LocationService().getCurrentLocation();
+      if (!mounted) return position;
+
+      setState(() {
+        _currentPosition = position;
+      });
+
+      if (animate && position != null) {
+        await _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: LatLng(position.latitude, position.longitude),
+              zoom: 14,
+            ),
+          ),
+        );
+      }
+
+      return position;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _locationLookupInProgress = false;
+        });
+      }
+    }
+  }
+
+  double? _readDouble(Map<String, dynamic> data, String key) {
     final value = data[key];
     if (value == null) return null;
     return double.tryParse(value.toString());
   }
 
-  LatLng? _latLngFromData(
-    Map<String, dynamic> data,
-  ) {
-    final latitude = _readDouble(data, 'latitude');
-    final longitude = _readDouble(data, 'longitude');
+  LatLng? _latLngFromData(Map<String, dynamic> data) {
+    final latitude =
+        _readDouble(data, 'latitude') ?? _readDouble(data, 'approxLatitude');
+    final longitude =
+        _readDouble(data, 'longitude') ?? _readDouble(data, 'approxLongitude');
 
     if (latitude == null || longitude == null) {
       return null;
@@ -68,9 +111,25 @@ void dispose() {
     return LatLng(latitude, longitude);
   }
 
-  bool _isFutureOpportunity(
-    Map<String, dynamic> data,
-  ) {
+  bool _isActiveCommunityHelp(Map<String, dynamic> data) {
+    final status = data['status']?.toString() ?? 'active';
+    final expiresAt = data['expiresAt'];
+
+    if (data['isActive'] == false ||
+        status == 'resolved' ||
+        status == 'expired' ||
+        data['resolvedAt'] != null) {
+      return false;
+    }
+
+    if (expiresAt is Timestamp) {
+      return expiresAt.toDate().isAfter(DateTime.now());
+    }
+
+    return true;
+  }
+
+  bool _isFutureOpportunity(Map<String, dynamic> data) {
     final eventDate = data['eventDate'];
 
     if (eventDate is Timestamp) {
@@ -80,68 +139,76 @@ void dispose() {
     return true;
   }
 
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _mappableDocs(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) {
-    return snapshot.docs.where((doc) {
-      final data = doc.data();
-
-      return _latLngFromData(data) != null &&
-          _isFutureOpportunity(data);
-    }).toList();
-  }
-
-  BitmapDescriptor _markerIcon({
-    required bool selected,
+  List<_MapItem> _mappableItems({
+    required QuerySnapshot<Map<String, dynamic>> opportunities,
+    required QuerySnapshot<Map<String, dynamic>> communityHelpPosts,
   }) {
-    return BitmapDescriptor.defaultMarkerWithHue(
-      selected
-          ? BitmapDescriptor.hueOrange
-          : BitmapDescriptor.hueRed,
-    );
+    final items = <_MapItem>[];
+
+    for (final doc in opportunities.docs) {
+      final data = doc.data();
+      if (_latLngFromData(data) == null || !_isFutureOpportunity(data)) {
+        continue;
+      }
+
+      items.add(_MapItem(id: doc.id, kind: _MapItemKind.activity, data: data));
+    }
+
+    for (final doc in communityHelpPosts.docs) {
+      final data = doc.data();
+      if (_latLngFromData(data) == null || !_isActiveCommunityHelp(data)) {
+        continue;
+      }
+
+      items.add(
+        _MapItem(id: doc.id, kind: _MapItemKind.communityHelp, data: data),
+      );
+    }
+
+    return items;
   }
 
+  void _refreshMarkers(List<_MapItem> items) {
+    final markers = items.map((item) {
+      final selected = item.key == _selectedItemKey;
+      final isCommunity = item.kind == _MapItemKind.communityHelp;
+      final mode = item.data['mode']?.toString() ?? 'lost';
+      final hue = isCommunity
+          ? mode == 'lost'
+                ? BitmapDescriptor.hueRed
+                : BitmapDescriptor.hueGreen
+          : BitmapDescriptor.hueAzure;
 
-Future<void> _refreshMarkers(
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-) async {
-  final markers =
-      await _markerController.buildMarkers(
-    docs: docs,
-    selectedOpportunityId:
-        _selectedOpportunityId,
-    latLngFromData: _latLngFromData,
-    onMarkerTap: (doc) {
-      _selectOpportunity(
-        doc,
-        animateCamera: true,
+      return Marker(
+        markerId: MarkerId(item.key),
+        position: _latLngFromData(item.data)!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        zIndexInt: selected
+            ? 100
+            : isCommunity
+            ? 20
+            : 1,
+        infoWindow: InfoWindow.noText,
+        onTap: () => _selectItem(item, animateCamera: true),
       );
-    },
-  );
-
-  if (!mounted) return;
-
-  setState(() {
-    _markers = markers;
-  });
-}
-  Future<void> _selectOpportunity(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc, {
-    required bool animateCamera,
-  }) async {
-    final latLng = _latLngFromData(doc.data());
+    }).toSet();
 
     setState(() {
-      _selectedOpportunityId = doc.id;
+      _markers = markers;
+    });
+  }
+
+  Future<void> _selectItem(_MapItem item, {required bool animateCamera}) async {
+    final latLng = _latLngFromData(item.data);
+
+    setState(() {
+      _selectedItemKey = item.key;
     });
 
     if (animateCamera && latLng != null) {
       await _mapController?.animateCamera(
         CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: latLng,
-            zoom: 14.5,
-          ),
+          CameraPosition(target: latLng, zoom: 14.5),
         ),
       );
     }
@@ -156,39 +223,68 @@ Future<void> _refreshMarkers(
     await _mapController?.getVisibleRegion();
   }
 
-  QueryDocumentSnapshot<Map<String, dynamic>>? _selectedDocFrom(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) {
-    if (_selectedOpportunityId == null) {
+  _MapItem? _selectedItemFrom(List<_MapItem> items) {
+    if (_selectedItemKey == null) {
       return null;
     }
 
-    for (final doc in docs) {
-      if (doc.id == _selectedOpportunityId) {
-        return doc;
+    for (final item in items) {
+      if (item.key == _selectedItemKey) {
+        return item;
       }
     }
 
     return null;
   }
 
-  String _mapStyle() {
-    return '''
-[
-  {
-    "featureType": "poi.business",
-    "stylers": [
-      { "visibility": "off" }
-    ]
-  },
-  {
-    "featureType": "transit",
-    "stylers": [
-      { "visibility": "off" }
-    ]
+  LatLng _initialCenter(List<_MapItem> items) {
+    if (_currentPosition != null) {
+      return LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
+    }
+
+    final mappable = items
+        .map((item) => _latLngFromData(item.data))
+        .whereType<LatLng>()
+        .toList();
+
+    if (mappable.isEmpty) {
+      return _ukFallbackCenter;
+    }
+
+    final lat =
+        mappable.map((point) => point.latitude).reduce((a, b) => a + b) /
+        mappable.length;
+    final lng =
+        mappable.map((point) => point.longitude).reduce((a, b) => a + b) /
+        mappable.length;
+
+    return LatLng(lat, lng);
   }
-]
-''';
+
+  Future<void> _centerOnCurrentLocation() async {
+    final position =
+        _currentPosition ?? await _loadCurrentLocation(animate: true);
+
+    if (position != null) {
+      await _mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(position.latitude, position.longitude),
+            zoom: 14,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'We could not get your current location. Showing nearby public posts instead.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -200,123 +296,139 @@ Future<void> _refreshMarkers(
           return const _MapMessage(
             icon: Icons.error_outline_rounded,
             title: 'Map could not load',
-            message: 'Something went wrong loading nearby opportunities.',
+            message: 'Something went wrong loading nearby activity.',
           );
         }
 
         if (!snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(),
-          );
+          return const Center(child: CircularProgressIndicator());
         }
 
-        final docs = _mappableDocs(snapshot.data!);
-     if (_markers.length != docs.length) {
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    _refreshMarkers(docs);
- });
-}
-        final selectedDoc = _selectedDocFrom(docs);
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _communityHelpStream,
+          builder: (context, communitySnapshot) {
+            if (communitySnapshot.hasError) {
+              return const _MapMessage(
+                icon: Icons.error_outline_rounded,
+                title: 'Map could not load',
+                message: 'Something went wrong loading nearby help posts.',
+              );
+            }
 
-        return Stack(
-          children: [
-            GoogleMap(
-              initialCameraPosition: const CameraPosition(
-                target: _defaultCenter,
-                zoom: 13,
-              ),
-             markers: _markers,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              mapToolbarEnabled: false,
-              compassEnabled: false,
-              buildingsEnabled: true,
-              trafficEnabled: false,
-              indoorViewEnabled: false,
-              onMapCreated: (controller) async {
-                _mapController = controller;
-                await controller.setMapStyle(_mapStyle());
-              },
-              onCameraMove: (_) {
-                if (!_showSearchThisArea) {
-                  setState(() {
-                    _showSearchThisArea = true;
-                  });
-                }
-              },
-              onTap: (_) {
-                setState(() {
-                  _selectedOpportunityId = null;
-                });
-              },
-            ),
+            if (!communitySnapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: SafeArea(
-                child: _MapSearchBar(
-                  onTap: _searchThisArea,
-                ),
-              ),
-            ),
+            final items = _mappableItems(
+              opportunities: snapshot.data!,
+              communityHelpPosts: communitySnapshot.data!,
+            );
+            if (_markers.length != items.length ||
+                !_markers
+                    .map((marker) => marker.markerId.value)
+                    .toSet()
+                    .containsAll(items.map((item) => item.key))) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _refreshMarkers(items);
+              });
+            }
+            final selectedItem = _selectedItemFrom(items);
 
-            if (_showSearchThisArea)
-              Positioned(
-                top: 86,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  child: Center(
-                    child: _SearchThisAreaButton(
-                      onTap: _searchThisArea,
-                    ),
+            return Stack(
+              children: [
+                GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: _initialCenter(items),
+                    zoom: _currentPosition == null && items.isEmpty
+                        ? 5.5
+                        : _currentPosition == null
+                        ? 12
+                        : 13,
                   ),
-                ),
-              ),
-
-            Positioned(
-              right: 16,
-              bottom: 184,
-              child: SafeArea(
-                child: _MapLocationButton(
-                  onTap: () async {
-                    await _mapController?.animateCamera(
-                      CameraUpdate.newCameraPosition(
-                        const CameraPosition(
-                          target: _defaultCenter,
-                          zoom: 13,
-                        ),
-                      ),
-                    );
+                  markers: _markers,
+                  myLocationEnabled: _currentPosition != null,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
+                  mapType: MapType.normal,
+                  compassEnabled: false,
+                  buildingsEnabled: true,
+                  trafficEnabled: false,
+                  indoorViewEnabled: false,
+                  onMapCreated: (controller) {
+                    _mapController = controller;
+                  },
+                  onCameraMove: (_) {
+                    if (!_showSearchThisArea) {
+                      setState(() {
+                        _showSearchThisArea = true;
+                      });
+                    }
+                  },
+                  onTap: (_) {
+                    setState(() {
+                      _selectedItemKey = null;
+                    });
                   },
                 ),
-              ),
-            ),
 
-            _MapBottomSheet(
-              docs: docs,
-              selectedDoc: selectedDoc,
-              onSelect: (doc) => _selectOpportunity(
-                doc,
-                animateCamera: true,
-              ),
-            ),
-          ],
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: SafeArea(child: _MapSearchBar(onTap: _searchThisArea)),
+                ),
+
+                if (_showSearchThisArea)
+                  Positioned(
+                    top: 86,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      child: Center(
+                        child: _SearchThisAreaButton(onTap: _searchThisArea),
+                      ),
+                    ),
+                  ),
+
+                Positioned(
+                  right: 16,
+                  bottom: 184,
+                  child: SafeArea(
+                    child: _MapLocationButton(onTap: _centerOnCurrentLocation),
+                  ),
+                ),
+
+                _MapBottomSheet(
+                  items: items,
+                  selectedItem: selectedItem,
+                  onSelect: (item) => _selectItem(item, animateCamera: true),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
 }
 
+enum _MapItemKind { activity, communityHelp }
+
+class _MapItem {
+  const _MapItem({required this.id, required this.kind, required this.data});
+
+  final String id;
+  final _MapItemKind kind;
+  final Map<String, dynamic> data;
+
+  String get key => '${kind.name}_$id';
+}
+
 class _MapSearchBar extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _MapSearchBar({
-    required this.onTap,
-  });
+  const _MapSearchBar({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -329,20 +441,14 @@ class _MapSearchBar extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 14,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           child: Row(
             children: [
-              Icon(
-                Icons.search_rounded,
-                color: AppColors.primary,
-              ),
+              Icon(Icons.search_rounded, color: AppColors.primary),
               const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'Explore opportunities nearby',
+                  'Explore activities nearby',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
@@ -353,7 +459,7 @@ class _MapSearchBar extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.10),
+                  color: AppColors.primary.withValues(alpha: 0.10),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -373,9 +479,7 @@ class _MapSearchBar extends StatelessWidget {
 class _SearchThisAreaButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _SearchThisAreaButton({
-    required this.onTap,
-  });
+  const _SearchThisAreaButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -388,13 +492,8 @@ class _SearchThisAreaButton extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 8,
         shadowColor: Colors.black26,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(999),
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 12,
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       ),
     );
   }
@@ -403,9 +502,7 @@ class _SearchThisAreaButton extends StatelessWidget {
 class _MapLocationButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _MapLocationButton({
-    required this.onTap,
-  });
+  const _MapLocationButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -421,40 +518,33 @@ class _MapLocationButton extends StatelessWidget {
 }
 
 class _MapBottomSheet extends StatelessWidget {
-  final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs;
-  final QueryDocumentSnapshot<Map<String, dynamic>>? selectedDoc;
-  final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>> onSelect;
+  final List<_MapItem> items;
+  final _MapItem? selectedItem;
+  final ValueChanged<_MapItem> onSelect;
 
   const _MapBottomSheet({
-    required this.docs,
-    required this.selectedDoc,
+    required this.items,
+    required this.selectedItem,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    final shownDocs = selectedDoc == null ? docs : [selectedDoc!];
+    final shownItems = selectedItem == null ? items : [selectedItem!];
 
     return DraggableScrollableSheet(
-      initialChildSize: selectedDoc == null ? 0.24 : 0.30,
+      initialChildSize: selectedItem == null ? 0.24 : 0.30,
       minChildSize: 0.16,
       maxChildSize: 0.72,
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
             color: AppColors.background,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(28),
-            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: ListView(
             controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(
-              16,
-              10,
-              16,
-              24,
-            ),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
               Center(
                 child: Container(
@@ -468,9 +558,11 @@ class _MapBottomSheet extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                selectedDoc == null
-                    ? '${docs.length} nearby opportunities'
-                    : 'Selected opportunity',
+                selectedItem == null
+                    ? '${items.length} nearby map items'
+                    : selectedItem!.kind == _MapItemKind.communityHelp
+                    ? 'Selected help post'
+                    : 'Selected activity',
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
@@ -478,20 +570,150 @@ class _MapBottomSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              if (docs.isEmpty)
-                const _MapEmptyState(),
-              ...shownDocs.map((doc) {
+              if (items.isEmpty) const _MapEmptyState(),
+              ...shownItems.map((item) {
+                if (item.kind == _MapItemKind.communityHelp) {
+                  return _MapCommunityHelpCard(
+                    postId: item.id,
+                    data: item.data,
+                    selected: selectedItem?.key == item.key,
+                    onSelect: () => onSelect(item),
+                  );
+                }
+
                 return _MapOpportunityCard(
-                  opportunityId: doc.id,
-                  data: doc.data(),
-                  selected: selectedDoc?.id == doc.id,
-                  onSelect: () => onSelect(doc),
+                  opportunityId: item.id,
+                  data: item.data,
+                  selected: selectedItem?.key == item.key,
+                  onSelect: () => onSelect(item),
                 );
               }),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _MapCommunityHelpCard extends StatelessWidget {
+  final String postId;
+  final Map<String, dynamic> data;
+  final bool selected;
+  final VoidCallback onSelect;
+
+  const _MapCommunityHelpCard({
+    required this.postId,
+    required this.data,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mode = data['mode']?.toString() ?? 'lost';
+    final isLost = mode == 'lost';
+    final title = data['title']?.toString() ?? 'Community Help post';
+    final description = data['description']?.toString() ?? '';
+    final category = data['itemCategory']?.toString() ?? 'Item';
+    final location =
+        data['publicLocation']?.toString() ??
+        data['location']?.toString() ??
+        'Approximate area';
+    final label = isLost ? 'LOST' : 'FOUND';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onSelect,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: selected ? AppColors.primary : Colors.grey.shade200,
+              width: selected ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: selected ? 0.12 : 0.05),
+                blurRadius: selected ? 22 : 12,
+                offset: const Offset(0, 7),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _CategoryPill(category: label),
+                  const SizedBox(width: 8),
+                  _CategoryPill(category: category),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.charcoal,
+                  height: 1.1,
+                ),
+              ),
+              if (description.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 14,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              _SheetInfoRow(icon: Icons.place_rounded, text: location),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            PostServiceRequestScreen(initialPostId: postId),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text(
+                    'Open Community Help',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -525,11 +747,10 @@ class _MapOpportunityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = data['title']?.toString() ?? 'Opportunity';
+    final title = data['title']?.toString() ?? 'Activity';
     final description = data['description']?.toString() ?? '';
     final category = data['category']?.toString() ?? 'Local';
-    final location =
-        data['location']?.toString() ?? 'Location to be confirmed';
+    final location = data['location']?.toString() ?? 'Location to be confirmed';
     final organiserName =
         data['organiserName']?.toString() ?? 'Local organiser';
     final attendeeCount = data['attendeeCount'] ?? 0;
@@ -554,7 +775,7 @@ class _MapOpportunityCard extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(selected ? 0.12 : 0.05),
+                color: Colors.black.withValues(alpha: selected ? 0.12 : 0.05),
                 blurRadius: selected ? 22 : 12,
                 offset: const Offset(0, 7),
               ),
@@ -603,20 +824,11 @@ class _MapOpportunityCard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 16),
-              _SheetInfoRow(
-                icon: Icons.calendar_month_rounded,
-                text: dateText,
-              ),
+              _SheetInfoRow(icon: Icons.calendar_month_rounded, text: dateText),
               const SizedBox(height: 8),
-              _SheetInfoRow(
-                icon: Icons.place_rounded,
-                text: location,
-              ),
+              _SheetInfoRow(icon: Icons.place_rounded, text: location),
               const SizedBox(height: 8),
-              _SheetInfoRow(
-                icon: Icons.person_rounded,
-                text: organiserName,
-              ),
+              _SheetInfoRow(icon: Icons.person_rounded, text: organiserName),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -636,18 +848,14 @@ class _MapOpportunityCard extends StatelessWidget {
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 15,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                   child: const Text(
-                    'View opportunity',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                    ),
+                    'View activity',
+                    style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),
               ),
@@ -662,19 +870,14 @@ class _MapOpportunityCard extends StatelessWidget {
 class _CategoryPill extends StatelessWidget {
   final String category;
 
-  const _CategoryPill({
-    required this.category,
-  });
+  const _CategoryPill({required this.category});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.10),
+        color: AppColors.primary.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -693,20 +896,13 @@ class _MiniStat extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _MiniStat({
-    required this.icon,
-    required this.text,
-  });
+  const _MiniStat({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 17,
-          color: Colors.black54,
-        ),
+        Icon(icon, size: 17, color: Colors.black54),
         const SizedBox(width: 4),
         Text(
           text,
@@ -724,20 +920,13 @@ class _SheetInfoRow extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _SheetInfoRow({
-    required this.icon,
-    required this.text,
-  });
+  const _SheetInfoRow({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(
-          icon,
-          size: 19,
-          color: AppColors.primary,
-        ),
+        Icon(icon, size: 19, color: AppColors.primary),
         const SizedBox(width: 9),
         Expanded(
           child: Text(
@@ -764,11 +953,8 @@ class _MapEmptyState extends StatelessWidget {
     return const Padding(
       padding: EdgeInsets.only(top: 10),
       child: Text(
-        'No opportunities with map locations yet.',
-        style: TextStyle(
-          color: Colors.black54,
-          fontWeight: FontWeight.w700,
-        ),
+        'No activities or help posts with map locations yet.',
+        style: TextStyle(color: Colors.black54, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -793,19 +979,13 @@ class _MapMessage extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 42,
-              color: AppColors.primary,
-            ),
+            Icon(icon, size: 42, color: AppColors.primary),
             const SizedBox(height: 14),
             Text(
               title,
@@ -820,10 +1000,7 @@ class _MapMessage extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.black54,
-                height: 1.4,
-              ),
+              style: const TextStyle(color: Colors.black54, height: 1.4),
             ),
           ],
         ),

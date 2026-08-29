@@ -1,0 +1,4 @@
+
+module stripe_ios.Swift {
+  header "stripe_ios-Swift.h"
+}

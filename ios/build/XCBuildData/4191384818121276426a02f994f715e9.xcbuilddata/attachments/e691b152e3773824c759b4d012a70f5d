@@ -1,0 +1,4 @@
+
+module FirebaseStorage.Swift {
+  header "FirebaseStorage-Swift.h"
+}

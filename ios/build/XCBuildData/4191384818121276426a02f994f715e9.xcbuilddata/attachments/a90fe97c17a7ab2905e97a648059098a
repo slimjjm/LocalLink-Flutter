@@ -1,0 +1,26 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/firebase_storage-primary.swiftdeps"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/firebase_storage-13.4.1/ios/firebase_storage/Sources/firebase_storage/FLTFirebaseStoragePlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FLTFirebaseStoragePlugin.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FLTFirebaseStoragePlugin.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FLTFirebaseStoragePlugin.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/firebase_storage-13.4.1/ios/firebase_storage/Sources/firebase_storage/FirebaseStorageMessages.g.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FirebaseStorageMessages.g.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FirebaseStorageMessages.g.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/FirebaseStorageMessages.g.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/firebase_storage-13.4.1/ios/firebase_storage/Sources/firebase_storage/TaskStateChannelStreamHandler.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/TaskStateChannelStreamHandler.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/TaskStateChannelStreamHandler.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/firebase_storage.build/Objects-normal/arm64/TaskStateChannelStreamHandler.o"
+  }
+}

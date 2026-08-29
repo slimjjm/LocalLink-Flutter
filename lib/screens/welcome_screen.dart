@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_colors.dart';
 import 'login_screen.dart';
+import 'register_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -25,20 +27,12 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       duration: const Duration(milliseconds: 350),
     );
 
-    _fade = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    );
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
 
     _slide = Tween<Offset>(
       begin: const Offset(0, .025),
       end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
   }
@@ -52,9 +46,14 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   void _continue() {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+  }
+
+  void _createAccount() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RegisterScreen()),
     );
   }
 
@@ -79,42 +78,51 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                       padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
                       child: Column(
                         children: [
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _continue,
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.textMuted,
-                                minimumSize: const Size(64, 44),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 40,
+                                child: Image.asset(
+                                  'assets/images/locallink_logo.png',
+                                  fit: BoxFit.contain,
                                 ),
                               ),
-                              child: const Text(
-                                'Sign in',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
+                              const Spacer(),
+                              TextButton(
+                                onPressed: _continue,
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AppColors.textMuted,
+                                  minimumSize: const Size(64, 44),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Sign in',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
+                            ],
                           ),
 
-                          const SizedBox(height: 56),
+                          const SizedBox(height: 34),
 
                           SizedBox(
-                            height: 154,
+                            height: 132,
                             child: Image.asset(
                               'assets/images/locallink_logo.png',
                               fit: BoxFit.contain,
                             ),
                           ),
 
-                          const SizedBox(height: 48),
+                          const SizedBox(height: 34),
 
                           const Text(
-                            'Find what is happening nearby.',
+                            'Discover what is happening nearby.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: AppColors.charcoal,
@@ -127,7 +135,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           const SizedBox(height: 16),
 
                           const Text(
-                            'Local groups, events and opportunities gathered in one trusted place.',
+                            'Local activities, services, availability and Community Help in one trusted place.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: AppColors.textMuted,
@@ -139,24 +147,22 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
                           const SizedBox(height: 28),
 
-                          const _LocalSignal(),
+                          const _PublicSignals(),
 
-                          const SizedBox(height: 56),
+                          const SizedBox(height: 34),
 
-                          const _ContinueButton(),
+                          _PrimaryLandingAction(onPressed: _createAccount),
 
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 10),
 
-                          const Text(
-                            'Built around your local area',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: AppColors.textLight,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              height: 1.3,
-                            ),
+                          TextButton(
+                            onPressed: _continue,
+                            child: const Text('I already have an account'),
                           ),
+
+                          const SizedBox(height: 22),
+
+                          const _PublicPageLinks(),
                         ],
                       ),
                     ),
@@ -171,8 +177,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   }
 }
 
-class _ContinueButton extends StatelessWidget {
-  const _ContinueButton();
+class _PrimaryLandingAction extends StatelessWidget {
+  const _PrimaryLandingAction({required this.onPressed});
+
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -192,14 +200,7 @@ class _ContinueButton extends StatelessWidget {
         width: double.infinity,
         height: 60,
         child: ElevatedButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const LoginScreen(),
-              ),
-            );
-          },
+          onPressed: onPressed,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.buttonPrimary,
             foregroundColor: AppColors.buttonText,
@@ -213,7 +214,7 @@ class _ContinueButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                'Continue',
+                'Create your account',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w800,
@@ -221,10 +222,7 @@ class _ContinueButton extends StatelessWidget {
                 ),
               ),
               SizedBox(width: 8),
-              Icon(
-                Icons.arrow_forward_rounded,
-                size: 21,
-              ),
+              Icon(Icons.arrow_forward_rounded, size: 21),
             ],
           ),
         ),
@@ -233,35 +231,50 @@ class _ContinueButton extends StatelessWidget {
   }
 }
 
-class _LocalSignal extends StatelessWidget {
-  const _LocalSignal();
+class _PublicSignals extends StatelessWidget {
+  const _PublicSignals();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        _SignalChip(icon: Icons.event_available_outlined, label: 'Activities'),
+        _SignalChip(icon: Icons.handshake_outlined, label: 'Services'),
+        _SignalChip(
+          icon: Icons.volunteer_activism_outlined,
+          label: 'Community Help',
+        ),
+      ],
+    );
+  }
+}
+
+class _SignalChip extends StatelessWidget {
+  const _SignalChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 12,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: AppColors.border,
-        ),
+        border: Border.all(color: AppColors.border),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.location_on_outlined,
-            size: 18,
-            color: AppColors.primary,
-          ),
-          SizedBox(width: 8),
+          Icon(icon, size: 18, color: AppColors.primary),
+          const SizedBox(width: 8),
           Text(
-            'Made for your neighbourhood',
-            style: TextStyle(
+            label,
+            style: const TextStyle(
               color: AppColors.textMuted,
               fontSize: 14,
               fontWeight: FontWeight.w700,
@@ -269,6 +282,51 @@ class _LocalSignal extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PublicPageLinks extends StatelessWidget {
+  const _PublicPageLinks();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 14,
+      runSpacing: 8,
+      children: [
+        _FooterLink(label: 'Privacy', path: '/privacy'),
+        _FooterLink(label: 'Terms', path: '/terms'),
+        _FooterLink(label: 'Contact', path: '/contact'),
+        _FooterLink(label: 'Delete account', path: '/delete-account'),
+      ],
+    );
+  }
+}
+
+class _FooterLink extends StatelessWidget {
+  const _FooterLink({required this.label, required this.path});
+
+  final String label;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: () {
+        launchUrl(Uri(path: path), webOnlyWindowName: '_self');
+      },
+      style: TextButton.styleFrom(
+        foregroundColor: AppColors.textLight,
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+        minimumSize: const Size(0, 36),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
       ),
     );
   }

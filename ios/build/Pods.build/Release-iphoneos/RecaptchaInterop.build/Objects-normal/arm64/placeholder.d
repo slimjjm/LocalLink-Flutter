@@ -1,0 +1,5 @@
+dependencies: \
+  /Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/RecaptchaInterop.build/module.modulemap \
+  /Users/jamesevans/locallink_flutter/ios/Pods/RecaptchaInterop/RecaptchaEnterprise/RecaptchaInterop/placeholder.m \
+  /Users/jamesevans/locallink_flutter/ios/Pods/Target\ Support\ Files/RecaptchaInterop/RecaptchaInterop-prefix.pch \
+  /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks/UIKit.framework/Modules/module.modulemap

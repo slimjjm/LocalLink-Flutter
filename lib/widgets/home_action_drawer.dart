@@ -1,10 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../screens/create_opportunity_screen.dart';
+import '../screens/business_home_screen.dart';
+import '../screens/business_list_screen.dart';
+import '../screens/create_choice_screen.dart';
+import '../screens/inbox_screen.dart';
 import '../screens/my_opportunities_screen.dart';
+import '../screens/post_service_request_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/saved_opportunities_screen.dart';
+import '../services/business_access_service.dart';
 import '../theme/app_colors.dart';
 
 class HomeActionDrawer extends StatefulWidget {
@@ -18,12 +24,21 @@ class HomeActionDrawer extends StatefulWidget {
 
 class _HomeActionDrawerState extends State<HomeActionDrawer> {
   static const double _collapsedSize = 0.064;
-  static const double _expandedSize = 0.44;
+  static const double _expandedSize = 0.58;
 
   final DraggableScrollableController _drawerController =
       DraggableScrollableController();
 
+  late final Future<DocumentSnapshot<Map<String, dynamic>>?>
+  _ownedBusinessFuture;
+
   bool _isExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownedBusinessFuture = _loadOwnedBusiness();
+  }
 
   @override
   void dispose() {
@@ -51,6 +66,10 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _loadOwnedBusiness() {
+    return BusinessAccessService.loadLinkedBusiness();
   }
 
   @override
@@ -132,7 +151,7 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                 ),
                 const SizedBox(height: 7),
                 const Text(
-                  'Create, save and manage what you discover locally.',
+                  'Find local help, share what you offer and keep track of everything here.',
                   style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 13.5,
@@ -142,22 +161,49 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                 ),
                 const SizedBox(height: 20),
                 _DrawerAction(
-                  icon: Icons.add_circle_outline_rounded,
-                  title: 'Create Opportunity',
-                  subtitle: 'Start something local',
+                  icon: Icons.search_rounded,
+                  title: 'Find a service',
+                  subtitle: 'Book trusted local help',
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const CreateOpportunityScreen(),
+                        builder: (_) =>
+                            const BusinessListScreen(useCurrentLocation: true),
+                      ),
+                    );
+                  },
+                ),
+                _DrawerAction(
+                  icon: Icons.add_circle_outline_rounded,
+                  title: 'Create',
+                  subtitle: 'Offer a service or host an activity',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CreateChoiceScreen(),
+                      ),
+                    );
+                  },
+                ),
+                _DrawerAction(
+                  icon: Icons.volunteer_activism_outlined,
+                  title: 'Community help',
+                  subtitle: 'Lost, found and free items',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PostServiceRequestScreen(),
                       ),
                     );
                   },
                 ),
                 _DrawerAction(
                   icon: Icons.event_available_rounded,
-                  title: 'My Opportunities',
-                  subtitle: 'Joined and created',
+                  title: 'Activities',
+                  subtitle: 'Joined and hosted',
                   onTap: () {
                     Navigator.push(
                       context,
@@ -169,8 +215,8 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                 ),
                 _DrawerAction(
                   icon: Icons.bookmark_border_rounded,
-                  title: 'Saved Opportunities',
-                  subtitle: 'Places and plans to revisit',
+                  title: 'Saved',
+                  subtitle: 'Activities and services to revisit',
                   onTap: () {
                     Navigator.push(
                       context,
@@ -181,9 +227,50 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                   },
                 ),
                 _DrawerAction(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: 'Messages',
+                  subtitle: 'Bookings, requests and chats',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const InboxScreen(currentRole: 'customer'),
+                      ),
+                    );
+                  },
+                ),
+                FutureBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
+                  future: _ownedBusinessFuture,
+                  builder: (context, snapshot) {
+                    final business = snapshot.data;
+
+                    if (business == null || !business.exists) {
+                      return const SizedBox.shrink();
+                    }
+
+                    final businessId = business.id;
+
+                    return _DrawerAction(
+                      icon: Icons.storefront_outlined,
+                      title: 'Your Page',
+                      subtitle: 'Services, bookings and messages',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                BusinessHomeScreen(businessId: businessId),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+                _DrawerAction(
                   icon: Icons.person_outline_rounded,
-                  title: 'Profile & Settings',
-                  subtitle: 'Your identity and preferences',
+                  title: 'Profile',
+                  subtitle: 'Your identity and activity',
                   onTap: () {
                     final user = FirebaseAuth.instance.currentUser;
                     if (user == null) return;
@@ -200,24 +287,11 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                     );
                   },
                 ),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: widget.onSettingsTap,
-                    icon: const Icon(Icons.settings_outlined, size: 18),
-                    label: const Text('Settings'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.textMuted,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 6,
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
+                _DrawerAction(
+                  icon: Icons.manage_accounts_outlined,
+                  title: 'Help & settings',
+                  subtitle: 'Notifications, support and sign out',
+                  onTap: widget.onSettingsTap,
                 ),
               ],
             ),

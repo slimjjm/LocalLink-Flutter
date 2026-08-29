@@ -1,0 +1,4 @@
+
+module StripeUICore.__Swift {
+  exclude header "StripeUICore-Swift.h"
+}

@@ -19,25 +19,18 @@ class CreateOpportunityScreen extends StatefulWidget {
       _CreateOpportunityScreenState();
 }
 
-class _CreateOpportunityScreenState
-    extends State<CreateOpportunityScreen> {
+class _CreateOpportunityScreenState extends State<CreateOpportunityScreen> {
+  final titleController = TextEditingController();
 
-  final titleController =
-      TextEditingController();
+  final descriptionController = TextEditingController();
 
-  final descriptionController =
-      TextEditingController();
+  final locationController = TextEditingController();
 
-  final locationController =
-      TextEditingController();
+  final addressService = AddressSearchService();
 
-      final addressService =
-    AddressSearchService();
+  List<AddressResult> suggestions = [];
 
-List<AddressResult> suggestions = [];
-
-  final ImagePicker picker =
-      ImagePicker();
+  final ImagePicker picker = ImagePicker();
 
   File? selectedImage;
 
@@ -48,96 +41,76 @@ List<AddressResult> suggestions = [];
   bool saving = false;
 
   DateTime? selectedDate;
-TimeOfDay? selectedTime;
-DateTime? repeatEndDate;
-double? selectedLatitude;
-double? selectedLongitude;
+  TimeOfDay? selectedTime;
+  DateTime? repeatEndDate;
+  double? selectedLatitude;
+  double? selectedLongitude;
 
-Future<void> pickDate() async {
-  final picked = await showDatePicker(
-    context: context,
-    initialDate: DateTime.now(),
-    firstDate: DateTime.now(),
-    lastDate: DateTime(2035),
-  );
+  Future<void> pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2035),
+    );
 
-  if (picked == null) return;
-
-  setState(() {
-    selectedDate = picked;
-  });
-}
-
-Future<void> pickTime() async {
-  final picked = await showTimePicker(
-    context: context,
-    initialTime: TimeOfDay.now(),
-  );
-
-  if (picked == null) return;
-
-  setState(() {
-    selectedTime = picked;
-  });
-}
-
-Future<void> pickRepeatEndDate() async {
-
-  final picked = await showDatePicker(
-    context: context,
-    initialDate:
-        repeatEndDate ??
-        selectedDate ??
-        DateTime.now(),
-    firstDate:
-        selectedDate ??
-        DateTime.now(),
-    lastDate:
-        DateTime(2035),
-  );
-
-  if (picked == null) return;
-
-  setState(() {
-    repeatEndDate = picked;
-  });
-}
-
-Future<void> getCurrentLocation() async {
-
-  try {
-
-    final position =
-        await Geolocator
-            .getCurrentPosition();
+    if (picked == null) return;
 
     setState(() {
-
-      selectedLatitude =
-          position.latitude;
-
-      selectedLongitude =
-          position.longitude;
-
-      locationController.text =
-          '${position.latitude.toStringAsFixed(4)}, '
-          '${position.longitude.toStringAsFixed(4)}';
+      selectedDate = picked;
     });
-
-  } catch (e) {
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Unable to get location',
-        ),
-      ),
-    );
   }
-}
+
+  Future<void> pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      selectedTime = picked;
+    });
+  }
+
+  Future<void> pickRepeatEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: repeatEndDate ?? selectedDate ?? DateTime.now(),
+      firstDate: selectedDate ?? DateTime.now(),
+      lastDate: DateTime(2035),
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      repeatEndDate = picked;
+    });
+  }
+
+  Future<void> getCurrentLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition();
+
+      setState(() {
+        selectedLatitude = position.latitude;
+
+        selectedLongitude = position.longitude;
+
+        locationController.text =
+            '${position.latitude.toStringAsFixed(4)}, '
+            '${position.longitude.toStringAsFixed(4)}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unable to get location')));
+    }
+  }
+
   @override
   void dispose() {
     titleController.dispose();
@@ -147,9 +120,7 @@ Future<void> getCurrentLocation() async {
   }
 
   Future<void> pickImage() async {
-
-    final picked =
-        await picker.pickImage(
+    final picked = await picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 75,
     );
@@ -157,201 +128,142 @@ Future<void> getCurrentLocation() async {
     if (picked == null) return;
 
     setState(() {
-      selectedImage =
-          File(picked.path);
+      selectedImage = File(picked.path);
     });
   }
 
   Future<void> saveOpportunity() async {
+    if (titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter a title')));
 
-  if (titleController.text
-    .trim()
-    .isEmpty) {
+      return;
+    }
 
-  ScaffoldMessenger.of(context)
-      .showSnackBar(
-    const SnackBar(
-      content: Text(
-        'Please enter a title',
-      ),
-    ),
-  );
+    if (locationController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a location')));
 
-  return;
-}
+      return;
+    }
 
-if (locationController.text
-    .trim()
-    .isEmpty) {
-
-  ScaffoldMessenger.of(context)
-      .showSnackBar(
-    const SnackBar(
-      content: Text(
-        'Please select a location',
-      ),
-    ),
-  );
-
-  return;
-}
+    final eventTimeLabel = selectedTime?.format(context);
 
     setState(() {
       saving = true;
     });
 
     try {
+      final user = FirebaseAuth.instance.currentUser;
 
-      final user =
-          FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw Exception('Please sign in to create an opportunity.');
+      }
 
-        final latitude =
-    selectedLatitude;
+      final latitude = selectedLatitude;
 
-final longitude =
-    selectedLongitude;
+      final longitude = selectedLongitude;
 
       String? photoUrl;
 
       if (selectedImage != null) {
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-        final fileName =
-            '${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-        final ref =
-            FirebaseStorage.instance
-                .ref()
-                .child(
-                  'opportunityPhotos/$fileName',
-                );
+        final ref = FirebaseStorage.instance.ref().child(
+          'opportunityPhotos/${user.uid}/$fileName',
+        );
 
         await ref.putFile(
           selectedImage!,
           SettableMetadata(
-            contentType:
-                'image/jpeg',
-            customMetadata: {
-              'ownerId':
-                  user?.uid ?? '',
-            },
+            contentType: 'image/jpeg',
+            customMetadata: {'ownerId': user.uid},
           ),
         );
 
-        photoUrl =
-            await ref.getDownloadURL();
+        photoUrl = await ref.getDownloadURL();
       }
 
-   final opportunityRef =
-    FirebaseFirestore.instance
-        .collection('opportunities')
-        .doc();
+      final opportunityRef = FirebaseFirestore.instance
+          .collection('opportunities')
+          .doc();
 
-await opportunityRef.set({
+      await opportunityRef.set({
+        'title': titleController.text.trim(),
 
-  'title':
-      titleController.text.trim(),
+        'description': descriptionController.text.trim(),
 
-  'description':
-      descriptionController.text.trim(),
+        'location': locationController.text.trim(),
 
-  'location':
-      locationController.text.trim(),
+        'category': category,
 
-  'category':
-      category,
+        'attendeeCount': 0,
 
-  'attendeeCount': 0,
+        'organiserName': user.displayName ?? 'User',
 
-  'organiserName':
-    user?.displayName ?? 'User',
+        'createdBy': user.uid,
 
-  'createdBy':
-      user?.uid,
+        'photoUrl': photoUrl,
 
-  'photoUrl':
-      photoUrl,
+        'latitude': latitude,
 
-  'latitude':
-      latitude,
+        'longitude': longitude,
 
-  'longitude':
-      longitude,
+        'eventDate': selectedDate == null
+            ? null
+            : Timestamp.fromDate(selectedDate!),
 
-      'eventDate':
-    selectedDate == null
-        ? null
-        : Timestamp.fromDate(
-            selectedDate!,
-          ),
+        'eventTime': eventTimeLabel,
 
-'eventTime':
-    selectedTime == null
-        ? null
-        : selectedTime!.format(
-            context,
-          ),
+        'isActive': true,
 
-'isActive': true,
+        // =========================
+        // Recurring Opportunity
+        // =========================
+        'isRecurring': repeatType != 'none',
 
-// =========================
-// Recurring Opportunity
-// =========================
+        'repeatType': repeatType,
 
-'isRecurring': repeatType != 'none',
+        'repeatEndDate': repeatEndDate == null
+            ? null
+            : Timestamp.fromDate(repeatEndDate!),
 
-'repeatType': repeatType,
+        'seriesId': opportunityRef.id,
 
-'repeatEndDate':
-    repeatEndDate == null
-        ? null
-        : Timestamp.fromDate(
-            repeatEndDate!,
-          ),
+        'occurrenceNumber': 1,
 
-'seriesId': opportunityRef.id,
+        'previousOccurrenceId': null,
 
-'occurrenceNumber': 1,
+        'nextOccurrenceId': null,
 
-'previousOccurrenceId': null,
+        'seriesStatus': 'active',
 
-'nextOccurrenceId': null,
+        'resumeAfter': null,
 
-'seriesStatus': 'active',
+        'skipNext': false,
 
-'resumeAfter': null,
+        'cancelledOccurrence': false,
 
-'skipNext': false,
+        // =========================
+        'reminder24hSent': false,
 
-'cancelledOccurrence': false,
+        'reminder1hSent': false,
 
-// =========================
-
-'reminder24hSent': false,
-
-'reminder1hSent': false,
-
-'createdAt':
-    Timestamp.now(),
-});
+        'createdAt': Timestamp.now(),
+      });
 
       if (!mounted) return;
 
       Navigator.pop(context);
-
     } catch (e) {
-
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed: $e',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed: $e')));
     } finally {
-
       if (mounted) {
         setState(() {
           saving = false;
@@ -362,210 +274,149 @@ await opportunityRef.set({
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Create Opportunity',
-        ),
-      ),
+      appBar: AppBar(title: const Text('Create Activity')),
       body: SingleChildScrollView(
-        padding:
-            const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-
             TextField(
-              controller:
-                  titleController,
-              decoration:
-                  const InputDecoration(
-                labelText: 'Title',
-              ),
+              controller: titleController,
+              decoration: const InputDecoration(labelText: 'Title'),
             ),
 
             const SizedBox(height: 16),
 
             TextField(
-              controller:
-                  descriptionController,
+              controller: descriptionController,
               maxLines: 4,
-              decoration:
-                  const InputDecoration(
-                labelText:
-                    'Description',
-              ),
+              decoration: const InputDecoration(labelText: 'Description'),
             ),
 
             const SizedBox(height: 16),
 
-          Column(
-  children: [
-    TextField(
-      controller: locationController,
-      decoration: const InputDecoration(
-        labelText: 'Where Is it?',
-      ),
-      onChanged: (value) async {
-        final results =
-            await addressService.search(value);
+            Column(
+              children: [
+                TextField(
+                  controller: locationController,
+                  decoration: const InputDecoration(labelText: 'Where Is it?'),
+                  onChanged: (value) async {
+                    final results = await addressService.search(value);
 
-        if (!mounted) return;
+                    if (!mounted) return;
 
-        setState(() {
-          suggestions = results;
-        });
-      },
-    ),
+                    setState(() {
+                      suggestions = results;
+                    });
+                  },
+                ),
 
-    if (suggestions.isNotEmpty)
-      Container(
-        margin: const EdgeInsets.only(
-          top: 8,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.grey.shade300,
-          ),
-        ),
-        child: Column(
-        children: suggestions.map(
-  (suggestion) {
-    return ListTile(
-      title: Text(
-        suggestion.description,
-      ),
-      onTap: () async {
+                if (suggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      children: suggestions.map((suggestion) {
+                        return ListTile(
+                          title: Text(suggestion.description),
+                          onTap: () async {
+                            final coords = await addressService.getCoordinates(
+                              suggestion.placeId,
+                            );
 
-        final coords =
-            await addressService
-                .getCoordinates(
-          suggestion.placeId,
-        );
+                            if (!mounted) return;
 
-        if (!mounted) return;
+                            setState(() {
+                              selectedLatitude = coords?['lat'];
 
-        setState(() {
+                              selectedLongitude = coords?['lng'];
 
-          selectedLatitude =
-              coords?['lat'];
+                              locationController.text = suggestion.description;
 
-          selectedLongitude =
-              coords?['lng'];
+                              suggestions = [];
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+              ],
+            ),
 
-          locationController.text =
-              suggestion.description;
+            const SizedBox(height: 12),
 
-          suggestions = [];
-        });
-      },
-    );
-  },
-).toList(),
-        ),
-      ),
-  ],
-),
+            OutlinedButton.icon(
+              onPressed: getCurrentLocation,
+              icon: const Icon(Icons.my_location),
+              label: const Text('Use Current Location'),
+            ),
 
-const SizedBox(height: 12),
-
-OutlinedButton.icon(
-  onPressed: getCurrentLocation,
-  icon: const Icon(
-    Icons.my_location,
-  ),
-  label: const Text(
-    'Use Current Location',
-  ),
-),
-
-const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
             GestureDetector(
-  onTap: pickDate,
-  child: Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      border: Border.all(
-        color: Colors.grey.shade400,
-      ),
-      borderRadius:
-          BorderRadius.circular(8),
-    ),
-    child: Text(
-      selectedDate == null
-          ? 'Select Date'
-          : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
-    ),
-  ),
-),
+              onTap: pickDate,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  selectedDate == null
+                      ? 'Select Date'
+                      : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
+                ),
+              ),
+            ),
 
-const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-GestureDetector(
-  onTap: pickTime,
-  child: Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      border: Border.all(
-        color: Colors.grey.shade400,
-      ),
-      borderRadius:
-          BorderRadius.circular(8),
-    ),
-    child: Text(
-      selectedTime == null
-          ? 'Select Time'
-          : selectedTime!.format(context),
-    ),
-  ),
-),
+            GestureDetector(
+              onTap: pickTime,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  selectedTime == null
+                      ? 'Select Time'
+                      : selectedTime!.format(context),
+                ),
+              ),
+            ),
 
-const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
             DropdownButtonFormField<String>(
               value: category,
               items: const [
-
-             DropdownMenuItem(
-  value: 'Fitness & Sport',
-  child: Text('Fitness & Sport'),
-),
-DropdownMenuItem(
-  value: 'Family',
-  child: Text('Family'),
-),
-DropdownMenuItem(
-  value: 'Pets',
-  child: Text('Pets'),
-),
-DropdownMenuItem(
-  value: 'Hobbies',
-  child: Text('Hobbies'),
-),
-DropdownMenuItem(
-  value: 'Social',
-  child: Text('Social'),
-),
-DropdownMenuItem(
-  value: 'Volunteering',
-  child: Text('Volunteering'),
-),
-DropdownMenuItem(
-  value: 'Learning',
-  child: Text('Learning'),
-),
-DropdownMenuItem(
-  value: 'Local Deals',
-  child: Text('Local Deals'),
-),
+                DropdownMenuItem(
+                  value: 'Fitness & Sport',
+                  child: Text('Fitness & Sport'),
+                ),
+                DropdownMenuItem(value: 'Family', child: Text('Family')),
+                DropdownMenuItem(value: 'Pets', child: Text('Pets')),
+                DropdownMenuItem(value: 'Hobbies', child: Text('Hobbies')),
+                DropdownMenuItem(value: 'Social', child: Text('Social')),
+                DropdownMenuItem(
+                  value: 'Volunteering',
+                  child: Text('Volunteering'),
+                ),
+                DropdownMenuItem(value: 'Learning', child: Text('Learning')),
+                DropdownMenuItem(
+                  value: 'Local Deals',
+                  child: Text('Local Deals'),
+                ),
               ],
               onChanged: (value) {
-
                 if (value == null) {
                   return;
                 }
@@ -576,170 +427,132 @@ DropdownMenuItem(
               },
             ),
 
-           const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-const Align(
-  alignment: Alignment.centerLeft,
-  child: Text(
-    'Repeat',
-    style: TextStyle(
-      fontWeight: FontWeight.bold,
-    ),
-  ),
-),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Repeat',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
 
-const SizedBox(height: 10),
+            const SizedBox(height: 10),
 
-Wrap(
-  spacing: 8,
-  runSpacing: 8,
-  children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('None'),
+                  selected: repeatType == 'none',
+                  onSelected: (_) {
+                    setState(() {
+                      repeatType = 'none';
+                    });
+                  },
+                ),
 
-    ChoiceChip(
-      label: const Text('None'),
-      selected: repeatType == 'none',
-      onSelected: (_) {
-        setState(() {
-          repeatType = 'none';
-        });
-      },
-    ),
+                ChoiceChip(
+                  label: const Text('Daily'),
+                  selected: repeatType == 'daily',
+                  onSelected: (_) {
+                    setState(() {
+                      repeatType = 'daily';
+                    });
+                  },
+                ),
 
-    ChoiceChip(
-      label: const Text('Daily'),
-      selected: repeatType == 'daily',
-      onSelected: (_) {
-        setState(() {
-          repeatType = 'daily';
-        });
-      },
-    ),
+                ChoiceChip(
+                  label: const Text('Weekly'),
+                  selected: repeatType == 'weekly',
+                  onSelected: (_) {
+                    setState(() {
+                      repeatType = 'weekly';
+                    });
+                  },
+                ),
 
-    ChoiceChip(
-      label: const Text('Weekly'),
-      selected: repeatType == 'weekly',
-      onSelected: (_) {
-        setState(() {
-          repeatType = 'weekly';
-        });
-      },
-    ),
+                ChoiceChip(
+                  label: const Text('Fortnightly'),
+                  selected: repeatType == 'fortnightly',
+                  onSelected: (_) {
+                    setState(() {
+                      repeatType = 'fortnightly';
+                    });
+                  },
+                ),
 
-    ChoiceChip(
-      label: const Text('Fortnightly'),
-      selected: repeatType == 'fortnightly',
-      onSelected: (_) {
-        setState(() {
-          repeatType = 'fortnightly';
-        });
-      },
-    ),
+                ChoiceChip(
+                  label: const Text('Monthly'),
+                  selected: repeatType == 'monthly',
+                  onSelected: (_) {
+                    setState(() {
+                      repeatType = 'monthly';
+                    });
+                  },
+                ),
+              ],
+            ),
 
-    ChoiceChip(
-      label: const Text('Monthly'),
-      selected: repeatType == 'monthly',
-      onSelected: (_) {
-        setState(() {
-          repeatType = 'monthly';
-        });
-      },
-    ),
+            if (repeatType != 'none') ...[
+              const SizedBox(height: 20),
 
-  ],
-),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Repeat Until (Optional)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
 
-         if (repeatType != 'none') ...[
+              const SizedBox(height: 10),
 
-  const SizedBox(height: 20),
+              GestureDetector(
+                onTap: pickRepeatEndDate,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade400),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    repeatEndDate == null
+                        ? 'Select End Date'
+                        : '${repeatEndDate!.day}/${repeatEndDate!.month}/${repeatEndDate!.year}',
+                  ),
+                ),
+              ),
 
-  const Align(
-    alignment: Alignment.centerLeft,
-    child: Text(
-      'Repeat Until (Optional)',
-      style: TextStyle(
-        fontWeight: FontWeight.bold,
-      ),
-    ),
-  ),
+              const SizedBox(height: 20),
+            ],
 
-  const SizedBox(height: 10),
-
-  GestureDetector(
-    onTap: pickRepeatEndDate,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: Colors.grey.shade400,
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        repeatEndDate == null
-            ? 'Select End Date'
-            : '${repeatEndDate!.day}/${repeatEndDate!.month}/${repeatEndDate!.year}',
-      ),
-    ),
-  ),
-
-  const SizedBox(height: 20),
-
-],
-
-GestureDetector(
-  onTap: pickImage,
+            GestureDetector(
+              onTap: pickImage,
               child: Container(
                 height: 180,
                 width: double.infinity,
-                decoration:
-                    BoxDecoration(
+                decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius:
-                      BorderRadius
-                          .circular(
-                    20,
-                  ),
-                  border: Border.all(
-                    color: Colors.grey
-                        .shade300,
-                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.grey.shade300),
                 ),
-                child:
-                    selectedImage == null
+                child: selectedImage == null
+                    ? const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.image_outlined, size: 50),
 
-                        ? const Column(
-                            mainAxisAlignment:
-                                MainAxisAlignment.center,
-                            children: [
+                          SizedBox(height: 10),
 
-                              Icon(
-                                Icons
-                                    .image_outlined,
-                                size: 50,
-                              ),
-
-                              SizedBox(
-                                height: 10,
-                              ),
-
-                              Text(
-                                'Add Photo (Optional)',
-                              ),
-                            ],
-                          )
-
-                        : ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(
-                              20,
-                            ),
-                            child:
-                                Image.file(
-                              selectedImage!,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
+                          Text('Add Photo (Optional)'),
+                        ],
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Image.file(selectedImage!, fit: BoxFit.cover),
+                      ),
               ),
             ),
 
@@ -747,24 +560,13 @@ GestureDetector(
 
             SizedBox(
               width: double.infinity,
-              child:
-                  ElevatedButton(
-                onPressed:
-                    saving
-                        ? null
-                        : saveOpportunity,
-                style:
-                    ElevatedButton.styleFrom(
-                  backgroundColor:
-                      AppColors.primary,
-                  foregroundColor:
-                      Colors.white,
+              child: ElevatedButton(
+                onPressed: saving ? null : saveOpportunity,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
                 ),
-                child: Text(
-                  saving
-                      ? 'Saving...'
-                      : 'Create Opportunity',
-                ),
+                child: Text(saving ? 'Saving...' : 'Create Activity'),
               ),
             ),
           ],

@@ -36,20 +36,12 @@ class _LoginScreenState extends State<LoginScreen>
       duration: const Duration(milliseconds: 350),
     );
 
-    _fade = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    );
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
 
     _slide = Tween<Offset>(
       begin: const Offset(0, .025),
       end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOutCubic,
-      ),
-    );
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
   }
@@ -69,9 +61,11 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
 
       Navigator.pushReplacementNamed(context, '/');
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        error = e.toString();
+        error =
+            'We could not sign you in. Please check your details and try again.';
       });
     } finally {
       if (mounted) {
@@ -93,9 +87,10 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
 
       Navigator.pushReplacementNamed(context, '/');
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        error = e.toString();
+        error = 'Google sign-in could not be completed. Please try again.';
       });
     }
   }
@@ -111,9 +106,10 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
 
       Navigator.pushReplacementNamed(context, '/');
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        error = e.toString();
+        error = 'Apple sign-in could not be completed. Please try again.';
       });
     }
   }
@@ -227,7 +223,6 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-
 }
 
 InputDecoration _premiumInputDecoration({
@@ -244,48 +239,28 @@ InputDecoration _premiumInputDecoration({
     ),
     prefixIcon: Padding(
       padding: const EdgeInsets.only(left: 18, right: 12),
-      child: Icon(
-        icon,
-        color: AppColors.textMuted,
-        size: 21,
-      ),
+      child: Icon(icon, color: AppColors.textMuted, size: 21),
     ),
-    prefixIconConstraints: const BoxConstraints(
-      minWidth: 52,
-      minHeight: 58,
-    ),
+    prefixIconConstraints: const BoxConstraints(minWidth: 52, minHeight: 58),
     suffixIcon: suffix,
     filled: true,
     fillColor: AppColors.background,
-    contentPadding: const EdgeInsets.symmetric(
-      horizontal: 18,
-      vertical: 20,
-    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(
-        color: AppColors.divider,
-      ),
+      borderSide: const BorderSide(color: AppColors.divider),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(
-        color: AppColors.primary,
-        width: 1.2,
-      ),
+      borderSide: const BorderSide(color: AppColors.primary, width: 1.2),
     ),
     errorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(
-        color: AppColors.error,
-      ),
+      borderSide: const BorderSide(color: AppColors.error),
     ),
     focusedErrorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(18),
-      borderSide: const BorderSide(
-        color: AppColors.error,
-        width: 1.2,
-      ),
+      borderSide: const BorderSide(color: AppColors.error, width: 1.2),
     ),
   );
 }
@@ -372,9 +347,7 @@ class _LoginCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.card.withOpacity(.82),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: AppColors.card.withOpacity(.7),
-        ),
+        border: Border.all(color: AppColors.card.withOpacity(.7)),
         boxShadow: [
           BoxShadow(
             color: AppColors.shadow.withOpacity(.7),
@@ -411,11 +384,15 @@ class _LoginCard extends StatelessWidget {
               icon: Icons.lock_outline_rounded,
               suffix: IconButton(
                 onPressed: onPasswordVisibilityChanged,
+                tooltip: obscurePassword ? 'Show password' : 'Hide password',
                 color: AppColors.textMuted,
                 icon: Icon(
                   obscurePassword
                       ? Icons.visibility_outlined
                       : Icons.visibility_off_outlined,
+                  semanticLabel: obscurePassword
+                      ? 'Show password'
+                      : 'Hide password',
                   size: 21,
                 ),
               ),
@@ -429,10 +406,7 @@ class _LoginCard extends StatelessWidget {
 
           const SizedBox(height: 20),
 
-          _PrimaryButton(
-            isLoading: isLoading,
-            onPressed: onSignIn,
-          ),
+          _PrimaryButton(isLoading: isLoading, onPressed: onSignIn),
 
           const SizedBox(height: 22),
 
@@ -464,10 +438,7 @@ class _PrimaryButton extends StatelessWidget {
   final bool isLoading;
   final VoidCallback onPressed;
 
-  const _PrimaryButton({
-    required this.isLoading,
-    required this.onPressed,
-  });
+  const _PrimaryButton({required this.isLoading, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -558,11 +529,7 @@ class _DividerLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Row(
       children: [
-        Expanded(
-          child: Divider(
-            color: AppColors.divider,
-          ),
-        ),
+        Expanded(child: Divider(color: AppColors.divider)),
         Padding(
           padding: EdgeInsets.symmetric(horizontal: 14),
           child: Text(
@@ -574,11 +541,7 @@ class _DividerLabel extends StatelessWidget {
             ),
           ),
         ),
-        Expanded(
-          child: Divider(
-            color: AppColors.divider,
-          ),
-        ),
+        Expanded(child: Divider(color: AppColors.divider)),
       ],
     );
   }
@@ -604,11 +567,7 @@ class _SocialButton extends StatelessWidget {
       height: 58,
       child: OutlinedButton.icon(
         onPressed: onPressed,
-        icon: Icon(
-          icon,
-          size: iconSize,
-          color: AppColors.charcoal,
-        ),
+        icon: Icon(icon, size: iconSize, color: AppColors.charcoal),
         label: Text(
           label,
           style: const TextStyle(
@@ -621,9 +580,7 @@ class _SocialButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 18),
           backgroundColor: AppColors.card,
           foregroundColor: AppColors.charcoal,
-          side: const BorderSide(
-            color: AppColors.divider,
-          ),
+          side: const BorderSide(color: AppColors.divider),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(19),
           ),
@@ -636,9 +593,7 @@ class _SocialButton extends StatelessWidget {
 class _CreateAccountPrompt extends StatelessWidget {
   final VoidCallback onPressed;
 
-  const _CreateAccountPrompt({
-    required this.onPressed,
-  });
+  const _CreateAccountPrompt({required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -683,9 +638,7 @@ class _CreateAccountPrompt extends StatelessWidget {
 class _ErrorBox extends StatelessWidget {
   final String message;
 
-  const _ErrorBox({
-    required this.message,
-  });
+  const _ErrorBox({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -695,9 +648,7 @@ class _ErrorBox extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.error.withOpacity(.08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.error.withOpacity(.24),
-        ),
+        border: Border.all(color: AppColors.error.withOpacity(.24)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -8,6 +8,7 @@ import '../services/review_service.dart';
 import '../services/follow_service.dart';
 import '../services/trust_safety_service.dart';
 import '../widgets/report_sheet.dart';
+import '../utils/helpers.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'followers_screen.dart';
 
@@ -74,11 +75,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .collection('users')
           .doc(widget.userId)
           .set({'photoUrl': url}, SetOptions(merge: true));
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'We could not update your profile photo. Please try again.',
+            ),
+          ),
+        );
       }
     }
 
@@ -294,7 +299,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             return Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                child: SelectableText(snapshot.error.toString()),
+                child: const Text(
+                  'We could not load this profile. Please try again.',
+                  textAlign: TextAlign.center,
+                ),
               ),
             );
           }
@@ -344,14 +352,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ? CircleAvatar(
                             radius: 55,
                             backgroundImage: NetworkImage(profilePhotoUrl),
+                            onBackgroundImageError: (exception, stackTrace) {},
                           )
                         : CircleAvatar(
                             radius: 55,
                             child: Text(
-                              (userData['userName']?.toString() ??
-                                      widget.userName)
-                                  .substring(0, 1)
-                                  .toUpperCase(),
+                              safeInitial(
+                                userData['userName']?.toString() ??
+                                    widget.userName,
+                              ),
                               style: const TextStyle(fontSize: 28),
                             ),
                           ),
@@ -468,7 +477,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.bookmark_border),
-                      label: const Text('Saved Opportunities'),
+                      label: const Text('Saved'),
                       onPressed: () {
                         Navigator.push(
                           context,

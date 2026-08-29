@@ -1,0 +1,221 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/stripe_ios-primary.swiftdeps"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AddToWalletButtonFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AddressSheetFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/ApplePayButtonView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayButtonView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayButtonView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayButtonView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/AuBECSDebitFormFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/CardFieldFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/CardFormFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/RCTBridge.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTBridge-59d877701c3704472cbf103874cdf2b4.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTBridge-59d877701c3704472cbf103874cdf2b4.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTBridge-59d877701c3704472cbf103874cdf2b4.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/RCTPresentedViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTPresentedViewController.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTPresentedViewController.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/RCTPresentedViewController.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/AddressSheet/AddressSheetUtils.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetUtils.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetUtils.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetUtils.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/AddressSheet/AddressSheetView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddressSheetView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/ApplePayUtils.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayUtils.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayUtils.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayUtils.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/ApplePayViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayViewController.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayViewController.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ApplePayViewController.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/AuBECSDebitFormView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AuBECSDebitFormView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/CardFieldView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFieldView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/CardFormView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CardFormView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingViewController.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewController.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewController.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewController.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/ConnectAccountOnboarding/ConnectAccountOnboardingViewManager.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewManager.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewManager.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ConnectAccountOnboardingViewManager.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/CustomerSheet/CustomerSheetUtils.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CustomerSheetUtils.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CustomerSheetUtils.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/CustomerSheetUtils.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/CustomerSheet/ReactNativeCustomerAdapter.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ReactNativeCustomerAdapter.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ReactNativeCustomerAdapter.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/ReactNativeCustomerAdapter.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/EmbeddedPaymentElementView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/EmbeddedPaymentElementView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/EmbeddedPaymentElementView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/EmbeddedPaymentElementView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/Errors.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Errors.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Errors.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Errors.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/FinancialConnections.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/FinancialConnections.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/FinancialConnections.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/FinancialConnections.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/Mappers.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Mappers.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Mappers.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/Mappers.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/NavigationBarManager.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarManager.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarManager.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarManager.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/NavigationBarView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/NavigationBarView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/PaymentMethodFactory.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentMethodFactory.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentMethodFactory.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentMethodFactory.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/PaymentOptionDisplayData+ReactNative.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentOptionDisplayData+ReactNative.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentOptionDisplayData+ReactNative.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentOptionDisplayData+ReactNative.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/PaymentPassFinder.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentPassFinder.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentPassFinder.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentPassFinder.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/PaymentSheetAppearance.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentSheetAppearance.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentSheetAppearance.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PaymentSheetAppearance.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeContainerView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeContainerView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeContainerView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeContainerView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeSdkEmitter.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkEmitter.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkEmitter.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkEmitter.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeSdkImpl+CustomerSheet.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+CustomerSheet.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+CustomerSheet.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+CustomerSheet.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeSdkImpl+Embedded.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+Embedded.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+Embedded.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+Embedded.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeSdkImpl+PaymentSheet.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+PaymentSheet.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+PaymentSheet.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl+PaymentSheet.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/StripeSdkImpl.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeSdkImpl.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/UIColorExtension.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/UIColorExtension.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/UIColorExtension.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/UIColorExtension.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/pushprovisioning/AddToWalletButtonView.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonView.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonView.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/AddToWalletButtonView.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/Stripe Sdk/pushprovisioning/PushProvisioningUtils.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PushProvisioningUtils.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PushProvisioningUtils.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/PushProvisioningUtils.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripeIosPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeIosPlugin.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeIosPlugin.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripeIosPlugin.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripePlugin+PayPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin+PayPlugin.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin+PayPlugin.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin+PayPlugin.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/stripe_ios-12.6.0/ios/stripe_ios/Sources/stripe_ios/StripePlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/stripe_ios.build/Objects-normal/arm64/StripePlugin.o"
+  }
+}

@@ -2,16 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../models/business_dashboard_model.dart';
 import '../services/business_dashboard_service.dart';
-
-import 'business_bookings_screen.dart';
-import 'business_services_screen.dart';
-import 'business_staff_screen.dart';
-import 'business_calendar_screen.dart';
-import 'business_subscription_screen.dart';
-import 'business_profile_screen.dart';
-import 'inbox_screen.dart';
-
 import '../theme/app_colors.dart';
+import 'business_bookings_screen.dart';
+import 'business_calendar_screen.dart';
+import 'business_profile_screen.dart';
+import 'business_service_requests_screen.dart';
+import 'business_services_screen.dart';
+import 'inbox_screen.dart';
+import 'post_availability_screen.dart';
 
 class BusinessHomeScreen extends StatefulWidget {
   final String businessId;
@@ -24,6 +22,7 @@ class BusinessHomeScreen extends StatefulWidget {
 
 class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
   late Future<BusinessDashboardModel> dashboardFuture;
+  late Future<BusinessDashboardMessagingModel> messagingFuture;
 
   @override
   void initState() {
@@ -33,487 +32,208 @@ class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
 
   void loadDashboard() {
     dashboardFuture = BusinessDashboardService.loadDashboard(widget.businessId);
+    messagingFuture = BusinessDashboardService.loadMessagingSummary(
+      widget.businessId,
+    );
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      loadDashboard();
-    });
+    setState(loadDashboard);
+    await Future.wait([dashboardFuture, messagingFuture]);
+  }
 
-    await dashboardFuture;
+  void _openPostAvailability() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PostAvailabilityScreen(businessId: widget.businessId),
+      ),
+    );
+  }
+
+  void _openBookings() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BusinessBookingsScreen(businessId: widget.businessId),
+      ),
+    );
+  }
+
+  void _openMessages() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            InboxScreen(businessId: widget.businessId, currentRole: 'business'),
+      ),
+    );
+  }
+
+  void _openServices() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BusinessServicesScreen(businessId: widget.businessId),
+      ),
+    );
+  }
+
+  void _openRequests() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            BusinessServiceRequestsScreen(businessId: widget.businessId),
+      ),
+    );
+  }
+
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BusinessProfileScreen(businessId: widget.businessId),
+      ),
+    );
+  }
+
+  void _openDiary() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BusinessCalendarScreen(businessId: widget.businessId),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-
       appBar: AppBar(
         elevation: 0,
-
         backgroundColor: AppColors.background,
-
         foregroundColor: AppColors.charcoal,
-
         title: const Text(
-          'Business Dashboard',
-
-          style: TextStyle(fontWeight: FontWeight.bold),
+          'Your Page',
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
-
       body: FutureBuilder<BusinessDashboardModel>(
         future: dashboardFuture,
-
         builder: (context, snapshot) {
-          // LOADING
-
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const _DashboardLoading();
           }
 
-          // ERROR
-
           if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 60,
-                      color: Colors.red,
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Dashboard failed to load',
-
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    Text(
-                      snapshot.error.toString(),
-                      textAlign: TextAlign.center,
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          loadDashboard();
-                        });
-                      },
-
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              ),
+            return _DashboardMessage(
+              icon: Icons.error_outline_rounded,
+              title: 'We could not load your Page',
+              message: 'Please check your connection and try again.',
+              actionLabel: 'Retry',
+              onAction: () => setState(loadDashboard),
             );
           }
 
-          // EMPTY
-
           if (!snapshot.hasData) {
-            return const Center(child: Text('No dashboard data'));
+            return _DashboardMessage(
+              icon: Icons.storefront_outlined,
+              title: 'Your Page is getting ready',
+              message:
+                  'Bookings, messages and available time will appear here.',
+              actionLabel: 'Refresh',
+              onAction: () => setState(loadDashboard),
+            );
           }
 
           final dashboard = snapshot.data!;
 
           return RefreshIndicator(
+            color: AppColors.serviceGreen,
             onRefresh: _refresh,
-
             child: ListView(
-              padding: const EdgeInsets.all(20),
-
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
               children: [
-                // HERO HEADER
-                Container(
-                  padding: const EdgeInsets.all(24),
-
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [AppColors.primary, Color(0xFFE65100)],
-
-                      begin: Alignment.topLeft,
-
-                      end: Alignment.bottomRight,
-                    ),
-
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-
-                    children: [
-                      const Text(
-                        'LocalLink Business',
-
-                        style: TextStyle(color: Colors.white70, fontSize: 16),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      const Text(
-                        'Dashboard',
-
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      Text(
-                        DateTime.now().toString().split(' ').first,
-
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ],
-                  ),
+                _DashboardHeader(dashboard: dashboard),
+                const SizedBox(height: 18),
+                _SetupAlerts(dashboard: dashboard),
+                const SizedBox(height: 18),
+                _SectionHeader(
+                  title: 'Quick actions',
+                  subtitle: 'Manage what you offer locally.',
                 ),
-
-                const SizedBox(height: 24),
-
-                // STATS
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Bookings',
-                        value: dashboard.todayBookings.toString(),
-                        icon: Icons.event,
-                      ),
-                    ),
-
-                    const SizedBox(width: 12),
-
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Today',
-                        value:
-                            '£${(dashboard.todayRevenue / 100).toStringAsFixed(2)}',
-                        icon: Icons.currency_pound,
-                      ),
-                    ),
-                  ],
-                ),
-
                 const SizedBox(height: 12),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Staff',
-                        value: dashboard.activeStaff.toString(),
-                        icon: Icons.people,
-                      ),
+                _ActionGrid(
+                  actions: [
+                    _BusinessAction(
+                      title: 'Share time',
+                      subtitle: 'Share available time',
+                      icon: Icons.event_available_outlined,
+                      color: AppColors.serviceGreen,
+                      onTap: _openPostAvailability,
                     ),
-
-                    const SizedBox(width: 12),
-
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Health',
-                        value: dashboard.healthTitle,
-                        icon: dashboard.isHealthy
-                            ? Icons.check_circle
-                            : Icons.warning_amber_rounded,
-                      ),
+                    _BusinessAction(
+                      title: 'Diary',
+                      subtitle: 'See today clearly',
+                      icon: Icons.calendar_month_outlined,
+                      color: AppColors.primary,
+                      onTap: _openDiary,
                     ),
-                  ],
-                ),
-
-                const SizedBox(height: 28),
-
-                // WARNINGS
-                if (!dashboard.stripeConnected)
-                  const _WarningCard(text: 'Stripe account not connected.'),
-
-                if (!dashboard.hasServices)
-                  const _WarningCard(text: 'No services created yet.'),
-
-                if (!dashboard.hasAvailability)
-                  const _WarningCard(text: 'No availability generated yet.'),
-
-                if (dashboard.restrictionMode)
-                  const _WarningCard(text: 'Subscription action required.'),
-
-                const SizedBox(height: 30),
-
-                // MANAGEMENT
-                const Text(
-                  'Management',
-
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.charcoal,
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                _StatusRow(
-                  title: 'Services',
-
-                  subtitle: dashboard.hasServices
-                      ? 'Pricing live'
-                      : 'Add your first service',
-
-                  icon: Icons.cut,
-
-                  color: dashboard.hasServices ? Colors.green : Colors.red,
-
-                  onTap: () {
-                    Navigator.push(
-                      context,
-
-                      MaterialPageRoute(
-                        builder: (_) => BusinessServicesScreen(
-                          businessId: widget.businessId,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                _StatusRow(
-                  title: 'Staff',
-
-                  subtitle: dashboard.activeStaff >= dashboard.allowedStaff
-                      ? 'Staff limit reached'
-                      : '${dashboard.activeStaff}/${dashboard.allowedStaff} staff used',
-
-                  icon: Icons.people_alt,
-
-                  color: dashboard.activeStaff >= dashboard.allowedStaff
-                      ? Colors.orange
-                      : Colors.green,
-
-                  onTap: () {
-                    Navigator.push(
-                      context,
-
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            BusinessStaffScreen(businessId: widget.businessId),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                _StatusRow(
-                  title: 'Availability',
-
-                  subtitle: dashboard.hasAvailability
-                      ? 'Ready for bookings'
-                      : 'Generate slots',
-
-                  icon: Icons.schedule,
-
-                  color: dashboard.hasAvailability
-                      ? Colors.green
-                      : Colors.orange,
-
-                  onTap: () {
-                    Navigator.push(
-                      context,
-
-                      MaterialPageRoute(
-                        builder: (_) => BusinessCalendarScreen(
-                          businessId: widget.businessId,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                _StatusRow(
-                  title: 'Stripe',
-
-                  subtitle: dashboard.stripeConnected
-                      ? 'Billing active'
-                      : 'Setup incomplete',
-
-                  icon: Icons.credit_card,
-
-                  color: dashboard.stripeConnected
-                      ? Colors.green
-                      : Colors.orange,
-
-                  onTap: () {
-                    Navigator.push(
-                      context,
-
-                      MaterialPageRoute(
-                        builder: (_) => BusinessSubscriptionScreen(
-                          businessId: widget.businessId,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                _StatusRow(
-                  title: 'Business Profile',
-
-                  subtitle: dashboard.profileComplete
-                      ? 'Profile complete'
-                      : dashboard.hasPhotos
-                      ? 'Add more business info'
-                      : 'Add photos and details',
-
-                  icon: Icons.storefront,
-
-                  color: dashboard.profileComplete
-                      ? AppColors.success
-                      : dashboard.hasPhotos
-                      ? AppColors.primary
-                      : AppColors.error,
-
-                  onTap: () {
-                    Navigator.push(
-                      context,
-
-                      MaterialPageRoute(
-                        builder: (_) => BusinessProfileScreen(
-                          businessId: widget.businessId,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 30),
-
-                // QUICK ACTIONS
-                const Text(
-                  'Quick Actions',
-
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.charcoal,
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                GridView.count(
-                  crossAxisCount: 2,
-
-                  shrinkWrap: true,
-
-                  physics: const NeverScrollableScrollPhysics(),
-
-                  crossAxisSpacing: 14,
-
-                  mainAxisSpacing: 14,
-
-                  childAspectRatio: 1.15,
-
-                  children: [
-                    _ActionCard(
+                    _BusinessAction(
                       title: 'Bookings',
-
-                      icon: Icons.calendar_today,
-
-                      onTap: () {
-                        Navigator.push(
-                          context,
-
-                          MaterialPageRoute(
-                            builder: (_) => BusinessBookingsScreen(
-                              businessId: widget.businessId,
-                            ),
-                          ),
-                        );
-                      },
+                      subtitle: 'Manage appointments',
+                      icon: Icons.calendar_today_outlined,
+                      color: AppColors.primary,
+                      onTap: _openBookings,
                     ),
-
-                    _ActionCard(
-                      title: 'Calendar',
-
-                      icon: Icons.schedule,
-
-                      onTap: () {
-                        Navigator.push(
-                          context,
-
-                          MaterialPageRoute(
-                            builder: (_) => BusinessCalendarScreen(
-                              businessId: widget.businessId,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
-                    _ActionCard(
-                      title: 'Staff',
-
-                      icon: Icons.people_alt,
-
-                      onTap: () {
-                        Navigator.push(
-                          context,
-
-                          MaterialPageRoute(
-                            builder: (_) => BusinessStaffScreen(
-                              businessId: widget.businessId,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-
-                    _ActionCard(
-                      title: 'Inbox',
-
+                    _BusinessAction(
+                      title: 'Messages',
+                      subtitle: 'Reply to people',
                       icon: Icons.chat_bubble_outline,
-
-                      onTap: () {
-                        Navigator.push(
-                          context,
-
-                          MaterialPageRoute(
-                            builder: (_) => InboxScreen(
-                              businessId: widget.businessId,
-                              currentRole: 'business',
-                            ),
-                          ),
-                        );
-                      },
+                      color: AppColors.info,
+                      onTap: _openMessages,
+                    ),
+                    _BusinessAction(
+                      title: 'Services',
+                      subtitle: 'Manage your offer',
+                      icon: Icons.handshake_outlined,
+                      color: AppColors.serviceGreen,
+                      onTap: _openServices,
+                    ),
+                    _BusinessAction(
+                      title: 'Requests',
+                      subtitle: 'Find people nearby',
+                      icon: Icons.campaign_outlined,
+                      color: AppColors.warning,
+                      onTap: _openRequests,
+                    ),
+                    _BusinessAction(
+                      title: 'Page details',
+                      subtitle: 'Update your page',
+                      icon: Icons.storefront_outlined,
+                      color: AppColors.charcoal,
+                      onTap: _openProfile,
                     ),
                   ],
                 ),
-
-                const SizedBox(height: 40),
+                const SizedBox(height: 22),
+                _AvailabilityStatusCard(
+                  dashboard: dashboard,
+                  onPostAvailability: _openPostAvailability,
+                  onOpenBookings: _openBookings,
+                ),
+                const SizedBox(height: 22),
+                _SectionHeader(
+                  title: 'Today',
+                  subtitle: 'A quick look at what needs attention.',
+                ),
+                const SizedBox(height: 12),
+                _DashboardStats(
+                  dashboard: dashboard,
+                  messagingFuture: messagingFuture,
+                ),
               ],
             ),
           );
@@ -523,102 +243,231 @@ class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
   }
 }
 
-// =====================================================
-// STAT CARD
-// =====================================================
+class _DashboardLoading extends StatelessWidget {
+  const _DashboardLoading();
 
-class _StatCard extends StatelessWidget {
-  final String title;
-  final String value;
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            SizedBox(height: 14),
+            Text(
+              'Getting your Page ready...',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardMessage extends StatelessWidget {
   final IconData icon;
+  final String title;
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
 
-  const _StatCard({
-    required this.title,
-    required this.value,
+  const _DashboardMessage({
     required this.icon,
+    required this.title,
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 52, color: AppColors.primary),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.charcoal,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textMuted, height: 1.35),
+            ),
+            const SizedBox(height: 20),
+            FilledButton(onPressed: onAction, child: Text(actionLabel)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardHeader extends StatelessWidget {
+  final BusinessDashboardModel dashboard;
+
+  const _DashboardHeader({required this.dashboard});
+
+  @override
+  Widget build(BuildContext context) {
+    final statusText = dashboard.isHealthy
+        ? 'Ready for bookings'
+        : dashboard.healthTitle;
+    final statusColor = dashboard.isHealthy
+        ? AppColors.success
+        : AppColors.warning;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: AppColors.serviceGreen.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.storefront_outlined,
+              color: AppColors.serviceGreen,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Your local page',
+                  style: TextStyle(
+                    color: AppColors.charcoal,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Keep track of bookings, messages and the times you have shared.',
+                  style: TextStyle(color: AppColors.textMuted, height: 1.35),
+                ),
+                const SizedBox(height: 12),
+                _StatusPill(
+                  label: statusText,
+                  icon: dashboard.isHealthy
+                      ? Icons.check_circle_outline
+                      : Icons.info_outline,
+                  color: statusColor,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SetupAlerts extends StatelessWidget {
+  final BusinessDashboardModel dashboard;
+
+  const _SetupAlerts({required this.dashboard});
+
+  @override
+  Widget build(BuildContext context) {
+    final alerts = <String>[
+      if (!dashboard.hasServices)
+        'Add a service before sharing when people can book you.',
+      if (!dashboard.hasAvailability)
+        'Share your first available time so nearby people can see you.',
+      if (dashboard.restrictionMode)
+        'A subscription step is needed before every Page tool is available.',
+    ];
+
+    if (alerts.isEmpty) {
+      return const _TrustNotice(
+        icon: Icons.check_circle_outline,
+        text: 'Your Page is ready for local bookings.',
+        color: AppColors.success,
+      );
+    }
+
+    return Column(
+      children: alerts
+          .map(
+            (alert) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _TrustNotice(
+                icon: Icons.info_outline,
+                text: alert,
+                color: AppColors.warning,
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _TrustNotice extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  const _TrustNotice({
+    required this.icon,
+    required this.text,
+    required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
-
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-
-        borderRadius: BorderRadius.circular(24),
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-
-            blurRadius: 10,
-
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-          Icon(icon, size: 28, color: AppColors.primary),
-
-          const SizedBox(height: 20),
-
-          Text(
-            value,
-
-            style: const TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: AppColors.charcoal,
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          Text(title, style: const TextStyle(color: Colors.grey)),
-        ],
-      ),
-    );
-  }
-}
-
-// =====================================================
-// WARNING CARD
-// =====================================================
-
-class _WarningCard extends StatelessWidget {
-  final String text;
-
-  const _WarningCard({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-
-      padding: const EdgeInsets.all(18),
-
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3E0),
-
-        borderRadius: BorderRadius.circular(18),
-      ),
-
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100)),
-
-          const SizedBox(width: 14),
-
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               text,
-
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: AppColors.charcoal,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
             ),
           ),
         ],
@@ -627,18 +476,69 @@ class _WarningCard extends StatelessWidget {
   }
 }
 
-// =====================================================
-// STATUS ROW
-// =====================================================
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
 
-class _StatusRow extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: AppColors.charcoal,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: const TextStyle(color: AppColors.textMuted, height: 1.3),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionGrid extends StatelessWidget {
+  final List<_BusinessAction> actions;
+
+  const _ActionGrid({required this.actions});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 700 ? 3 : 2;
+        final spacing = 12.0;
+        final itemWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: actions
+              .map((action) => SizedBox(width: itemWidth, child: action))
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _BusinessAction extends StatelessWidget {
   final String title;
   final String subtitle;
   final IconData icon;
   final Color color;
   final VoidCallback onTap;
 
-  const _StatusRow({
+  const _BusinessAction({
     required this.title,
     required this.subtitle,
     required this.icon,
@@ -649,70 +549,53 @@ class _StatusRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
-
-      borderRadius: BorderRadius.circular(22),
-
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
-
         child: Container(
-          padding: const EdgeInsets.all(18),
-
+          height: 128,
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-
-                blurRadius: 10,
-
-                offset: const Offset(0, 4),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
           ),
-
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
-
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-
-                  borderRadius: BorderRadius.circular(16),
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-
-                child: Icon(icon, color: color),
+                child: Icon(icon, color: color, size: 22),
               ),
-
-              const SizedBox(width: 16),
-
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-
-                  children: [
-                    Text(
-                      title,
-
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-
-                    const SizedBox(height: 4),
-
-                    Text(subtitle, style: const TextStyle(color: Colors.grey)),
-                  ],
+              const SizedBox(height: 18),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.charcoal,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
                 ),
               ),
-
-              Icon(Icons.chevron_right, color: Colors.grey.shade400),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
@@ -721,80 +604,285 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
-// =====================================================
-// ACTION CARD
-// =====================================================
+class _AvailabilityStatusCard extends StatelessWidget {
+  final BusinessDashboardModel dashboard;
+  final VoidCallback onPostAvailability;
+  final VoidCallback onOpenBookings;
 
-class _ActionCard extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _ActionCard({
-    required this.title,
-    required this.icon,
-    required this.onTap,
+  const _AvailabilityStatusCard({
+    required this.dashboard,
+    required this.onPostAvailability,
+    required this.onOpenBookings,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-
-      borderRadius: BorderRadius.circular(24),
-
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-
-        onTap: onTap,
-
-        child: Container(
-          padding: const EdgeInsets.all(20),
-
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-
-                blurRadius: 10,
-
-                offset: const Offset(0, 4),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Available time',
+                  style: TextStyle(
+                    color: AppColors.charcoal,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onPostAvailability,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Share'),
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 560 ? 4 : 2;
+              final spacing = 10.0;
+              final itemWidth =
+                  (constraints.maxWidth - (spacing * (columns - 1))) / columns;
 
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: [
+                  SizedBox(
+                    width: itemWidth,
+                    child: _MetricTile(
+                      label: 'Live',
+                      value: dashboard.liveAvailability.toString(),
+                      emptyText: 'Share your first time',
+                      onTap: onPostAvailability,
+                    ),
+                  ),
+                  SizedBox(
+                    width: itemWidth,
+                    child: _MetricTile(
+                      label: 'Coming up',
+                      value: dashboard.scheduledAvailability.toString(),
+                      emptyText: 'Share more time',
+                      onTap: onPostAvailability,
+                    ),
+                  ),
+                  SizedBox(
+                    width: itemWidth,
+                    child: _MetricTile(
+                      label: 'Needs reply',
+                      value: dashboard.pendingApprovalBookings.toString(),
+                      emptyText: 'Nothing waiting',
+                      onTap: onOpenBookings,
+                    ),
+                  ),
+                  SizedBox(
+                    width: itemWidth,
+                    child: _MetricTile(
+                      label: 'Ended today',
+                      value: dashboard.expiredAvailabilityToday.toString(),
+                      emptyText: 'Nothing ended',
+                      onTap: onPostAvailability,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
+class _DashboardStats extends StatelessWidget {
+  final BusinessDashboardModel dashboard;
+  final Future<BusinessDashboardMessagingModel> messagingFuture;
 
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
+  const _DashboardStats({
+    required this.dashboard,
+    required this.messagingFuture,
+  });
 
-                  borderRadius: BorderRadius.circular(18),
-                ),
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 560 ? 3 : 2;
+        final spacing = 10.0;
+        final itemWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
 
-                child: Icon(icon, size: 34, color: AppColors.primary),
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            SizedBox(
+              width: itemWidth,
+              child: _MetricTile(
+                label: 'Bookings',
+                value: dashboard.upcomingBookings.toString(),
+                emptyText: 'No bookings yet',
               ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: FutureBuilder<BusinessDashboardMessagingModel>(
+                future: messagingFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const _MetricTile(
+                      label: 'Messages',
+                      value: '...',
+                      emptyText: 'Checking inbox',
+                    );
+                  }
 
-              const SizedBox(height: 18),
+                  final unread = snapshot.data?.unreadMessages ?? 0;
+                  return _MetricTile(
+                    label: 'Messages',
+                    value: snapshot.hasError ? '-' : unread.toString(),
+                    emptyText: snapshot.hasError
+                        ? 'Could not check'
+                        : 'No unread messages',
+                  );
+                },
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _MetricTile(
+                label: 'Available time',
+                value: dashboard.liveAvailability.toString(),
+                emptyText: 'Share time',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
 
+class _MetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String emptyText;
+  final VoidCallback? onTap;
+
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    required this.emptyText,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final count = int.tryParse(value) ?? 0;
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 92),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Text(
-                title,
-
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: count == 0 ? AppColors.textMuted : AppColors.charcoal,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
                   color: AppColors.charcoal,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                count == 0 ? emptyText : 'Up to date',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  height: 1.2,
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _StatusPill({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

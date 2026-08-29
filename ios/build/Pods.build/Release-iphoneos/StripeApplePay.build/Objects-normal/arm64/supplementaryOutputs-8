@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/locallink_flutter/ios/Pods/StripeApplePay/StripeApplePay/StripeApplePay/Source/PaymentsCore/API/Models/Address.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripeApplePay.build/Objects-normal/arm64/StripeApplePay.swiftsourceinfo"
+  }
+}

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../widgets/booking_status_chip.dart';
+
 class MyBookingsScreen extends StatelessWidget {
   const MyBookingsScreen({super.key});
 
@@ -20,21 +22,14 @@ class MyBookingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
-      return const Scaffold(
-        body: Center(
-          child: Text('Please log in'),
-        ),
-      );
+      return const Scaffold(body: Center(child: Text('Please log in')));
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Bookings'),
-      ),
+      appBar: AppBar(title: const Text('My Bookings')),
 
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -44,28 +39,20 @@ class MyBookingsScreen extends StatelessWidget {
             .snapshots(),
 
         builder: (context, snapshot) {
-
-          if (snapshot.connectionState ==
-              ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(),
-            );
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Error: ${snapshot.error}',
-              ),
+            return const Center(
+              child: Text("We couldn't load your bookings. Please try again."),
             );
           }
 
           final docs = snapshot.data?.docs ?? [];
 
           if (docs.isEmpty) {
-            return const Center(
-              child: Text('No bookings yet'),
-            );
+            return const Center(child: Text('No bookings yet'));
           }
 
           return ListView.builder(
@@ -73,25 +60,17 @@ class MyBookingsScreen extends StatelessWidget {
             itemCount: docs.length,
 
             itemBuilder: (context, index) {
+              final booking = docs[index].data() as Map<String, dynamic>;
 
-              final booking =
-                  docs[index].data()
-                      as Map<String, dynamic>;
+              final serviceName = booking['serviceName'] ?? 'Service';
 
-              final serviceName =
-                  booking['serviceName'] ?? 'Service';
+              final staffName = booking['staffName'] ?? 'Team member';
 
-              final staffName =
-                  booking['staffName'] ?? 'Staff';
+              final status = booking['status'] ?? 'unknown';
 
-              final status =
-                  booking['status'] ?? 'unknown';
+              final startDate = booking['startDate'] as Timestamp;
 
-              final startDate =
-                  booking['startDate'] as Timestamp;
-
-             final paymentMethod =
-    booking['paymentMethod'] ?? 'unknown';
+              final paymentMethod = booking['paymentMethod'] ?? 'unknown';
               return Container(
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(16),
@@ -102,14 +81,11 @@ class MyBookingsScreen extends StatelessWidget {
                 ),
 
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
 
                   children: [
-
                     Row(
                       children: [
-
                         Expanded(
                           child: Text(
                             serviceName,
@@ -120,26 +96,7 @@ class MyBookingsScreen extends StatelessWidget {
                           ),
                         ),
 
-                        Container(
-                          padding:
-                              const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-
-                          decoration: BoxDecoration(
-                            color: status == 'confirmed'
-                                ? Colors.green.shade100
-                                : Colors.orange.shade100,
-
-                            borderRadius:
-                                BorderRadius.circular(20),
-                          ),
-
-                          child: Text(
-                            status.replaceAll('_', ' '),
-                          ),
-                        ),
+                        BookingStatusChip(status: status, compact: true),
                       ],
                     ),
 

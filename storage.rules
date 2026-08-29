@@ -1,0 +1,99 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isImage() {
+      return request.resource != null
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function businessData(businessId) {
+      return firestore.get(
+        /databases/(default)/documents/businesses/$(businessId)
+      ).data;
+    }
+
+    function isBusinessOwnerOrCreator(businessId) {
+      return signedIn()
+        && (
+          businessData(businessId).ownerId == request.auth.uid
+          || businessData(businessId).businessOwnerId == request.auth.uid
+          || businessData(businessId).ownerUid == request.auth.uid
+          || businessData(businessId).claimedBy == request.auth.uid
+          || businessData(businessId).createdBy == request.auth.uid
+          || (
+            businessData(businessId).ownerIds is list
+            && request.auth.uid in businessData(businessId).ownerIds
+          )
+          || (
+            businessData(businessId).adminUserIds is list
+            && request.auth.uid in businessData(businessId).adminUserIds
+          )
+        );
+    }
+
+    function isActiveBusinessTeam(businessId) {
+      return signedIn()
+        && firestore.exists(
+          /databases/(default)/documents/businesses/$(businessId)/staff/$(request.auth.uid)
+        )
+        && firestore.get(
+          /databases/(default)/documents/businesses/$(businessId)/staff/$(request.auth.uid)
+        ).data.isActive == true;
+    }
+
+    function canManageBusiness(businessId) {
+      return isBusinessOwnerOrCreator(businessId)
+        || isActiveBusinessTeam(businessId);
+    }
+
+    match /profile_photos/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && fileName == request.auth.uid + '.jpg'
+        && isImage();
+    }
+
+    match /businessPhotos/{businessId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if canManageBusiness(businessId) && isImage();
+    }
+
+    match /servicePhotos/{businessId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if canManageBusiness(businessId) && isImage();
+    }
+
+    match /opportunityPhotos/{fileName} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /opportunityPhotos/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && userId == request.auth.uid
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /communityHelpPhotos/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && userId == request.auth.uid
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

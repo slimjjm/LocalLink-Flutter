@@ -61,7 +61,7 @@ class _PostcodeSearchSheetState extends State<PostcodeSearchSheet> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Enter a UK postcode to discover nearby businesses, services and community opportunities.',
+              'Enter a UK postcode to discover nearby businesses, services and community activities.',
               style: TextStyle(
                 color: Colors.black54,
                 fontSize: 15,

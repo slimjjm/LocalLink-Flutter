@@ -184,6 +184,7 @@ async function createReminderNotifications({
       opportunityId,
       notificationId,
     },
+    preferenceKey: "reminders",
   }
 );
   }

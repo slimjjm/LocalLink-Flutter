@@ -5,6 +5,7 @@ class BookingSuccessScreen extends StatelessWidget {
   final String businessName;
   final DateTime bookingDate;
   final bool isCashBooking;
+  final bool pendingBusinessConfirmation;
 
   const BookingSuccessScreen({
     super.key,
@@ -12,6 +13,7 @@ class BookingSuccessScreen extends StatelessWidget {
     required this.businessName,
     required this.bookingDate,
     required this.isCashBooking,
+    this.pendingBusinessConfirmation = false,
   });
 
   String formatDate(DateTime date) {
@@ -26,9 +28,7 @@ class BookingSuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-      ),
+      appBar: AppBar(automaticallyImplyLeading: false),
 
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -36,30 +36,29 @@ class BookingSuccessScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-
             const SizedBox(height: 40),
 
-            const Icon(
-              Icons.check_circle,
-              size: 90,
-              color: Colors.green,
-            ),
+            const Icon(Icons.check_circle, size: 90, color: Colors.green),
 
             const SizedBox(height: 24),
 
-            const Text(
-              'Booking Confirmed',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
+            Text(
+              pendingBusinessConfirmation
+                  ? 'Waiting for confirmation'
+                  : 'Booking confirmed',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
             ),
 
             const SizedBox(height: 12),
 
             Text(
               isCashBooking
-                  ? 'Your cash booking is confirmed.'
+                  ? pendingBusinessConfirmation
+                        ? 'Your booking request has been sent. This appointment starts soon, so they need to confirm they can still help. Most people respond within 10 minutes.'
+                        : 'Your cash booking is confirmed.'
+                  : pendingBusinessConfirmation
+                  ? 'Your payment is secure. This appointment starts soon, so they need to confirm they can still help. Most people respond within 10 minutes.'
                   : 'Your payment was successful and your booking is confirmed.',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 16),
@@ -79,7 +78,6 @@ class BookingSuccessScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   Text(
                     serviceName,
                     style: const TextStyle(
@@ -90,10 +88,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
                   const SizedBox(height: 10),
 
-                  Text(
-                    businessName,
-                    style: const TextStyle(fontSize: 16),
-                  ),
+                  Text(businessName, style: const TextStyle(fontSize: 16)),
 
                   const SizedBox(height: 10),
 
@@ -112,10 +107,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.popUntil(
-                    context,
-                    (route) => route.isFirst,
-                  );
+                  Navigator.popUntil(context, (route) => route.isFirst);
                 },
 
                 child: const Text('Back Home'),
@@ -123,7 +115,6 @@ class BookingSuccessScreen extends StatelessWidget {
             ),
 
             const SizedBox(height: 12),
-
           ],
         ),
       ),

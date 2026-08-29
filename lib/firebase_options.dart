@@ -52,32 +52,32 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyA5g8flHbKSgSotjo3APx4XUJqckVTlbTk',
-    appId: '1:126981571024:android:3d6cd6bf4119bee6bd39d5',
+    appId: '1:126981571024:android:8b89de9bad8e4e6ebd39d5',
     messagingSenderId: '126981571024',
     projectId: 'locallink-995a5',
     storageBucket: 'locallink-995a5.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyApwXO62bvgmF7OdscIs4uGkgYSftsX-Jg',
-    appId: '1:126981571024:ios:4bd4e6b2b8e78485bd39d5',
+    apiKey: 'AIzaSyBg751i899gDAlKIR1U2e0I1oi9Ib7phIA',
+    appId: '1:126981571024:ios:bdd17ecadbdd6895bd39d5',
     messagingSenderId: '126981571024',
     projectId: 'locallink-995a5',
     storageBucket: 'locallink-995a5.firebasestorage.app',
     androidClientId: '126981571024-gm2hkrd7b4692jk884hd51gena3qe4a1.apps.googleusercontent.com',
-    iosClientId: '126981571024-p0fsgkrrkb3865j6f37utjiks4f29fk8.apps.googleusercontent.com',
-    iosBundleId: 'com.example.locallinkFlutter',
+    iosClientId: '126981571024-hjpfhln362q2iadd2mp9gblvg2sjnfll.apps.googleusercontent.com',
+    iosBundleId: 'Canine-Connections.LocalLink',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyApwXO62bvgmF7OdscIs4uGkgYSftsX-Jg',
-    appId: '1:126981571024:ios:4bd4e6b2b8e78485bd39d5',
+    apiKey: 'AIzaSyBg751i899gDAlKIR1U2e0I1oi9Ib7phIA',
+    appId: '1:126981571024:ios:bdd17ecadbdd6895bd39d5',
     messagingSenderId: '126981571024',
     projectId: 'locallink-995a5',
     storageBucket: 'locallink-995a5.firebasestorage.app',
     androidClientId: '126981571024-gm2hkrd7b4692jk884hd51gena3qe4a1.apps.googleusercontent.com',
-    iosClientId: '126981571024-p0fsgkrrkb3865j6f37utjiks4f29fk8.apps.googleusercontent.com',
-    iosBundleId: 'com.example.locallinkFlutter',
+    iosClientId: '126981571024-hjpfhln362q2iadd2mp9gblvg2sjnfll.apps.googleusercontent.com',
+    iosBundleId: 'Canine-Connections.LocalLink',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

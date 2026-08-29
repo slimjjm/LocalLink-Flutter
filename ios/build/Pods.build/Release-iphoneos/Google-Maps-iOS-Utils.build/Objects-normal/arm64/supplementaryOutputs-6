@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/locallink_flutter/ios/Pods/Google-Maps-iOS-Utils/Sources/GoogleMapsUtils/GeometryUtils/Internal/CartesianPoint.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/GoogleMapsUtils.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/Google-Maps-iOS-Utils-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/Google-Maps-iOS-Utils-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/Google-Maps-iOS-Utils-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/GoogleMapsUtils-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/GoogleMapsUtils.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/GoogleMapsUtils.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Google-Maps-iOS-Utils.build/Objects-normal/arm64/GoogleMapsUtils.swiftsourceinfo"
+  }
+}

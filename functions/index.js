@@ -14,9 +14,19 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 
 const STRIPE_API_VERSION = "2023-10-16";
+const SHORT_NOTICE_APPROVAL_HOURS = 2;
+const SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES = Number(
+  process.env.SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES || 10
+);
+const PENDING_PAYMENT_TIMEOUT_MINUTES = 15;
+const {
+  cleanupDecisionForPaymentIntentStatus,
+} = require("./stripe_cleanup_policy");
 
 const notifications =
   require("./notifications");
+const sendPushToUser =
+  notifications.sendPushToUser;
 
   const reminders =
   require("./reminders");
@@ -28,10 +38,28 @@ let stripeClient = null;
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
-    console.log("🔥 STRIPE KEY:", key.substring(0, 8));
   if (!key) throw new HttpsError("failed-precondition", "Stripe secret not configured.");
   if (!stripeClient) stripeClient = require("stripe")(key, { apiVersion: STRIPE_API_VERSION });
   return stripeClient;
+}
+
+async function assertAdminRequest(request) {
+  assert(request.auth, "unauthenticated", "Login required.");
+
+  const email = String(request.auth.token?.email || "").trim().toLowerCase();
+  const approvedEmails = [
+    "jae19882011@hotmail.co.uk",
+    "founder@locallinkapp.co.uk",
+  ];
+
+  assert(approvedEmails.includes(email), "permission-denied", "Admin access required.");
+
+  const adminEmailSnap = await db.collection("adminEmails").doc(email).get();
+  assert(
+    adminEmailSnap.exists && adminEmailSnap.data()?.enabled !== false,
+    "permission-denied",
+    "Admin access required."
+  );
 }
 
 function assert(cond, code, msg) {
@@ -41,6 +69,245 @@ function assert(cond, code, msg) {
 function safeTrim(s) {
   return String(s ?? "").trim();
 }
+
+function publicText(value, fallback = "") {
+  const text = safeTrim(value);
+  return text || fallback;
+}
+
+function firstPublicText(...values) {
+  for (const value of values) {
+    const text = safeTrim(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function truncatePublicText(value, maxLength = 220) {
+  const text = safeTrim(value).replace(/\s+/g, " ");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function dateToPublicLabel(value) {
+  const millis = timestampToMillis(value);
+  if (!millis) return "";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(millis));
+}
+
+function publicPriceLabel(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value === 0 ? "Free" : `£${value.toFixed(value % 1 === 0 ? 0 : 2)}`;
+  }
+  return safeTrim(value);
+}
+
+function publicImageUrl(data) {
+  return firstPublicText(
+    data.photoUrl,
+    data.photoURL,
+    data.imageUrl,
+    data.imageURL,
+    data.coverImageUrl,
+    data.coverPhotoUrl,
+    Array.isArray(data.photoURLs) ? data.photoURLs[0] : ""
+  );
+}
+
+function communityHelpPublicLabel(post) {
+  const type = safeTrim(post.type);
+  if (type === "free_item") return "Free item";
+
+  const mode = safeTrim(post.mode).toLowerCase();
+  const category = safeTrim(post.itemCategory).toLowerCase();
+  const title = safeTrim(post.title).toLowerCase();
+  const copy = `${category} ${title}`;
+  const kind = copy.includes("dog")
+    ? "dog"
+    : copy.includes("cat")
+      ? "cat"
+      : category === "pet"
+        ? "pet"
+        : "item";
+
+  if (mode === "lost") return `Missing ${kind}`;
+  if (mode === "found") return `Found ${kind}`;
+  return "Community help";
+}
+
+function communityHelpPublicStatus(post) {
+  const status = safeTrim(post.status).toLowerCase();
+  if (["resolved", "reunited", "found"].includes(status)) {
+    return status === "reunited" ? "Reunited" : "Found / resolved";
+  }
+  return communityHelpPublicLabel(post);
+}
+
+function isPubliclyPreviewable(data) {
+  if (!data) return false;
+  if (data.isDeleted === true || data.deleted === true) return false;
+  if (data.hidden === true || data.isHidden === true) return false;
+  if (data.private === true || data.isPrivate === true) return false;
+  return data.isActive !== false;
+}
+
+function publicPreviewPayload({ type, id, parentId = "", label, title, subtitle = "", location = "", imageUrl = "" }) {
+  return {
+    type,
+    id,
+    parentId,
+    label: publicText(label, "LocalLink"),
+    title: publicText(title, "LocalLink post"),
+    subtitle: truncatePublicText(subtitle),
+    location: truncatePublicText(location, 120),
+    imageUrl: publicText(imageUrl),
+  };
+}
+
+exports.getPublicSharePreview = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const type = safeTrim(request.data?.type);
+    const id = safeTrim(request.data?.id);
+    const parentId = safeTrim(request.data?.parentId);
+
+    assert(id, "invalid-argument", "Missing shared item id.");
+
+    if (type === "communityHelp") {
+      const snap = await db.collection("communityHelpPosts").doc(id).get();
+      assert(snap.exists, "not-found", "This Community Help post is no longer available.");
+
+      const post = snap.data() || {};
+      assert(isPubliclyPreviewable(post), "not-found", "This Community Help post is no longer available.");
+
+      const lastSeen = firstPublicText(
+        post.lastSeenText,
+        dateToPublicLabel(post.lastSeenAt),
+        dateToPublicLabel(post.createdAt)
+      );
+      const location = firstPublicText(post.publicLocation, post.approximateLocationLabel, post.areaLabel);
+      const subtitleParts = [
+        lastSeen ? `Last seen: ${lastSeen}` : "",
+        post.description,
+        post.markings,
+      ].filter((part) => safeTrim(part));
+
+      return publicPreviewPayload({
+        type,
+        id,
+        label: communityHelpPublicStatus(post),
+        title: firstPublicText(post.petName, post.itemName, post.title, "Community Help post"),
+        subtitle: subtitleParts.join(" · "),
+        location,
+        imageUrl: publicImageUrl(post),
+      });
+    }
+
+    if (type === "activity") {
+      const snap = await db.collection("opportunities").doc(id).get();
+      assert(snap.exists, "not-found", "This activity is no longer available.");
+
+      const post = snap.data() || {};
+      assert(isPubliclyPreviewable(post), "not-found", "This activity is no longer available.");
+
+      const when = firstPublicText(post.dateText, post.timeText, dateToPublicLabel(post.date), dateToPublicLabel(post.startTime));
+      const location = firstPublicText(post.publicLocation, post.locationLabel, post.location, post.areaLabel);
+
+      return publicPreviewPayload({
+        type,
+        id,
+        label: firstPublicText(post.category, "Activity"),
+        title: firstPublicText(post.title, post.name, "Local activity"),
+        subtitle: firstPublicText(when, post.description),
+        location,
+        imageUrl: publicImageUrl(post),
+      });
+    }
+
+    if (type === "availability") {
+      const snap = await db.collection("availabilityPosts").doc(id).get();
+      assert(snap.exists, "not-found", "This available time is no longer live.");
+
+      const post = snap.data() || {};
+      assert(isPubliclyPreviewable(post), "not-found", "This available time is no longer live.");
+
+      const when = firstPublicText(
+        post.availabilityText,
+        dateToPublicLabel(post.availabilityAt),
+        dateToPublicLabel(post.startDateTime)
+      );
+      const price = publicPriceLabel(post.price);
+      const subtitle = [when, price, post.description].filter((part) => safeTrim(part)).join(" · ");
+
+      return publicPreviewPayload({
+        type,
+        id,
+        label: "Available time",
+        title: firstPublicText(post.serviceName, post.title, "Available service"),
+        subtitle,
+        location: firstPublicText(post.publicLocation, post.locationLabel, post.areaLabel),
+        imageUrl: publicImageUrl(post),
+      });
+    }
+
+    if (type === "business") {
+      const snap = await db.collection("businesses").doc(id).get();
+      assert(snap.exists, "not-found", "This business is no longer available.");
+
+      const business = snap.data() || {};
+      assert(isPubliclyPreviewable(business), "not-found", "This business is no longer available.");
+
+      return publicPreviewPayload({
+        type,
+        id,
+        label: firstPublicText(business.category, "Business"),
+        title: firstPublicText(business.businessName, business.name, "Local business"),
+        subtitle: firstPublicText(business.shortDescription, business.description),
+        location: firstPublicText(business.serviceArea, business.publicLocation, business.areaLabel),
+        imageUrl: publicImageUrl(business),
+      });
+    }
+
+    if (type === "service") {
+      assert(parentId, "invalid-argument", "Missing business id.");
+
+      const businessSnap = await db.collection("businesses").doc(parentId).get();
+      assert(businessSnap.exists, "not-found", "This service is no longer available.");
+      const business = businessSnap.data() || {};
+      assert(isPubliclyPreviewable(business), "not-found", "This service is no longer available.");
+
+      const serviceSnap = await db.collection("businesses").doc(parentId).collection("services").doc(id).get();
+      assert(serviceSnap.exists, "not-found", "This service is no longer available.");
+      const service = serviceSnap.data() || {};
+      assert(isPubliclyPreviewable(service), "not-found", "This service is no longer available.");
+
+      const price = publicPriceLabel(service.price);
+      const duration = service.durationMinutes ? `${service.durationMinutes} minutes` : "";
+
+      return publicPreviewPayload({
+        type,
+        id,
+        parentId,
+        label: "Service",
+        title: firstPublicText(service.name, service.serviceName, "Local service"),
+        subtitle: [firstPublicText(business.businessName, business.name), price, duration, service.description]
+          .filter((part) => safeTrim(part))
+          .join(" · "),
+        location: firstPublicText(business.serviceArea, business.publicLocation, business.areaLabel),
+        imageUrl: firstPublicText(publicImageUrl(service), publicImageUrl(business)),
+      });
+    }
+
+    throw new HttpsError("invalid-argument", "Unsupported shared item type.");
+  }
+);
 
 //
 // =================================================
@@ -64,9 +331,6 @@ function timestampToMillis(value) {
 
   return null;
 }
-exports.notifyNewMessage =
-  notifications.notifyNewMessage;
-
 exports.notifyBookingCancelled =
   notifications.notifyBookingCancelled;
 
@@ -92,6 +356,225 @@ function bookingMessageRef(bookingId) {
 async function isBusinessOwner(uid, businessId) {
   const snap = await db.collection("businesses").doc(businessId).get();
   return snap.exists && snap.data()?.ownerId === uid;
+}
+
+function bookingConversationRef(bookingId) {
+  return db.collection("conversations").doc(bookingId);
+}
+
+function businessCustomerConversationId({ businessId, customerId }) {
+  return `business_${businessId}_${customerId}`;
+}
+
+async function activeBusinessCustomerConversationRef({ businessId, customerId }) {
+  const preferredRef = db
+    .collection("conversations")
+    .doc(businessCustomerConversationId({ businessId, customerId }));
+  const preferredSnap = await preferredRef.get();
+
+  if (preferredSnap.exists && preferredSnap.data()?.archived !== true) {
+    return preferredRef;
+  }
+
+  const snap = await db
+    .collection("conversations")
+    .where("businessId", "==", businessId)
+    .where("customerId", "==", customerId)
+    .where("archived", "==", false)
+    .limit(1)
+    .get();
+
+  if (!snap.empty) {
+    return snap.docs[0].ref;
+  }
+
+  return preferredRef;
+}
+
+function conversationStatusForBookingStatus(status) {
+  if (status === "completed") return "completed";
+  if (status === "confirmed") return "booking";
+  return "enquiry";
+}
+
+function isBookingMessageStatus(status) {
+  return ["confirmed", "completed"].includes(status);
+}
+
+async function buildConversationPayload(bookingId, booking) {
+  const businessId = safeTrim(booking.businessId);
+  const customerId = safeTrim(booking.customerId);
+
+  assert(businessId && customerId, "failed-precondition", "Booking is missing participant data.");
+
+  const businessSnap = await db.collection("businesses").doc(businessId).get();
+  const business = businessSnap.data() || {};
+  const businessOwnerId = safeTrim(booking.businessOwnerId) || safeTrim(business.ownerId);
+
+  assert(businessOwnerId, "failed-precondition", "Business owner not found.");
+
+  return {
+    bookingId,
+    currentBookingId: bookingId,
+    customerId,
+    businessId,
+    businessOwnerId,
+    originatingServiceId: safeTrim(booking.originatingServiceId) || safeTrim(booking.serviceId),
+    originatingServiceName: safeTrim(booking.originatingServiceName) || safeTrim(booking.serviceName) || "Service",
+    currentBookingServiceId: safeTrim(booking.serviceId),
+    currentBookingServiceName: safeTrim(booking.serviceName) || "Service",
+    currentBookingStatus: booking.status || "unknown",
+    serviceId: safeTrim(booking.serviceId),
+    businessName: safeTrim(booking.businessName) || safeTrim(business.businessName) || safeTrim(business.name) || "Business",
+    customerName: safeTrim(booking.customerName) || "Customer",
+    serviceName: safeTrim(booking.serviceName) || "Service",
+    serviceImageUrl: safeTrim(booking.serviceImageUrl) || safeTrim(booking.imageUrl) || safeTrim(booking.photoUrl),
+    bookingStartAt: booking.startDate || booking.startTime || null,
+    lastMessage: safeTrim(booking.lastMessage),
+    lastMessageAt: booking.lastMessageAt || null,
+    unreadCustomerCount: Number(booking.unreadCustomerCount || 0),
+    unreadBusinessCount: Number(booking.unreadBusinessCount || 0),
+    archived: booking.archived === true,
+    participants: [customerId, businessOwnerId],
+    bookingStatus: booking.status || "unknown",
+    quotationStatus: booking.quotationStatus || "none",
+    acceptedQuotationId: booking.acceptedQuotationId || "",
+    quotationIds: Array.isArray(booking.quotationIds) ? booking.quotationIds : [],
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+async function ensureBookingConversationDoc(bookingId, booking) {
+  if (!isBookingMessageStatus(booking.status)) {
+    return null;
+  }
+
+  const conversationId = safeTrim(booking.conversationId) || bookingId;
+  const ref = bookingConversationRef(conversationId);
+  const existingSnap = await ref.get();
+  const existing = existingSnap.data() || {};
+  const mergedBooking = existingSnap.exists
+    ? {
+        ...existing,
+        ...booking,
+        lastMessage: existing.lastMessage,
+        lastMessageAt: existing.lastMessageAt,
+        lastMessageId: existing.lastMessageId,
+        lastSenderId: existing.lastSenderId,
+        lastSenderType: existing.lastSenderType,
+        unreadCustomerCount: existing.unreadCustomerCount,
+        unreadBusinessCount: existing.unreadBusinessCount,
+        customerHasMessaged: existing.customerHasMessaged === true,
+      }
+    : booking;
+  const payload = await buildConversationPayload(
+    bookingId,
+    mergedBooking
+  );
+
+  await ref.set(
+    {
+      ...payload,
+      conversationStatus:
+        conversationStatusForBookingStatus(booking.status),
+      customerHasMessaged:
+        existing.customerHasMessaged === true,
+      createdAt: existingSnap.exists
+        ? existingSnap.data()?.createdAt || admin.firestore.FieldValue.serverTimestamp()
+        : admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return ref;
+}
+
+async function requireBookingConversationAccess(uid, bookingId) {
+  assert(uid, "unauthenticated", "Login required.");
+  assert(bookingId, "invalid-argument", "Missing bookingId.");
+
+  const bookingRef = db.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef.get();
+
+  assert(bookingSnap.exists, "not-found", "Booking not found.");
+
+  const booking = bookingSnap.data() || {};
+  const conversationRef = await ensureBookingConversationDoc(bookingId, booking);
+
+  assert(conversationRef, "failed-precondition", "Conversation is available after booking confirmation.");
+
+  const conversationSnap = await conversationRef.get();
+  const conversation = conversationSnap.data() || {};
+  const isCustomer = conversation.customerId === uid;
+  const isBusiness = conversation.businessOwnerId === uid;
+  const communityParticipants = Array.isArray(conversation.communityHelpParticipantIds)
+    ? conversation.communityHelpParticipantIds
+    : [];
+  const isCommunityParticipant = communityParticipants.includes(uid);
+
+  assert(isCustomer || isBusiness || isCommunityParticipant, "permission-denied", "You cannot access this conversation.");
+
+  return {
+    conversationRef,
+    conversation,
+    senderType: isCustomer ? "customer" : "business",
+    recipientId: isCustomer ? conversation.businessOwnerId : conversation.customerId,
+  };
+}
+
+async function requireConversationAccess(uid, conversationId) {
+  assert(uid, "unauthenticated", "Login required.");
+  assert(conversationId, "invalid-argument", "Missing conversationId.");
+
+  const conversationRef = db.collection("conversations").doc(conversationId);
+  const conversationSnap = await conversationRef.get();
+
+  assert(conversationSnap.exists, "not-found", "Conversation not found.");
+
+  const conversation = conversationSnap.data() || {};
+  const isCustomer = conversation.customerId === uid;
+  const isBusiness = conversation.businessOwnerId === uid;
+  const communityParticipants = Array.isArray(conversation.communityHelpParticipantIds)
+    ? conversation.communityHelpParticipantIds
+    : [];
+  const isCommunityParticipant = communityParticipants.includes(uid);
+
+  assert(isCustomer || isBusiness || isCommunityParticipant, "permission-denied", "You cannot access this conversation.");
+
+  return {
+    conversationRef,
+    conversation,
+    senderType: isCustomer ? "customer" : "business",
+    recipientId: isCustomer ? conversation.businessOwnerId : conversation.customerId,
+  };
+}
+
+async function updateRepeatCustomerSnapshot({
+  customerId,
+  businessId,
+  serviceId,
+  serviceName,
+  customerAddress,
+  customerNotes,
+}) {
+  if (!customerId || !businessId) return;
+
+  await db
+    .collection("users")
+    .doc(customerId)
+    .collection("businessPreferences")
+    .doc(businessId)
+    .set(
+      {
+        businessId,
+        lastServiceId: serviceId || "",
+        lastServiceName: serviceName || "",
+        lastAddress: customerAddress || "",
+        lastNotes: customerNotes || "",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 }
 
 async function addSystemBookingMessage(bookingId, text) {
@@ -123,6 +606,689 @@ async function releaseBookedSlot({ businessId, staffId, slotId }) {
     lockExpiresAt: admin.firestore.FieldValue.delete(),
   });
 }
+
+async function releaseBookingSlots(booking) {
+  if (booking.directAvailability === true && booking.bookingId) {
+    await restoreDirectAvailabilityBooking(booking.bookingId);
+    return;
+  }
+
+  const businessId = safeTrim(booking.businessId);
+  const staffId = safeTrim(booking.staffId);
+  const slotIds = Array.isArray(booking.slotIds)
+    ? booking.slotIds
+    : [booking.slotId].filter(Boolean);
+
+  for (const slotId of slotIds) {
+    await releaseBookedSlot({ businessId, staffId, slotId });
+  }
+}
+
+function directAvailabilityStartFromRequest(requestData) {
+  const millis = Number(requestData?.selectedStartMillis || 0);
+  if (!Number.isFinite(millis) || millis <= 0) {
+    throw new HttpsError("invalid-argument", "Choose a valid time.");
+  }
+  return new Date(millis);
+}
+
+function postRemainingCapacity(post) {
+  return Number(post.remainingCapacity ?? post.capacity ?? 1);
+}
+
+function assertDirectAvailabilitySelectable(post, selectedStart, durationMinutes) {
+  const type = safeTrim(post.type || post.availabilityType || "exact");
+  const remaining = postRemainingCapacity(post);
+  assert(post.isActive === true, "failed-precondition", "Availability is no longer live.");
+  assert(post.archived !== true, "failed-precondition", "Availability is no longer live.");
+  assert((post.status || "live") === "live", "failed-precondition", "Availability is no longer live.");
+  assert(remaining > 0, "failed-precondition", "Availability is fully booked.");
+
+  if (type !== "flexible") {
+    assert(selectedStart > new Date(), "failed-precondition", "Choose a future time.");
+  }
+
+  const postStart = post.startDateTime || post.startTime || post.availabilityAt;
+  const postEnd = post.endDateTime || post.endTime || post.availableUntil;
+
+  if (type === "exact" && postStart?.toDate) {
+    assert(
+      postStart.toDate().getTime() === selectedStart.getTime(),
+      "failed-precondition",
+      "This appointment time is no longer available."
+    );
+  }
+
+  if (type === "window" && postStart?.toDate && postEnd?.toDate) {
+    const selectedEnd = new Date(selectedStart.getTime() + durationMinutes * 60 * 1000);
+    assert(
+      selectedStart >= postStart.toDate() && selectedEnd <= postEnd.toDate(),
+      "failed-precondition",
+      "Choose a time within the advertised window."
+    );
+  }
+}
+
+function directAvailabilityPostUpdate(post, bookingId) {
+  const remaining = Math.max(0, postRemainingCapacity(post) - 1);
+  return {
+    remainingCapacity: remaining,
+    status: remaining === 0 ? "booked" : "live",
+    isActive: remaining > 0,
+    archived: remaining === 0,
+    archivedReason: remaining === 0 ? "booked" : null,
+    bookingId,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    archivedAt: remaining === 0
+      ? admin.firestore.FieldValue.serverTimestamp()
+      : admin.firestore.FieldValue.delete(),
+  };
+}
+
+function directAvailabilityRestoreUpdate(post, bookingId) {
+  const capacity = Math.max(1, Number(post.capacity ?? 1));
+  const remaining = Math.max(0, postRemainingCapacity(post));
+  const restored = Math.min(capacity, remaining + 1);
+  const update = {
+    remainingCapacity: restored,
+    status: "live",
+    isActive: true,
+    archived: false,
+    archivedReason: admin.firestore.FieldValue.delete(),
+    archivedAt: admin.firestore.FieldValue.delete(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (safeTrim(post.bookingId) === bookingId) {
+    update.bookingId = admin.firestore.FieldValue.delete();
+  }
+
+  return update;
+}
+
+function directAvailabilityNeedsRestore(booking) {
+  return booking?.directAvailability === true &&
+    Boolean(safeTrim(booking.availabilityPostId)) &&
+    !booking.availabilityRestoredAt;
+}
+
+async function restoreDirectAvailabilityInTransaction(tx, bookingRef, booking, bookingId) {
+  if (!directAvailabilityNeedsRestore(booking)) return false;
+
+  const postRef = db
+    .collection("availabilityPosts")
+    .doc(safeTrim(booking.availabilityPostId));
+  const postSnap = await tx.get(postRef);
+
+  if (postSnap.exists) {
+    tx.update(postRef, directAvailabilityRestoreUpdate(postSnap.data() || {}, bookingId));
+  }
+
+  tx.update(bookingRef, {
+    availabilityRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return true;
+}
+
+async function restoreDirectAvailabilityBooking(bookingId) {
+  const bookingRef = db.collection("bookings").doc(bookingId);
+
+  return db.runTransaction(async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists) return false;
+
+    const booking = bookingSnap.data() || {};
+    return restoreDirectAvailabilityInTransaction(
+      tx,
+      bookingRef,
+      booking,
+      bookingId
+    );
+  });
+}
+
+function releaseBookingSlotsInTransaction(tx, booking) {
+  const businessId = safeTrim(booking.businessId);
+  const staffId = safeTrim(booking.staffId);
+  const bookingSlotIds = Array.isArray(booking.slotIds)
+    ? booking.slotIds
+    : [booking.slotId];
+
+  if (!businessId || !staffId) return;
+
+  for (const bookingSlotId of bookingSlotIds.map(safeTrim).filter(Boolean)) {
+    const sRef = slotRef(businessId, staffId, bookingSlotId);
+    tx.update(sRef, {
+      lockedByBookingId: admin.firestore.FieldValue.delete(),
+      lockExpiresAt: admin.firestore.FieldValue.delete(),
+    });
+  }
+}
+
+async function finalizePaidBookingInTransaction({
+  tx,
+  bookingRef,
+  bookingId,
+  paymentMetadata = {},
+}) {
+  const bookingSnap = await tx.get(bookingRef);
+
+  if (!bookingSnap.exists) {
+    logger.error("Paid booking reconciliation skipped; booking not found", {
+      bookingId,
+    });
+    return { changed: false, reason: "booking_not_found" };
+  }
+
+  const data = bookingSnap.data() || {};
+  const currentStatus = safeTrim(data.status);
+  const currentPaymentStatus = safeTrim(data.paymentStatus);
+
+  if (
+    currentPaymentStatus === "paid" &&
+    ["confirmed", "pending_business_confirmation"].includes(currentStatus)
+  ) {
+    return { changed: false, reason: "already_paid" };
+  }
+
+  if (currentStatus !== "pending_payment") {
+    logger.warn("Paid booking reconciliation skipped; booking is no longer pending", {
+      bookingId,
+      status: currentStatus,
+      paymentStatus: currentPaymentStatus,
+    });
+    return { changed: false, reason: "not_pending" };
+  }
+
+  const businessId = safeTrim(data.businessId || paymentMetadata.businessId);
+  const staffId = safeTrim(data.staffId || paymentMetadata.staffId);
+  const slotId = safeTrim(data.slotId || paymentMetadata.slotId);
+  const directAvailability =
+    data.directAvailability === true ||
+    paymentMetadata.directAvailability === "true";
+
+  if (!businessId) {
+    logger.error("Paid booking reconciliation skipped; missing businessId", {
+      bookingId,
+    });
+    return { changed: false, reason: "missing_business" };
+  }
+
+  if (!directAvailability) {
+    if (!staffId || !slotId) {
+      logger.error("Paid booking reconciliation skipped; missing staff slot metadata", {
+        bookingId,
+      });
+      return { changed: false, reason: "missing_slot_metadata" };
+    }
+
+    const bookingSlotIds = Array.isArray(data.slotIds)
+      ? data.slotIds
+      : [slotId];
+
+    for (const bookingSlotId of bookingSlotIds.map(safeTrim).filter(Boolean)) {
+      const bookingSlotRef = db
+        .collection("businesses")
+        .doc(businessId)
+        .collection("staff")
+        .doc(staffId)
+        .collection("availableSlots")
+        .doc(bookingSlotId);
+
+      const slotSnap = await tx.get(bookingSlotRef);
+      if (!slotSnap.exists) {
+        throw new Error("Slot missing");
+      }
+
+      const slotData = slotSnap.data() || {};
+      if (slotData.lockedByBookingId !== bookingId) {
+        throw new Error("Slot lock mismatch");
+      }
+
+      tx.update(bookingSlotRef, {
+        isBooked: true,
+        lockExpiresAt: admin.firestore.FieldValue.delete(),
+        lockedByBookingId: admin.firestore.FieldValue.delete(),
+      });
+    }
+  }
+
+  const nextStatus = data.requiresBusinessApproval === true
+    ? "pending_business_confirmation"
+    : "confirmed";
+
+  tx.update(bookingRef, {
+    status: nextStatus,
+    paymentStatus: "paid",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    confirmedAt: nextStatus === "confirmed"
+      ? admin.firestore.FieldValue.serverTimestamp()
+      : null,
+  });
+
+  return { changed: true, status: nextStatus };
+}
+
+async function retrievePendingPaymentIntentForCleanup(stripe, booking) {
+  const paymentIntentId = safeTrim(booking.paymentIntentId);
+
+  if (!paymentIntentId) {
+    return {
+      decision: "abandon",
+      paymentIntent: null,
+      reason: "missing_payment_intent",
+    };
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    return {
+      decision: cleanupDecisionForPaymentIntentStatus(paymentIntent.status),
+      paymentIntent,
+      reason: paymentIntent.status,
+    };
+  } catch (error) {
+    if (
+      error?.type === "StripeInvalidRequestError" &&
+      error?.code === "resource_missing"
+    ) {
+      return {
+        decision: "abandon",
+        paymentIntent: null,
+        reason: "payment_intent_not_found",
+      };
+    }
+
+    logger.warn("Pending booking cleanup skipped; Stripe lookup failed", {
+      bookingId: booking.bookingId,
+      paymentIntentId,
+      type: error?.type,
+      code: error?.code,
+      message: error?.message,
+    });
+
+    return {
+      decision: "retry_later",
+      paymentIntent: null,
+      reason: "stripe_lookup_failed",
+    };
+  }
+}
+
+async function cancelAbandonedPaymentIntentIfNeeded(stripe, paymentIntent, bookingId) {
+  if (!paymentIntent) return;
+
+  const cancellable = [
+    "requires_payment_method",
+    "requires_confirmation",
+    "requires_action",
+    "requires_capture",
+  ];
+
+  if (!cancellable.includes(paymentIntent.status)) return;
+
+  try {
+    await stripe.paymentIntents.cancel(paymentIntent.id);
+  } catch (error) {
+    logger.warn("Stripe PaymentIntent cancel failed during scheduled cleanup", {
+      bookingId,
+      paymentIntentId: paymentIntent.id,
+      type: error?.type,
+      code: error?.code,
+      message: error?.message,
+    });
+  }
+}
+
+async function buildDirectAvailabilityBooking({
+  request,
+  paymentMethod,
+  paymentStatus,
+}) {
+  const uid = request.auth?.uid;
+  assert(uid, "unauthenticated", "Login required.");
+
+  const businessId = safeTrim(request.data?.businessId);
+  const serviceId = safeTrim(request.data?.serviceId);
+  const availabilityPostId = safeTrim(request.data?.availabilityPostId);
+  const customerName = safeTrim(request.data?.customerName);
+  const customerAddress = safeTrim(request.data?.customerAddress);
+  const customerNotes = safeTrim(request.data?.customerNotes);
+  const selectedStart = directAvailabilityStartFromRequest(request.data);
+
+  assert(businessId && serviceId && availabilityPostId, "invalid-argument", "Missing booking data.");
+
+  const businessRef = db.collection("businesses").doc(businessId);
+  const businessSnap = await businessRef.get();
+  assert(businessSnap.exists, "not-found", "Business not found.");
+
+  const business = businessSnap.data() || {};
+  const paymentMethods = Array.isArray(business.paymentMethods)
+    ? business.paymentMethods
+    : ["cash"];
+  assert(paymentMethods.includes(paymentMethod), "failed-precondition", "This payment method is not available.");
+
+  const serviceSnap = await businessRef.collection("services").doc(serviceId).get();
+  assert(serviceSnap.exists, "not-found", "Service not found.");
+
+  const service = serviceSnap.data() || {};
+  const availabilityRef = db.collection("availabilityPosts").doc(availabilityPostId);
+  const serviceName = safeTrim(service.name) || "Service";
+  const serviceDurationMinutes = Number(service.durationMinutes || 30);
+  const serviceImageUrl = safeTrim(service.imageUrl || service.photoUrl || "");
+  const activeConversationRef = await activeBusinessCustomerConversationRef({
+    businessId,
+    customerId: uid,
+  });
+  const activeConversationSnap = await activeConversationRef.get();
+  const bookingRef = db.collection("bookings").doc();
+  const bookingId = bookingRef.id;
+  const conversationId = activeConversationSnap.exists ? activeConversationRef.id : bookingId;
+  const bookingDay = new Date(selectedStart);
+  bookingDay.setHours(0, 0, 0, 0);
+  const hoursBefore = (selectedStart - new Date()) / (1000 * 60 * 60);
+  const requiresBusinessApproval = hoursBefore < SHORT_NOTICE_APPROVAL_HOURS;
+  const approvalExpiresAt = requiresBusinessApproval
+    ? admin.firestore.Timestamp.fromMillis(Date.now() + SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES * 60 * 1000)
+    : null;
+  const lockExpiresAt = paymentMethod === "stripe"
+    ? admin.firestore.Timestamp.fromMillis(
+      Date.now() + PENDING_PAYMENT_TIMEOUT_MINUTES * 60 * 1000
+    )
+    : null;
+
+  let booking = null;
+
+  await db.runTransaction(async (tx) => {
+    const postSnap = await tx.get(availabilityRef);
+    assert(postSnap.exists, "failed-precondition", "Availability no longer exists.");
+
+    const post = postSnap.data() || {};
+    assert(safeTrim(post.businessId) === businessId, "permission-denied", "Availability does not belong to this business.");
+    assert(safeTrim(post.serviceId) === serviceId, "failed-precondition", "Availability no longer matches this service.");
+    assertDirectAvailabilitySelectable(post, selectedStart, serviceDurationMinutes);
+
+    const price = Number(post.priceOverride ?? post.price ?? service.price ?? 0);
+    assert(price > 0, "failed-precondition", "Invalid service price.");
+    const selectedEnd = new Date(selectedStart.getTime() + serviceDurationMinutes * 60 * 1000);
+    const status = paymentMethod === "cash"
+      ? (requiresBusinessApproval ? "pending_business_confirmation" : "confirmed")
+      : "pending_payment";
+
+    booking = {
+      bookingId,
+      conversationId,
+      businessId,
+      customerId: uid,
+      serviceId,
+      serviceName,
+      serviceDurationMinutes,
+      serviceImageUrl,
+      staffId: null,
+      staffName: "",
+      customerName,
+      customerAddress,
+      customerNotes,
+      addOns: [],
+      addOnsTotal: 0,
+      price,
+      status,
+      requiresBusinessApproval,
+      approvalExpiresAt,
+      paymentMethod,
+      paymentStatus,
+      paymentIntentId: "",
+      directAvailability: true,
+      availabilityPostId,
+      lockExpiresAt,
+      slotId: "",
+      slotIds: [],
+      slotPath: "",
+      bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
+      startDate: admin.firestore.Timestamp.fromDate(selectedStart),
+      endDate: admin.firestore.Timestamp.fromDate(selectedEnd),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      confirmedAt: paymentMethod === "cash" && !requiresBusinessApproval
+        ? admin.firestore.FieldValue.serverTimestamp()
+        : null,
+      unreadForCustomer: 0,
+      unreadForBusiness: 0,
+    };
+
+    tx.set(bookingRef, booking);
+    tx.update(availabilityRef, directAvailabilityPostUpdate(post, bookingId));
+  });
+
+  return {
+    bookingId,
+    booking,
+    business,
+    bookingRef,
+    requiresBusinessApproval,
+  };
+}
+
+exports.createDirectAvailabilityCashBooking = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const result = await buildDirectAvailabilityBooking({
+      request,
+      paymentMethod: "cash",
+      paymentStatus: "pay_on_arrival",
+    });
+
+    const booking = result.booking || {};
+    const ownerId = result.business.ownerId || result.business.businessOwnerId;
+
+    if (ownerId) {
+      await sendPushToUser(ownerId, {
+        title: result.requiresBusinessApproval ? "New Last-Minute Request" : "New Booking",
+        body: `${booking.customerName || "A customer"} booked ${booking.serviceName || "a service"}.`,
+        data: {
+          bookingId: result.bookingId,
+          businessId: booking.businessId,
+          type: result.requiresBusinessApproval ? "last_minute_request" : "new_booking",
+        },
+        preferenceKey: "serviceBookingUpdates",
+      });
+    }
+
+    await sendPushToUser(booking.customerId, {
+      title: result.requiresBusinessApproval ? "Booking request sent" : "Booking confirmed",
+      body: result.requiresBusinessApproval
+        ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
+        : `Your booking for ${booking.serviceName || "your service"} is confirmed.`,
+      data: {
+        bookingId: result.bookingId,
+        businessId: booking.businessId,
+        type: result.requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
+      },
+      preferenceKey: "serviceBookingUpdates",
+    });
+
+    await ensureBookingConversationDoc(result.bookingId, booking);
+
+    return {
+      ok: true,
+      bookingId: result.bookingId,
+      status: booking.status,
+      requiresBusinessApproval: result.requiresBusinessApproval,
+    };
+  }
+);
+
+exports.createDirectAvailabilityPaymentIntent = onCall(
+  {
+    region: "us-central1",
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async (request) => {
+    const stripe = getStripe();
+    const businessId = safeTrim(request.data?.businessId);
+    assert(businessId, "invalid-argument", "Missing booking data.");
+
+    const preflightBusinessSnap = await db.collection("businesses").doc(businessId).get();
+    assert(preflightBusinessSnap.exists, "not-found", "Business not found.");
+
+    const preflightBusiness = preflightBusinessSnap.data() || {};
+    const stripeAccountId = preflightBusiness.stripeAccountId;
+    assert(stripeAccountId, "failed-precondition", "Stripe not connected.");
+
+    const account = await stripe.accounts.retrieve(stripeAccountId);
+    assert(account.charges_enabled, "failed-precondition", "Business cannot accept payments yet.");
+
+    let result = null;
+
+    try {
+      result = await buildDirectAvailabilityBooking({
+        request,
+        paymentMethod: "stripe",
+        paymentStatus: "pending",
+      });
+      const booking = result.booking || {};
+
+      const paymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: booking.price,
+          currency: "gbp",
+          automatic_payment_methods: { enabled: true },
+          metadata: {
+            bookingId: result.bookingId,
+            businessId: booking.businessId,
+            customerId: booking.customerId,
+            directAvailability: "true",
+            availabilityPostId: booking.availabilityPostId,
+          },
+          transfer_data: {
+            destination: stripeAccountId,
+          },
+        },
+        {
+          idempotencyKey: `direct_availability_booking_${result.bookingId}`,
+        }
+      );
+
+      await result.bookingRef.update({
+        paymentIntentId: paymentIntent.id,
+        paymentStatus: "payment_intent_created",
+      });
+
+      return {
+        ok: true,
+        bookingId: result.bookingId,
+        clientSecret: paymentIntent.client_secret,
+        requiresBusinessApproval: result.requiresBusinessApproval,
+      };
+    } catch (error) {
+      if (result?.bookingId) {
+        logger.warn("Restoring direct availability after payment setup failure", {
+          bookingId: result.bookingId,
+          error: error.message,
+        });
+        await restoreDirectAvailabilityBooking(result.bookingId);
+      }
+
+      throw error;
+    }
+  }
+);
+
+exports.cancelPendingCardBooking = onCall(
+  {
+    region: "us-central1",
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    assert(uid, "unauthenticated", "Login required.");
+
+    const bookingId = safeTrim(request.data?.bookingId);
+    assert(bookingId, "invalid-argument", "Missing bookingId.");
+
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    assert(bookingSnap.exists, "not-found", "Booking not found.");
+
+    const booking = bookingSnap.data() || {};
+    assert(booking.customerId === uid, "permission-denied", "Not allowed.");
+    assert(booking.paymentMethod === "stripe", "failed-precondition", "This is not a card booking.");
+
+    const status = safeTrim(booking.status);
+    const paymentStatus = safeTrim(booking.paymentStatus);
+    const pendingStatuses = ["pending_payment"];
+    const pendingPaymentStatuses = ["", "pending", "payment_intent_created"];
+
+    if (!pendingStatuses.includes(status) ||
+      !pendingPaymentStatuses.includes(paymentStatus)) {
+      return { ok: true, status, paymentStatus, alreadyFinal: true };
+    }
+
+    const stripe = getStripe();
+    const paymentIntentId = safeTrim(booking.paymentIntentId);
+
+    if (paymentIntentId) {
+      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+      if (paymentIntent.status === "succeeded") {
+        return { ok: false, status: "payment_succeeded" };
+      }
+
+      if (paymentIntent.status === "processing") {
+        return { ok: false, status: "payment_processing" };
+      }
+
+      const cancellable = [
+        "requires_payment_method",
+        "requires_confirmation",
+        "requires_action",
+        "requires_capture",
+      ];
+
+      if (cancellable.includes(paymentIntent.status)) {
+        try {
+          await stripe.paymentIntents.cancel(paymentIntentId);
+        } catch (error) {
+          logger.warn("Stripe PaymentIntent cancel failed during booking release", {
+            bookingId,
+            paymentIntentId,
+            message: error.message,
+          });
+        }
+      }
+    }
+
+    await db.runTransaction(async (tx) => {
+      const freshSnap = await tx.get(bookingRef);
+      if (!freshSnap.exists) return;
+
+      const fresh = freshSnap.data() || {};
+      const freshStatus = safeTrim(fresh.status);
+      const freshPaymentStatus = safeTrim(fresh.paymentStatus);
+
+      if (!pendingStatuses.includes(freshStatus) ||
+        !pendingPaymentStatuses.includes(freshPaymentStatus)) {
+        return;
+      }
+
+      if (fresh.directAvailability === true) {
+        await restoreDirectAvailabilityInTransaction(tx, bookingRef, fresh, bookingId);
+      } else {
+        releaseBookingSlotsInTransaction(tx, fresh);
+      }
+
+      tx.update(bookingRef, {
+        status: "payment_cancelled",
+        paymentStatus: "cancelled",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { ok: true, status: "payment_cancelled" };
+  }
+);
 
 function buildCancellationOutcome({ cancelledBy, shouldRefund, hoursBeforeStart }) {
   if (cancelledBy === "business") {
@@ -502,6 +1668,10 @@ exports.cancelBooking = onCall(
 
     await batch.commit();
 
+    if (booking.directAvailability === true) {
+      await restoreDirectAvailabilityBooking(bookingId);
+    }
+
     console.log("✅ BOOKING CANCELLED:", bookingId);
 
     // 🔥 SYSTEM MESSAGE
@@ -520,7 +1690,8 @@ exports.cancelBooking = onCall(
     body: shouldRefund
       ? "Your booking was cancelled by the business. A refund has been issued."
       : "Your booking was cancelled by the business.",
-    data: { bookingId, type: "booking_cancelled" }
+    data: { bookingId, type: "booking_cancelled" },
+    preferenceKey: "serviceBookingUpdates",
   });
 
   await bookingRef.update({
@@ -538,7 +1709,8 @@ exports.cancelBooking = onCall(
       body: shouldRefund
         ? "A customer cancelled their booking (refund issued)."
         : "A customer cancelled their booking (no refund).",
-      data: { bookingId, type: "booking_cancelled" }
+      data: { bookingId, type: "booking_cancelled" },
+      preferenceKey: "serviceBookingUpdates",
     });
   }
 
@@ -562,6 +1734,327 @@ exports.cancelBooking = onCall(
     throw new HttpsError("internal", error.message);
   }
 });
+
+exports.acceptShortNoticeBooking = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+    const bookingId = safeTrim(request.data?.bookingId);
+    assert(bookingId, "invalid-argument", "Missing bookingId.");
+
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    assert(bookingSnap.exists, "not-found", "Booking not found.");
+
+    const booking = bookingSnap.data() || {};
+    const businessId = safeTrim(booking.businessId);
+    assert(await isBusinessOwner(uid, businessId), "permission-denied", "Not allowed.");
+    assert(
+      booking.status === "pending_business_confirmation",
+      "failed-precondition",
+      "This booking is not awaiting confirmation."
+    );
+
+    await bookingRef.update({
+      status: "confirmed",
+      confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+      acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await addSystemBookingMessage(bookingId, "Short-notice booking accepted by business");
+    await incrementAnalytics({
+      "bookings.businessAccepted": 1,
+      "bookings.pendingApprovalResolved": 1,
+    });
+
+    if (booking.customerId) {
+      await sendPushToUser(booking.customerId, {
+        title: "Booking Confirmed",
+        body: `${booking.businessName || "The business"} confirmed ${booking.serviceName || "your service"}.`,
+        data: { bookingId, businessId, type: "booking_confirmed" },
+        preferenceKey: "serviceBookingUpdates",
+      });
+    }
+
+    return { ok: true, bookingId, status: "confirmed" };
+  }
+);
+
+exports.declineShortNoticeBooking = onCall(
+  {
+    region: "us-central1",
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "You must be signed in.");
+
+    const bookingId = safeTrim(request.data?.bookingId);
+    assert(bookingId, "invalid-argument", "Missing bookingId.");
+
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    assert(bookingSnap.exists, "not-found", "Booking not found.");
+
+    const booking = bookingSnap.data() || {};
+    const businessId = safeTrim(booking.businessId);
+    const staffId = safeTrim(booking.staffId);
+    assert(await isBusinessOwner(uid, businessId), "permission-denied", "Not allowed.");
+    assert(
+      booking.status === "pending_business_confirmation",
+      "failed-precondition",
+      "This booking is not awaiting confirmation."
+    );
+
+    let refundId = null;
+    if (booking.paymentIntentId) {
+      const stripe = getStripe();
+      const existing = await stripe.refunds.list({
+        payment_intent: booking.paymentIntentId,
+        limit: 1,
+      });
+
+      if (existing.data.length > 0) {
+        refundId = existing.data[0].id;
+      } else {
+        const refund = await stripe.refunds.create({
+          payment_intent: booking.paymentIntentId,
+        });
+        refundId = refund.id;
+      }
+    }
+
+    const batch = db.batch();
+    batch.update(bookingRef, {
+      status: "declined",
+      declinedAt: admin.firestore.FieldValue.serverTimestamp(),
+      refundStatus: booking.paymentIntentId ? "refunded" : "not_required",
+      refundId: refundId || null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const slotIds = Array.isArray(booking.slotIds)
+      ? booking.slotIds
+      : [booking.slotId].filter(Boolean);
+
+    for (const slotId of slotIds) {
+      if (!staffId || !slotId) continue;
+
+      const ref = db
+        .collection("businesses")
+        .doc(businessId)
+        .collection("staff")
+        .doc(staffId)
+        .collection("availableSlots")
+        .doc(slotId);
+
+      batch.update(ref, {
+        isBooked: false,
+        lockedByBookingId: admin.firestore.FieldValue.delete(),
+        lockExpiresAt: admin.firestore.FieldValue.delete(),
+      });
+    }
+
+    await batch.commit();
+    await releaseBookingSlots(booking);
+    await addSystemBookingMessage(bookingId, "Short-notice booking declined by business");
+    await incrementAnalytics({
+      "bookings.businessDeclined": 1,
+      "bookings.pendingApprovalResolved": 1,
+      ...(refundId ? { "payments.refundsIssued": 1 } : {}),
+    });
+
+    if (booking.customerId) {
+      await sendPushToUser(booking.customerId, {
+        title: "Booking Declined",
+        body:
+          "Unfortunately this appointment could not be accepted because it was requested at very short notice.",
+        data: { bookingId, businessId, type: "booking_declined" },
+        preferenceKey: "serviceBookingUpdates",
+      });
+    }
+
+    return { ok: true, bookingId, status: "declined", refundIssued: !!refundId };
+  }
+);
+
+exports.cleanupExpiredAvailabilityPosts = onSchedule(
+  {
+    schedule: "every 15 minutes",
+    region: "us-central1",
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const snap = await db
+      .collection("availabilityPosts")
+      .where("isActive", "==", true)
+      .where("availabilityAt", "<", now)
+      .limit(200)
+      .get();
+
+    if (snap.empty) {
+      return null;
+    }
+
+    const batch = db.batch();
+    snap.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        isActive: false,
+        archived: true,
+        archivedReason: "expired",
+        archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+    logger.info("Expired availability posts archived", { count: snap.size });
+    return null;
+  }
+);
+
+exports.expireServiceRequests = onSchedule(
+  {
+    schedule: "every 30 minutes",
+    region: "us-central1",
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const snap = await db
+      .collection("serviceRequests")
+      .where("isActive", "==", true)
+      .where("status", "==", "open")
+      .where("expiresAt", "<=", now)
+      .limit(300)
+      .get();
+
+    if (snap.empty) {
+      return null;
+    }
+
+    const batch = db.batch();
+    snap.docs.forEach((doc) => {
+      batch.set(
+        doc.ref,
+        {
+          status: "expired",
+          isActive: false,
+          closedAt: admin.firestore.FieldValue.serverTimestamp(),
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    await batch.commit();
+    logger.info("Expired service requests", { count: snap.size });
+    return null;
+  }
+);
+
+exports.cleanupExpiredShortNoticeBookings = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    region: "us-central1",
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const snap = await db
+      .collection("bookings")
+      .where("status", "==", "pending_business_confirmation")
+      .where("approvalExpiresAt", "<=", now)
+      .limit(100)
+      .get();
+
+    if (snap.empty) {
+      return null;
+    }
+
+    for (const doc of snap.docs) {
+      const booking = doc.data() || {};
+
+      let refundId = null;
+      if (booking.paymentIntentId) {
+        const stripe = getStripe();
+        const existing = await stripe.refunds.list({
+          payment_intent: booking.paymentIntentId,
+          limit: 1,
+        });
+
+        if (existing.data.length > 0) {
+          refundId = existing.data[0].id;
+        } else {
+          const refund = await stripe.refunds.create({
+            payment_intent: booking.paymentIntentId,
+          });
+          refundId = refund.id;
+        }
+      }
+
+      await doc.ref.update({
+        status: "declined",
+        declinedReason: "approval_timeout",
+        declinedAt: admin.firestore.FieldValue.serverTimestamp(),
+        refundStatus: booking.paymentIntentId ? "refunded" : "not_required",
+        refundId: refundId || null,
+        paymentStatus: booking.paymentIntentId ? "refunded" : booking.paymentStatus,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await releaseBookingSlots(booking);
+      await addSystemBookingMessage(
+        doc.id,
+        "Short-notice booking expired before it was accepted"
+      );
+
+      if (booking.customerId) {
+        await sendPushToUser(booking.customerId, {
+          title: "Booking Request Expired",
+          body: "Unfortunately we didn't receive confirmation in time.",
+          data: {
+            bookingId: doc.id,
+            businessId: booking.businessId || "",
+            type: "booking_expired",
+          },
+          preferenceKey: "serviceBookingUpdates",
+        });
+      }
+
+      const businessSnap = booking.businessId
+        ? await db.collection("businesses").doc(booking.businessId).get()
+        : null;
+      const ownerId = businessSnap?.data()?.ownerId;
+      if (ownerId) {
+        await sendPushToUser(ownerId, {
+          title: "Booking Request Expired",
+          body: "This booking request expired before it was accepted.",
+          data: {
+            bookingId: doc.id,
+            businessId: booking.businessId || "",
+            type: "booking_expired",
+          },
+          preferenceKey: "serviceBookingUpdates",
+        });
+      }
+
+      await incrementAnalytics({
+        "bookings.pendingApprovalExpired": 1,
+        "bookings.pendingApprovalResolved": 1,
+        ...(refundId ? { "payments.refundsIssued": 1 } : {}),
+      });
+    }
+
+    logger.info("Expired short-notice bookings processed", {
+      count: snap.size,
+    });
+    return null;
+  }
+);
+
 // =================================================
 // STRIPE HELPERS
 // =================================================
@@ -1061,8 +2554,10 @@ exports.createCashBooking = onCall(
       const serviceId = safeTrim(request.data?.serviceId);
       const slotId = safeTrim(request.data?.slotId);
 const slotPath = safeTrim(request.data?.slotPath);
+const availabilityPostId = safeTrim(request.data?.availabilityPostId);
 const customerName = safeTrim(request.data?.customerName);
       const customerAddress = safeTrim(request.data?.customerAddress);
+      const customerNotes = safeTrim(request.data?.customerNotes);
 
       const addOnIds = Array.isArray(request.data?.addOnIds)
         ? request.data.addOnIds.map(id => safeTrim(id)).filter(Boolean)
@@ -1119,16 +2614,10 @@ const customerName = safeTrim(request.data?.customerName);
 
       assert(slotStart > new Date(), "failed-precondition", "Slot is in the past.");
 
-      const minimumNoticeHours = 2;
+      const minimumNoticeHours = SHORT_NOTICE_APPROVAL_HOURS;
       const hoursBefore = (slotStart - new Date()) / (1000 * 60 * 60);
-
-      assert(
-        hoursBefore >= minimumNoticeHours,
-        "failed-precondition",
-        "This slot is too soon to book."
-      );
-
-      const active = await staffIsActiveServer(businessId, staffId);
+      const requiresBusinessApproval = hoursBefore < minimumNoticeHours;
+	      const active = await staffIsActiveServer(businessId, staffId);
       assert(active, "failed-precondition", "Staff inactive.");
 
 
@@ -1145,6 +2634,7 @@ const customerName = safeTrim(request.data?.customerName);
       const price = Number(service.price || 0);
       const serviceName = safeTrim(service.name) || "Service";
       const serviceDurationMinutes = Number(service.durationMinutes || 0);
+      const serviceImageUrl = safeTrim(service.imageUrl || service.photoUrl || "");
 
       assert(price > 0, "failed-precondition", "Invalid service price.");
 
@@ -1176,8 +2666,34 @@ const customerName = safeTrim(request.data?.customerName);
 
       const bookingRef = db.collection("bookings").doc();
       const bookingId = bookingRef.id;
+      const bookingStatus = requiresBusinessApproval
+        ? "pending_business_confirmation"
+        : "confirmed";
+      const approvalExpiresAt = requiresBusinessApproval
+        ? admin.firestore.Timestamp.fromMillis(
+            Date.now() + SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES * 60 * 1000
+          )
+        : null;
+      const activeConversationRef =
+        await activeBusinessCustomerConversationRef({ businessId, customerId });
+      const activeConversationSnap = await activeConversationRef.get();
+      const conversationId = activeConversationSnap.exists
+        ? activeConversationRef.id
+        : bookingId;
 
       await db.runTransaction(async (tx) => {
+        const availabilityPostRef = availabilityPostId
+          ? db.collection("availabilityPosts").doc(availabilityPostId)
+          : null;
+
+        if (availabilityPostRef) {
+          const postSnap = await tx.get(availabilityPostRef);
+          assert(postSnap.exists, "failed-precondition", "Availability no longer exists.");
+          const post = postSnap.data() || {};
+          assert(post.isActive === true && post.archived !== true, "failed-precondition", "Availability no longer exists.");
+          assert(safeTrim(post.slotId) === slotId, "failed-precondition", "Availability no longer matches this slot.");
+        }
+
         const slotsRequired =
   Math.ceil(serviceDurationMinutes / 30);
 
@@ -1237,24 +2753,29 @@ if (!requiredSlots) {
   tx.set(bookingRef, {
 
     bookingId,
+    conversationId,
     businessId,
     customerId,
     serviceId,
     serviceName,
     serviceDurationMinutes,
+    serviceImageUrl,
 
     staffId,
     staffName,
 
     customerName,
     customerAddress,
+    customerNotes,
 
     addOns: cleanedAddOns,
     addOnsTotal,
 
     price: totalPrice,
 
-    status: "confirmed",
+    status: bookingStatus,
+    requiresBusinessApproval,
+    approvalExpiresAt,
 
     paymentMethod: "cash",
 
@@ -1263,6 +2784,7 @@ if (!requiredSlots) {
     paymentIntentId: "",
 
     slotId,
+    availabilityPostId,
 
     slotIds:
       requiredSlots.map(
@@ -1293,8 +2815,9 @@ if (!requiredSlots) {
     createdAt:
       admin.firestore.FieldValue.serverTimestamp(),
 
-    confirmedAt:
-      admin.firestore.FieldValue.serverTimestamp(),
+    confirmedAt: requiresBusinessApproval
+      ? null
+      : admin.firestore.FieldValue.serverTimestamp(),
 
     unreadForCustomer: 0,
 
@@ -1314,6 +2837,16 @@ if (!requiredSlots) {
         admin.firestore.FieldValue.delete(),
     });
   }
+
+  if (availabilityPostRef) {
+    tx.update(availabilityPostRef, {
+      isActive: false,
+      archived: true,
+      archivedReason: "booked",
+      bookingId,
+      archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
 });
 
 const ownerId = business.ownerId;
@@ -1322,33 +2855,69 @@ if (ownerId) {
 
   await sendPushToUser(ownerId, {
 
-    title: "New booking",
+    title: requiresBusinessApproval
+      ? "New Last-Minute Request"
+      : "New Booking",
 
-    body: "You have a new cash booking.",
+    body: requiresBusinessApproval
+      ? `${customerName || "A customer"} requested ${serviceName} soon. Please accept or decline within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
+      : `${customerName || "A customer"} booked ${serviceName}.`,
 
     data: {
       bookingId,
-      type: "new_booking",
+      businessId,
+      type: requiresBusinessApproval ? "last_minute_request" : "new_booking",
     },
+    preferenceKey: "serviceBookingUpdates",
   });
 }
 
 await sendPushToUser(customerId, {
 
-  title: "Booking confirmed",
+  title: requiresBusinessApproval
+    ? "Booking request sent"
+    : "Booking confirmed",
 
   body:
-    `Your booking for ${serviceName} is confirmed.`,
+    requiresBusinessApproval
+      ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
+      : `Your booking for ${serviceName} is confirmed.`,
 
-  data: {
-    bookingId,
-    type: "booking_confirmed",
-  },
+	  data: {
+	    bookingId,
+	    businessId,
+	    type: requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
+	  },
+	  preferenceKey: "serviceBookingUpdates",
+	});
+
+await ensureBookingConversationDoc(bookingId, {
+  conversationId,
+  businessId,
+  customerId,
+  serviceId,
+  serviceName,
+  customerName,
+  customerAddress,
+  customerNotes,
+  businessName: business.businessName || business.name || "Business",
+  status: bookingStatus,
+});
+
+await updateRepeatCustomerSnapshot({
+  customerId,
+  businessId,
+  serviceId,
+  serviceName,
+  customerAddress,
+  customerNotes,
 });
 
 return {
   ok: true,
   bookingId,
+  status: bookingStatus,
+  requiresBusinessApproval,
 };
 
      } catch (error) {
@@ -1381,17 +2950,10 @@ exports.createBookingPaymentIntent = onCall(
   },
   async (request) => {
     try {
-      console.log("🔥 FUNCTION HIT", {
-        uid: request.auth?.uid,
-        provider: request.auth?.token?.firebase?.sign_in_provider,
-        data: request.data,
-      });
-
       assert(request.auth, "unauthenticated", "Login required.");
 
       const provider = request.auth.token?.firebase?.sign_in_provider;
       if (provider === "anonymous") {
-        console.log("❌ BLOCKED: Anonymous user");
         throw new HttpsError(
           "failed-precondition",
           "Please log in to make a booking"
@@ -1411,22 +2973,14 @@ exports.createBookingPaymentIntent = onCall(
       const serviceId = safeTrim(request.data?.serviceId);
       const slotId = safeTrim(request.data?.slotId);
 const slotPath = safeTrim(request.data?.slotPath);
+const availabilityPostId = safeTrim(request.data?.availabilityPostId);
 const customerName = safeTrim(request.data?.customerName);
       const customerAddress = safeTrim(request.data?.customerAddress);
+      const customerNotes = safeTrim(request.data?.customerNotes);
 
       const addOnIds = Array.isArray(request.data?.addOnIds)
   ? request.data.addOnIds.map(id => safeTrim(id)).filter(Boolean)
   : [];
-
-      console.log("📦 Booking Params:", {
-        businessId,
-        staffId,
-        serviceId,
-        slotId,
-        customerName,
-        customerAddress,
-        addOnsCount: addOnIds.length,
-      });
 
       assert(
         businessId && staffId && serviceId && slotId,
@@ -1453,13 +3007,11 @@ const customerName = safeTrim(request.data?.customerName);
       const slotSnap = await slotDocRef.get();
 
       if (!slotSnap.exists) {
-        console.log("❌ Slot does not exist:", slotId);
+        logger.warn("Booking slot does not exist");
         throw new HttpsError("failed-precondition", "Slot does not exist");
       }
 
       const slot = slotSnap.data();
-
-      console.log("🕒 Slot data:", slot);
 
       const isBooked =
         typeof slot.isBooked === "boolean"
@@ -1467,12 +3019,12 @@ const customerName = safeTrim(request.data?.customerName);
           : slot.isBooked === 1;
 
       if (isBooked) {
-        console.log("❌ Slot already booked");
+        logger.warn("Booking slot already booked");
         throw new HttpsError("failed-precondition", "Slot already booked");
       }
 
       if (!slot.startTime || !slot.startTime.toDate) {
-        console.log("❌ Invalid slot startTime:", slot.startTime);
+        logger.warn("Invalid slot startTime");
         throw new HttpsError("internal", "Invalid slot data");
       }
 
@@ -1480,26 +3032,20 @@ const customerName = safeTrim(request.data?.customerName);
 
 
       if (slotStart < new Date()) {
-        console.log("❌ Slot in the past:", slotStart);
+        logger.warn("Booking slot is in the past");
         throw new HttpsError("failed-precondition", "Slot is in the past");
       }
 
-      const minimumNoticeHours = 2;
-      const hoursBefore = (slotStart - new Date()) / (1000 * 60 * 60);
+	      const minimumNoticeHours = SHORT_NOTICE_APPROVAL_HOURS;
+	      const hoursBefore = (slotStart - new Date()) / (1000 * 60 * 60);
+	      const requiresBusinessApproval = hoursBefore < minimumNoticeHours;
+	      const approvalExpiresAt = requiresBusinessApproval
+	        ? admin.firestore.Timestamp.fromMillis(
+	          Date.now() + SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES * 60 * 1000
+	        )
+	        : null;
 
-      if (hoursBefore < minimumNoticeHours) {
-        console.log("❌ Slot too soon to book:", {
-          slotStart,
-          hoursBefore,
-        });
-
-        throw new HttpsError(
-          "failed-precondition",
-          "This slot is too soon to book."
-        );
-      }
-
-      // =================================================
+	      // =================================================
       // VALIDATE BUSINESS / STRIPE
       // =================================================
 
@@ -1509,23 +3055,11 @@ const customerName = safeTrim(request.data?.customerName);
       const business = businessSnap.data() || {};
       const stripeAccountId = business.stripeAccountId;
 
-      console.log("🏢 Business:", {
-        businessId,
-        stripeAccountId,
-        stripeConnected: business.stripeConnected,
-      });
-
       assert(stripeAccountId, "failed-precondition", "Stripe not connected.");
 
       const account = await stripe.accounts.retrieve(stripeAccountId);
 
-      console.log("💳 Stripe account status:", {
-        charges_enabled: account.charges_enabled,
-        payouts_enabled: account.payouts_enabled,
-      });
-
       if (!account.charges_enabled) {
-        console.log("❌ Stripe charges not enabled");
         throw new HttpsError(
           "failed-precondition",
           "Business cannot accept payments yet."
@@ -1537,8 +3071,6 @@ const customerName = safeTrim(request.data?.customerName);
       // =================================================
 
       const active = await staffIsActiveServer(businessId, staffId);
-      console.log("👤 Staff active:", active);
-
       assert(active, "failed-precondition", "Staff inactive.");
 
       const staffSnap = await businessRef.collection("staff").doc(staffId).get();
@@ -1558,6 +3090,7 @@ const customerName = safeTrim(request.data?.customerName);
       const price = Number(service.price || 0);
       const serviceName = safeTrim(service.name) || "Service";
       const serviceDurationMinutes = Number(service.durationMinutes || 0);
+      const serviceImageUrl = safeTrim(service.imageUrl || service.photoUrl || "");
 
 const slotsRequired =
   Math.ceil(serviceDurationMinutes / 30);
@@ -1578,8 +3111,6 @@ if (!requiredSlots) {
   );
 }
       assert(price > 0, "failed-precondition", "Invalid service price.");
-
-      console.log("💷 Base price (pence):", price);
 
       // =================================================
       // SECURE ADD-ONS (SERVER VALIDATED)
@@ -1613,22 +3144,36 @@ if (addOnIds.length > 0) {
       const totalPrice = price + addOnsTotal;
       assert(totalPrice > 0, "failed-precondition", "Invalid total price");
 
-      console.log("💷 TOTAL PRICE:", totalPrice);
-
       // =================================================
       // CREATE BOOKING ID
       // =================================================
 
       const bookingRef = db.collection("bookings").doc();
       const bookingId = bookingRef.id;
-
-      console.log("🧾 Creating booking:", bookingId);
+      const activeConversationRef =
+        await activeBusinessCustomerConversationRef({ businessId, customerId });
+      const activeConversationSnap = await activeConversationRef.get();
+      const conversationId = activeConversationSnap.exists
+        ? activeConversationRef.id
+        : bookingId;
 
       // =================================================
       // TRANSACTION: LOCK SLOT + CREATE BOOKING
       // =================================================
 
       await db.runTransaction(async (tx) => {
+        const availabilityPostRef = availabilityPostId
+          ? db.collection("availabilityPosts").doc(availabilityPostId)
+          : null;
+
+        if (availabilityPostRef) {
+          const postSnap = await tx.get(availabilityPostRef);
+          assert(postSnap.exists, "failed-precondition", "Availability no longer exists.");
+          const post = postSnap.data() || {};
+          assert(post.isActive === true && post.archived !== true, "failed-precondition", "Availability no longer exists.");
+          assert(safeTrim(post.slotId) === slotId, "failed-precondition", "Availability no longer matches this slot.");
+        }
+
         const slotSnapTx = await tx.get(slotDocRef);
         assert(slotSnapTx.exists, "not-found", "Slot not found.");
 
@@ -1673,23 +3218,29 @@ if (addOnIds.length > 0) {
 
         tx.set(bookingRef, {
           bookingId,
+          conversationId,
           businessId,
           customerId,
           serviceId,
           serviceName,
           serviceDurationMinutes,
+          serviceImageUrl,
           staffId,
           staffName,
           customerName,
           customerAddress,
+          customerNotes,
           addOns: cleanedAddOns,
           addOnsTotal,
          price: totalPrice,
 status: "pending_payment",
+requiresBusinessApproval,
+approvalExpiresAt,
 paymentMethod: "stripe",
 paymentStatus: "pending",
 lockExpiresAt: expires,
 slotId,
+availabilityPostId,
 slotIds:
   requiredSlots.map(
     s => s.slotId
@@ -1709,9 +3260,17 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
           unreadForCustomer: 0,
           unreadForBusiness: 0,
         });
-      });
 
-      console.log("✅ Booking created, creating PaymentIntent...");
+        if (availabilityPostRef) {
+          tx.update(availabilityPostRef, {
+            isActive: false,
+            archived: true,
+            archivedReason: "booked",
+            bookingId,
+            archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      });
 
       // =================================================
       // CREATE PAYMENT INTENT
@@ -1738,14 +3297,19 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
         }
       );
 
-      console.log("💰 PaymentIntent created:", paymentIntent.id);
-
      await bookingRef.update({
   paymentIntentId: paymentIntent.id,
   paymentStatus: "payment_intent_created",
 });
 
-      console.log("🎉 SUCCESS");
+      await updateRepeatCustomerSnapshot({
+        customerId,
+        businessId,
+        serviceId,
+        serviceName,
+        customerAddress,
+        customerNotes,
+      });
 
       return {
         clientSecret: paymentIntent.client_secret,
@@ -1753,7 +3317,7 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
       };
 
     } catch (error) {
-      console.error("❌ createBookingPaymentIntent failed:", error);
+      logger.error("createBookingPaymentIntent failed", error);
 
       if (error instanceof HttpsError) throw error;
 
@@ -1765,6 +3329,1709 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
   }
 );
 
+
+exports.onBookingConversationSync = onDocumentUpdated(
+  {
+    document: "bookings/{bookingId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const after = event.data?.after.data();
+    if (!after || !isBookingMessageStatus(after.status)) return;
+
+    await ensureBookingConversationDoc(event.params.bookingId, after);
+  }
+);
+
+exports.ensureBookingConversation = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const bookingId = safeTrim(request.data?.bookingId);
+    const result = await requireBookingConversationAccess(
+      request.auth?.uid,
+      bookingId
+    );
+
+    return {
+      conversationId: result.conversationRef.id,
+    };
+  }
+);
+
+exports.ensureConversationAccess = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const conversationId = safeTrim(request.data?.conversationId);
+    const result = await requireConversationAccess(
+      request.auth?.uid,
+      conversationId
+    );
+
+    return {
+      conversationId: result.conversationRef.id,
+    };
+  }
+);
+
+exports.createServiceEnquiry = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const businessId = safeTrim(request.data?.businessId);
+    const serviceId = safeTrim(request.data?.serviceId);
+    const text = safeTrim(request.data?.text);
+
+    logger.info("Service enquiry started", {
+      uid,
+      businessId,
+      serviceId,
+      hasText: Boolean(text),
+    });
+
+    assert(uid, "unauthenticated", "Login required.");
+    assert(businessId && serviceId, "invalid-argument", "Missing service data.");
+    assert(text, "invalid-argument", "Please enter a message.");
+    assert(text.length <= 2000, "invalid-argument", "Message is too long.");
+
+    const businessRef = db.collection("businesses").doc(businessId);
+    const businessSnap = await businessRef.get();
+    assert(businessSnap.exists, "not-found", "Business not found.");
+
+    const business = businessSnap.data() || {};
+    const businessOwnerId =
+      safeTrim(business.ownerId) ||
+      safeTrim(business.businessOwnerId);
+    logger.info("Service enquiry business resolved", {
+      businessId,
+      businessOwnerId,
+      hasOwnerId: Boolean(safeTrim(business.ownerId)),
+      hasBusinessOwnerId: Boolean(safeTrim(business.businessOwnerId)),
+    });
+    assert(businessOwnerId, "failed-precondition", "Business owner not found.");
+    assert(businessOwnerId !== uid, "failed-precondition", "Businesses cannot start customer conversations.");
+
+    const serviceSnap = await businessRef.collection("services").doc(serviceId).get();
+    assert(serviceSnap.exists, "not-found", "Service not found.");
+
+    const service = serviceSnap.data() || {};
+    logger.info("Service enquiry service resolved", {
+      businessId,
+      serviceId,
+      serviceName: safeTrim(service.name) || "Service",
+    });
+    const userSnap = await db.collection("users").doc(uid).get();
+    const user = userSnap.data() || {};
+    const customerName =
+      safeTrim(user.name) ||
+      safeTrim(user.displayName) ||
+      safeTrim(request.auth?.token?.name) ||
+      "Customer";
+    const conversationRef = await activeBusinessCustomerConversationRef({
+      businessId,
+      customerId: uid,
+    });
+    const conversationId = conversationRef.id;
+    const messageRef = conversationRef.collection("messages").doc();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    logger.info("Service enquiry conversation resolved", {
+      businessId,
+      serviceId,
+      conversationId,
+      messageId: messageRef.id,
+    });
+
+    await db.runTransaction(async (tx) => {
+      const conversationSnap = await tx.get(conversationRef);
+      const conversation = conversationSnap.data() || {};
+
+      assert(conversation.archived !== true, "failed-precondition", "This conversation is archived.");
+      assert(
+        !conversationSnap.exists || conversation.customerId === uid,
+        "permission-denied",
+        "You cannot access this conversation."
+      );
+
+      tx.set(
+        conversationRef,
+        {
+          bookingId: conversation.bookingId || "",
+          currentBookingId: conversation.currentBookingId || conversation.bookingId || "",
+          conversationType: conversation.conversationType || "service_enquiry",
+          conversationStatus: conversation.conversationStatus || "enquiry",
+          customerId: uid,
+          businessId,
+          businessOwnerId,
+          businessName: safeTrim(business.businessName) || safeTrim(business.name) || "Business",
+          customerName,
+          originatingServiceId: conversation.originatingServiceId || serviceId,
+          originatingServiceName: conversation.originatingServiceName || safeTrim(service.name) || "Service",
+          serviceId: conversation.serviceId || serviceId,
+          serviceName: conversation.serviceName || safeTrim(service.name) || "Service",
+          serviceImageUrl: conversation.serviceImageUrl || safeTrim(service.imageUrl) || safeTrim(service.photoUrl),
+          lastMessage: text,
+          lastMessageAt: now,
+          lastMessageId: messageRef.id,
+          lastSenderId: uid,
+          lastSenderType: "customer",
+          unreadCustomerCount: conversation.unreadCustomerCount || 0,
+          unreadBusinessCount: admin.firestore.FieldValue.increment(1),
+          archived: false,
+          customerHasMessaged: true,
+          quotationStatus: conversation.quotationStatus || "none",
+          acceptedQuotationId: conversation.acceptedQuotationId || "",
+          quotationIds: Array.isArray(conversation.quotationIds) ? conversation.quotationIds : [],
+          participants: [uid, businessOwnerId],
+          createdAt: conversation.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      tx.set(messageRef, {
+        senderId: uid,
+        senderType: "customer",
+        text,
+        timestamp: now,
+        read: false,
+        edited: false,
+        deleted: false,
+        attachments: [],
+      });
+    });
+
+    logger.info("Service enquiry conversation written", {
+      businessId,
+      serviceId,
+      conversationId,
+      messageId: messageRef.id,
+    });
+
+    try {
+      await sendPushToUser(businessOwnerId, {
+        title: "New customer enquiry",
+        body: text,
+        data: {
+          type: "service_enquiry",
+          conversationId,
+          businessId,
+          serviceId,
+        },
+        preferenceKey: "serviceBookingUpdates",
+      });
+      logger.info("Service enquiry notification attempted", {
+        businessOwnerId,
+        conversationId,
+      });
+    } catch (error) {
+      logger.error("Service enquiry notification failed after write", {
+        businessOwnerId,
+        conversationId,
+        error: error?.message || String(error),
+        code: error?.code || "unknown",
+        stack: error?.stack || "",
+      });
+    }
+
+    return {
+      conversationId,
+    };
+  }
+);
+
+function communityHelpConversationId({ postId, ownerId, responderId }) {
+  return `community_${postId}_${ownerId}_${responderId}`;
+}
+
+function isCommunityHelpActive(post) {
+  const status = safeTrim(post.status) || "active";
+  const activeStatuses = ["active", "open", "missing", "looking_for_owner"];
+  if (post.isActive === false || !activeStatuses.includes(status)) return false;
+  if (post.resolvedAt || status === "resolved" || status === "expired") return false;
+
+  const expiresMillis = timestampToMillis(post.expiresAt);
+  return expiresMillis === null || expiresMillis > Date.now();
+}
+
+function communityHelpContextLabel(post) {
+  const mode = safeTrim(post.mode).toUpperCase();
+  const title = safeTrim(post.title) || "Community Help post";
+  if (mode === "FOUND") return `FOUND · ${title}`;
+  if (mode === "LOST") return `LOST · ${title}`;
+  if (safeTrim(post.type) === "free_item") return `FREE · ${title}`;
+  return title;
+}
+
+function communityHelpSystemText({ responderName, post }) {
+  const mode = safeTrim(post.mode);
+  const category = safeTrim(post.itemCategory);
+  if (mode === "lost" && category === "Pet") {
+    return `${responderName} responded to your missing pet post.`;
+  }
+  if (mode === "lost") {
+    return `${responderName} may have seen your lost item.`;
+  }
+  if (mode === "found" && category === "Pet") {
+    return `${responderName} may know this pet or the owner.`;
+  }
+  if (mode === "found") {
+    return `${responderName} thinks this may be their item.`;
+  }
+  if (mode === "wanted") {
+    return `${responderName} may have something that helps.`;
+  }
+  return `${responderName} is interested in your free item.`;
+}
+
+function communityHelpNotification({ post }) {
+  const mode = safeTrim(post.mode);
+  const category = safeTrim(post.itemCategory);
+  const location = safeTrim(post.publicLocation || post.location);
+  const near = location ? ` near ${location}` : "";
+  if (mode === "lost" && category === "Pet") {
+    return {
+      title: "Possible sighting",
+      body: `Someone may have seen your missing pet${near}.`,
+    };
+  }
+  if (mode === "lost") {
+    return {
+      title: "New response",
+      body: "Open the conversation to see their message.",
+    };
+  }
+  if (mode === "found") {
+    return {
+      title: "New response",
+      body: "Open the conversation to check the details privately.",
+    };
+  }
+  return {
+    title: "New response",
+    body: "Open the conversation to reply privately.",
+  };
+}
+
+function numberFrom(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function degreesToRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceMilesBetweenPosts(a, b) {
+  const aLat = numberFrom(a.approxLatitude);
+  const aLng = numberFrom(a.approxLongitude);
+  const bLat = numberFrom(b.approxLatitude);
+  const bLng = numberFrom(b.approxLongitude);
+  if (aLat === null || aLng === null || bLat === null || bLng === null) {
+    return null;
+  }
+
+  const earthRadiusMiles = 3958.8;
+  const dLat = degreesToRadians(bLat - aLat);
+  const dLng = degreesToRadians(bLng - aLng);
+  const lat1 = degreesToRadians(aLat);
+  const lat2 = degreesToRadians(bLat);
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function keywordOverlapCount(a, b) {
+  const aWords = new Set(Array.isArray(a.keywords) ? a.keywords.map(safeTrim).filter(Boolean) : []);
+  const bWords = new Set(Array.isArray(b.keywords) ? b.keywords.map(safeTrim).filter(Boolean) : []);
+  let count = 0;
+  for (const word of aWords) {
+    if (bWords.has(word)) count += 1;
+  }
+  return count;
+}
+
+function communityHelpPostsMayMatch(a, b) {
+  if (safeTrim(a.type) !== "lost_found" || safeTrim(b.type) !== "lost_found") return false;
+  if (safeTrim(a.mode) === safeTrim(b.mode)) return false;
+  if (safeTrim(a.itemCategory) !== safeTrim(b.itemCategory)) return false;
+  if (!isCommunityHelpActive(a) || !isCommunityHelpActive(b)) return false;
+
+  const distance = distanceMilesBetweenPosts(a, b);
+  if (distance !== null) {
+    const aRadius = numberFrom(a.discoveryRadiusMiles) ?? 5;
+    const bRadius = numberFrom(b.discoveryRadiusMiles) ?? 5;
+    return distance <= aRadius || distance <= bRadius;
+  }
+
+  const aLocation = safeTrim(a.publicLocation || a.location).toLowerCase();
+  const bLocation = safeTrim(b.publicLocation || b.location).toLowerCase();
+  const locationsOverlap =
+    aLocation &&
+    bLocation &&
+    (aLocation.includes(bLocation) || bLocation.includes(aLocation));
+
+  return locationsOverlap || keywordOverlapCount(a, b) > 0;
+}
+
+function communityHelpMatchNotification({ newPost, matchingPost }) {
+  const newMode = safeTrim(newPost.mode);
+  const newTitle = safeTrim(newPost.title) || "a nearby post";
+  const matchingTitle = safeTrim(matchingPost.title) || "your post";
+
+  if (newMode === "found") {
+    return {
+      title: `Possible match for ${matchingTitle}`,
+      body: `Someone found ${newTitle} nearby. Open Community Help to check it.`,
+    };
+  }
+
+  return {
+    title: `Someone is missing ${newTitle}`,
+    body: `It may match ${matchingTitle}. Open Community Help to check it.`,
+  };
+}
+
+function communityAlertCategoryForPost(post) {
+  if (safeTrim(post.type) !== "lost_found" || safeTrim(post.mode) !== "lost") {
+    return null;
+  }
+
+  const category = safeTrim(post.itemCategory).toLowerCase();
+  const title = safeTrim(post.title).toLowerCase();
+  const description = safeTrim(post.description).toLowerCase();
+  const combined = `${title} ${description}`;
+
+  if (category === "pet") {
+    if (combined.includes("dog") || combined.includes("puppy")) {
+      return "missingDogs";
+    }
+    if (combined.includes("cat") || combined.includes("kitten")) {
+      return "missingCats";
+    }
+    return "otherMissingPets";
+  }
+
+  if (["keys", "wallet", "phone", "bag", "bike / scooter"].includes(category)) {
+    return "importantLostItems";
+  }
+
+  return "otherLostItems";
+}
+
+function communityAlertRadiusMilesForCategory(category) {
+  if (category === "missingDogs") return 8;
+  if (category === "missingCats") return 4;
+  if (category === "otherMissingPets") return 5;
+  if (category === "importantLostItems") return 2;
+  return 1;
+}
+
+function communityAlertCopy(post) {
+  const category = communityAlertCategoryForPost(post);
+  const title = safeTrim(post.title) || "An item";
+  const location = safeTrim(post.publicLocation || post.location);
+  const near = location ? ` near ${location}` : " nearby";
+
+  if (category === "missingDogs") {
+    return {
+      title: "Missing dog near you",
+      body: `${title} was last seen${near}.`,
+    };
+  }
+  if (category === "missingCats") {
+    return {
+      title: "Missing cat near you",
+      body: `${title} was last seen${near}.`,
+    };
+  }
+  if (category === "otherMissingPets") {
+    return {
+      title: "Missing pet near you",
+      body: `${title} was last seen${near}.`,
+    };
+  }
+  return {
+    title: "Lost item near you",
+    body: `${title} was reported missing${near}.`,
+  };
+}
+
+const TEMPORARY_LOCALITY_MINIMUM_MS = 10 * 60 * 1000;
+const TEMPORARY_LOCALITY_GRACE_MS = 2 * 60 * 60 * 1000;
+const NEARBY_COMMUNITY_ALERT_DAILY_LIMIT = 3;
+
+function communityAlertSubscriptionIsEligible(subscription, nowMs) {
+  if (timestampToMillis(subscription.expiresAt) !== null &&
+      timestampToMillis(subscription.expiresAt) <= nowMs) {
+    return false;
+  }
+
+  const type = safeTrim(subscription.subscriptionType) || "chosenArea";
+  if (type !== "temporaryArea") {
+    return subscription.isActive === true;
+  }
+
+  const establishedAt =
+    timestampToMillis(subscription.establishedAt) ??
+    timestampToMillis(subscription.firstSeenAt);
+  if (establishedAt === null ||
+      nowMs - establishedAt < TEMPORARY_LOCALITY_MINIMUM_MS) {
+    return false;
+  }
+
+  const leftAt = timestampToMillis(subscription.leftAt);
+  if (leftAt !== null) {
+    return nowMs - leftAt <= TEMPORARY_LOCALITY_GRACE_MS;
+  }
+
+  const lastSeenAt = timestampToMillis(subscription.lastSeenAt);
+  if (lastSeenAt !== null) {
+    return nowMs - lastSeenAt <= TEMPORARY_LOCALITY_GRACE_MS;
+  }
+
+  return subscription.isActive === true;
+}
+
+async function reserveNearbyCommunityAlertQuota(recipientId, nowMs) {
+  const dayKey = new Date(nowMs).toISOString().slice(0, 10);
+  const quotaRef = db
+    .collection("users")
+    .doc(recipientId)
+    .collection("notificationDailyCaps")
+    .doc(`nearbyCommunityAlerts_${dayKey}`);
+  let allowed = false;
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(quotaRef);
+    const count = numberFrom(snap.data()?.count) ?? 0;
+    if (count >= NEARBY_COMMUNITY_ALERT_DAILY_LIMIT) return;
+
+    tx.set(
+      quotaRef,
+      {
+        count: count + 1,
+        limit: NEARBY_COMMUNITY_ALERT_DAILY_LIMIT,
+        preferenceKey: "nearbyCommunityAlerts",
+        dayKey,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    allowed = true;
+  });
+
+  return allowed;
+}
+
+async function createAndSendCommunityAlertCampaign({ postId, post }) {
+  const alertCategory = communityAlertCategoryForPost(post);
+  if (!alertCategory || !isCommunityHelpActive(post)) {
+    return;
+  }
+
+  const ownerId = safeTrim(post.createdBy);
+  const campaignId = `${postId}_initial`;
+  const campaignRef = db.collection("communityAlertCampaigns").doc(campaignId);
+  const campaignSnap = await campaignRef.get();
+  if (campaignSnap.exists && campaignSnap.data()?.status === "completed") {
+    return;
+  }
+
+  const radiusMiles = communityAlertRadiusMilesForCategory(alertCategory);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const nowMs = Date.now();
+
+  await campaignRef.set(
+    {
+      postId,
+      ownerId,
+      alertCategory,
+      radiusMiles,
+      status: "running",
+      source: "community_help_post_created",
+      distributionTier: "freePreview",
+      entitlementType: "freePreview",
+      paymentRequired: false,
+      paymentStatus: "not_required",
+      imageUrl: safeTrim(post.photoUrl),
+      createdAt: campaignSnap.exists ? campaignSnap.data()?.createdAt || now : now,
+      startedAt: now,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+
+  const subscriptionSnapshot = await db
+    .collection("communityAlertSubscriptions")
+    .where("communityAlertsEnabled", "==", true)
+    .where("enabledCategories", "array-contains", alertCategory)
+    .limit(500)
+    .get();
+
+  const copy = communityAlertCopy(post);
+  let eligibleRecipientCount = 0;
+  let sentCount = 0;
+  let failedCount = 0;
+  let cappedCount = 0;
+
+  for (const subDoc of subscriptionSnapshot.docs) {
+    const subscription = subDoc.data() || {};
+    const recipientId = safeTrim(subscription.userId) || subDoc.id;
+    if (!recipientId || recipientId === ownerId) continue;
+    if (!communityAlertSubscriptionIsEligible(subscription, nowMs)) continue;
+
+    const distance = distanceMilesBetweenPosts(
+      {
+        approxLatitude: post.approxLatitude,
+        approxLongitude: post.approxLongitude,
+      },
+      {
+        approxLatitude: subscription.approxLatitude,
+        approxLongitude: subscription.approxLongitude,
+      }
+    );
+    const recipientRadius = numberFrom(subscription.maxRadiusMiles) ?? 10;
+    if (distance === null || distance > radiusMiles || distance > recipientRadius) {
+      continue;
+    }
+
+    eligibleRecipientCount += 1;
+    const recipientRef = campaignRef.collection("recipients").doc(recipientId);
+    let shouldSend = false;
+    await db.runTransaction(async (tx) => {
+      const recipientSnap = await tx.get(recipientRef);
+      if (recipientSnap.exists) return;
+
+      tx.set(recipientRef, {
+        userId: recipientId,
+        status: "pending",
+        distanceMiles: distance,
+        createdAt: now,
+      });
+      shouldSend = true;
+    });
+
+    if (!shouldSend) continue;
+    const quotaAllowed = await reserveNearbyCommunityAlertQuota(
+      recipientId,
+      nowMs
+    );
+    if (!quotaAllowed) {
+      cappedCount += 1;
+      await recipientRef.set({ status: "capped", cappedAt: now }, { merge: true });
+      continue;
+    }
+
+    const notificationId = `community_alert_${campaignId}`;
+    await db
+      .collection("users")
+      .doc(recipientId)
+      .collection("notifications")
+      .doc(notificationId)
+      .set({
+        type: "community_alert",
+        title: copy.title,
+        body: copy.body,
+        communityHelpPostId: postId,
+        campaignId,
+        imageUrl: safeTrim(post.photoUrl),
+        isRead: false,
+        createdAt: now,
+      });
+
+    try {
+      await sendPushToUser(recipientId, {
+        title: copy.title,
+        body: copy.body,
+        imageUrl: safeTrim(post.photoUrl),
+        preferenceKey: "nearbyCommunityAlerts",
+        data: {
+          type: "community_alert",
+          communityHelpPostId: postId,
+          campaignId,
+          notificationId,
+          imageUrl: safeTrim(post.photoUrl),
+        },
+      });
+      sentCount += 1;
+      await recipientRef.set({ status: "sent", sentAt: now }, { merge: true });
+    } catch (error) {
+      failedCount += 1;
+      await recipientRef.set(
+        {
+          status: "failed",
+          failedAt: now,
+          error: safeTrim(error?.message).slice(0, 240),
+        },
+        { merge: true }
+      );
+    }
+  }
+
+  await campaignRef.set(
+    {
+      status: "completed",
+      eligibleRecipientCount,
+      sentCount,
+      failedCount,
+      cappedCount,
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+exports.notifyCommunityHelpMatches = onDocumentCreated(
+  {
+    document: "communityHelpPosts/{postId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const newPost = event.data?.data() || {};
+    if (safeTrim(newPost.type) !== "lost_found" || !isCommunityHelpActive(newPost)) {
+      return;
+    }
+
+    const ownerId = safeTrim(newPost.createdBy);
+    const oppositeMode = safeTrim(newPost.mode) === "lost" ? "found" : "lost";
+    const snapshot = await db
+      .collection("communityHelpPosts")
+      .where("type", "==", "lost_found")
+      .where("mode", "==", oppositeMode)
+      .where("isActive", "==", true)
+      .limit(400)
+      .get();
+
+    let notifiedCount = 0;
+    for (const doc of snapshot.docs) {
+      if (doc.id === event.params.postId) continue;
+      const matchingPost = doc.data() || {};
+      const matchingOwnerId = safeTrim(matchingPost.createdBy);
+      if (!matchingOwnerId || matchingOwnerId === ownerId) continue;
+      if (!communityHelpPostsMayMatch(newPost, matchingPost)) continue;
+
+      const notification = communityHelpMatchNotification({
+        newPost,
+        matchingPost,
+      });
+      const notificationId = `community_help_match_${event.params.postId}_${doc.id}`;
+      const notificationRef = db
+        .collection("users")
+        .doc(matchingOwnerId)
+        .collection("notifications")
+        .doc(notificationId);
+
+      await notificationRef.set({
+        type: "community_help_match",
+        title: notification.title,
+        body: notification.body,
+        communityHelpPostId: doc.id,
+        matchingCommunityHelpPostId: event.params.postId,
+        imageUrl: safeTrim(matchingPost.photoUrl || newPost.photoUrl),
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await sendPushToUser(matchingOwnerId, {
+        title: notification.title,
+        body: notification.body,
+        imageUrl: safeTrim(matchingPost.photoUrl || newPost.photoUrl),
+        preferenceKey: "communityResponses",
+        data: {
+          type: "community_help_match",
+          communityHelpPostId: doc.id,
+          matchingCommunityHelpPostId: event.params.postId,
+          notificationId,
+          imageUrl: safeTrim(matchingPost.photoUrl || newPost.photoUrl),
+        },
+      });
+      notifiedCount += 1;
+      if (notifiedCount >= 20) break;
+    }
+
+    logger.info("Community Help match notifications processed", {
+      postId: event.params.postId,
+      notifiedCount,
+    });
+
+    await createAndSendCommunityAlertCampaign({
+      postId: event.params.postId,
+      post: newPost,
+    });
+  }
+);
+
+exports.createCommunityHelpConversation = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const postId = safeTrim(request.data?.postId);
+    const text = safeTrim(request.data?.text);
+    const sightingPhotoUrl = safeTrim(request.data?.sightingPhotoUrl);
+
+    assert(uid, "unauthenticated", "Login required.");
+    assert(postId, "invalid-argument", "Missing Community Help post.");
+    assert(text, "invalid-argument", "Please enter a message.");
+    assert(text.length <= 2000, "invalid-argument", "Message is too long.");
+
+    const postRef = db.collection("communityHelpPosts").doc(postId);
+    const postSnap = await postRef.get();
+    assert(postSnap.exists, "not-found", "Community Help post not found.");
+
+    const post = postSnap.data() || {};
+    const ownerId = safeTrim(post.createdBy);
+    assert(ownerId, "failed-precondition", "This post is missing an owner.");
+    assert(ownerId !== uid, "failed-precondition", "You cannot respond to your own post.");
+    assert(isCommunityHelpActive(post), "failed-precondition", "This post is no longer active.");
+
+    const [ownerSnap, responderSnap] = await Promise.all([
+      db.collection("users").doc(ownerId).get(),
+      db.collection("users").doc(uid).get(),
+    ]);
+    const owner = ownerSnap.data() || {};
+    const responder = responderSnap.data() || {};
+    const ownerName =
+      safeTrim(owner.name) ||
+      safeTrim(owner.displayName) ||
+      "LocalLink member";
+    const responderName =
+      safeTrim(responder.name) ||
+      safeTrim(responder.displayName) ||
+      safeTrim(request.auth?.token?.name) ||
+      "LocalLink member";
+
+    const conversationId = communityHelpConversationId({
+      postId,
+      ownerId,
+      responderId: uid,
+    });
+    const conversationRef = db.collection("conversations").doc(conversationId);
+    const systemMessageRef = conversationRef.collection("messages").doc("context");
+    const userMessageRef = conversationRef.collection("messages").doc();
+    const responseRef = postRef.collection("responses").doc(uid);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    let createdConversation = false;
+
+    await db.runTransaction(async (tx) => {
+      const freshPostSnap = await tx.get(postRef);
+      assert(freshPostSnap.exists, "not-found", "Community Help post not found.");
+      const freshPost = freshPostSnap.data() || {};
+      assert(isCommunityHelpActive(freshPost), "failed-precondition", "This post is no longer active.");
+      assert(safeTrim(freshPost.createdBy) === ownerId, "failed-precondition", "Post owner changed.");
+
+      const conversationSnap = await tx.get(conversationRef);
+      const conversation = conversationSnap.data() || {};
+      createdConversation = !conversationSnap.exists;
+
+      tx.set(
+        conversationRef,
+        {
+          conversationStatus: "community_help",
+          conversationType: "community_help",
+          customerId: uid,
+          businessOwnerId: ownerId,
+          businessId: "",
+          bookingId: "",
+          currentBookingId: "",
+          customerName: responderName,
+          businessName: ownerName,
+          originatingServiceId: "",
+          originatingServiceName: "Community Help",
+          currentBookingServiceName: communityHelpContextLabel(freshPost),
+          serviceId: "",
+          serviceName: "Community Help",
+          serviceImageUrl: safeTrim(freshPost.photoUrl),
+          lastMessage: text,
+          lastMessageAt: now,
+          lastMessageId: userMessageRef.id,
+          lastSenderId: uid,
+          lastSenderType: "customer",
+          unreadCustomerCount: conversation.unreadCustomerCount || 0,
+          unreadBusinessCount: admin.firestore.FieldValue.increment(1),
+          archived: false,
+          customerHasMessaged: true,
+          quotationStatus: "none",
+          acceptedQuotationId: "",
+          quotationIds: [],
+          participants: [uid, ownerId],
+          communityHelpParticipantIds: [uid, ownerId],
+          communityHelpPostId: postId,
+          communityHelpType: safeTrim(freshPost.type),
+          communityHelpMode: safeTrim(freshPost.mode),
+          communityHelpTitle: safeTrim(freshPost.title),
+          communityHelpLocation: safeTrim(freshPost.publicLocation) || safeTrim(freshPost.location),
+          communityHelpLifecycleKind: safeTrim(freshPost.lifecycleKind),
+          communityHelpOwnerId: ownerId,
+          communityHelpResponderId: uid,
+          createdAt: conversation.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      if (!conversationSnap.exists) {
+        tx.set(systemMessageRef, {
+          senderId: "system",
+          senderType: "system",
+          text: communityHelpSystemText({
+            responderName,
+            post: freshPost,
+          }),
+          timestamp: now,
+          read: false,
+          edited: false,
+          deleted: false,
+          attachments: [],
+          systemEvent: "community_help_response_started",
+        });
+      }
+
+      tx.set(userMessageRef, {
+        senderId: uid,
+        senderType: "customer",
+        text,
+        timestamp: now,
+        read: false,
+        edited: false,
+        deleted: false,
+        attachments: sightingPhotoUrl
+          ? [
+              {
+                type: "image",
+                url: sightingPhotoUrl,
+                visibility: "private",
+                purpose: "community_help_sighting",
+              },
+            ]
+          : [],
+      });
+
+      tx.set(
+        responseRef,
+        {
+          postId,
+          postOwnerId: ownerId,
+          responderId: uid,
+          responderName,
+          conversationId,
+          message: text,
+          status: "conversation_open",
+          createdAt: conversation.createdAt || now,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    });
+
+    if (createdConversation) {
+      const notification = communityHelpNotification({ post });
+      const notificationType = sightingPhotoUrl
+        ? "community_help_sighting"
+        : "community_help_response";
+      const notificationRef = db
+        .collection("users")
+        .doc(ownerId)
+        .collection("notifications")
+        .doc(`community_help_${conversationId}`);
+
+      await notificationRef.set({
+        type: notificationType,
+        title: notification.title,
+        body: notification.body,
+        communityHelpPostId: postId,
+        conversationId,
+        viewerType: "business",
+        imageUrl: safeTrim(post.photoUrl),
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await sendPushToUser(ownerId, {
+        title: notification.title,
+        body: notification.body,
+        imageUrl: safeTrim(post.photoUrl),
+        preferenceKey: "communityResponses",
+        data: {
+          type: notificationType,
+          conversationId,
+          bookingId: "",
+          viewerType: "business",
+          communityHelpPostId: postId,
+          notificationId: `community_help_${conversationId}`,
+          imageUrl: safeTrim(post.photoUrl),
+        },
+      });
+    }
+
+    return {
+      conversationId,
+      created: createdConversation,
+    };
+  }
+);
+
+exports.followCommunityHelpPost = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const postId = safeTrim(request.data?.postId);
+    assert(uid, "unauthenticated", "Login required.");
+    assert(postId, "invalid-argument", "Missing Community Help post.");
+
+    const postRef = db.collection("communityHelpPosts").doc(postId);
+    const followerRef = postRef.collection("followers").doc(uid);
+    let post = null;
+    let createdFollow = false;
+    await db.runTransaction(async (tx) => {
+      const postSnap = await tx.get(postRef);
+      assert(postSnap.exists, "not-found", "Community Help post not found.");
+      post = postSnap.data() || {};
+      assert(safeTrim(post.createdBy) !== uid, "failed-precondition", "You already own this post.");
+      assert(isCommunityHelpActive(post), "failed-precondition", "This post is no longer active.");
+
+      const followerSnap = await tx.get(followerRef);
+      if (!followerSnap.exists) {
+        createdFollow = true;
+        tx.set(followerRef, {
+          userId: uid,
+          postId,
+          notificationState: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        tx.set(
+          postRef,
+          {
+            lookoutCount: admin.firestore.FieldValue.increment(1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    });
+
+    const ownerId = safeTrim(post?.createdBy);
+    if (createdFollow && ownerId && ownerId !== uid) {
+      const notificationId = `community_help_lookout_${postId}_${uid}`;
+      const title = "Someone is keeping a lookout";
+      const body = "A LocalLink member is now following updates on your Community Help post.";
+      await db
+        .collection("users")
+        .doc(ownerId)
+        .collection("notifications")
+        .doc(notificationId)
+        .set({
+          type: "community_help_lookout",
+          title,
+          body,
+          communityHelpPostId: postId,
+          followerId: uid,
+          imageUrl: safeTrim(post.photoUrl),
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+      await sendPushToUser(ownerId, {
+        title,
+        body,
+        imageUrl: safeTrim(post.photoUrl),
+        preferenceKey: "communityResponses",
+        data: {
+          type: "community_help_lookout",
+          communityHelpPostId: postId,
+          followerId: uid,
+          notificationId,
+          imageUrl: safeTrim(post.photoUrl),
+        },
+      });
+    }
+
+    return { following: true };
+  }
+);
+
+exports.unfollowCommunityHelpPost = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const postId = safeTrim(request.data?.postId);
+    assert(uid, "unauthenticated", "Login required.");
+    assert(postId, "invalid-argument", "Missing Community Help post.");
+
+    const postRef = db.collection("communityHelpPosts").doc(postId);
+    const followerRef = postRef.collection("followers").doc(uid);
+    await db.runTransaction(async (tx) => {
+      const followerSnap = await tx.get(followerRef);
+      if (!followerSnap.exists) return;
+
+      tx.delete(followerRef);
+      tx.set(
+        postRef,
+        {
+          lookoutCount: admin.firestore.FieldValue.increment(-1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    return { following: false };
+  }
+);
+
+async function notifyCommunityHelpFollowers({ postId, post, title, body, updateId }) {
+  const followers = await db
+    .collection("communityHelpPosts")
+    .doc(postId)
+    .collection("followers")
+    .where("notificationState", "==", "active")
+    .limit(500)
+    .get();
+
+  for (const followerDoc of followers.docs) {
+    const followerId = safeTrim(followerDoc.data()?.userId) || followerDoc.id;
+    if (!followerId || followerId === safeTrim(post.createdBy)) continue;
+
+    const notificationId = updateId
+      ? `community_help_update_${postId}_${updateId}`
+      : `community_help_resolved_${postId}`;
+    await db
+      .collection("users")
+      .doc(followerId)
+      .collection("notifications")
+      .doc(notificationId)
+      .set({
+        type: updateId ? "community_help_update" : "community_help_resolved",
+        title,
+        body,
+        communityHelpPostId: postId,
+        updateId: updateId || "",
+        imageUrl: safeTrim(post.photoUrl),
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+    await sendPushToUser(followerId, {
+      title,
+      body,
+      imageUrl: safeTrim(post.photoUrl),
+      preferenceKey: "communityFollowing",
+      data: {
+        type: updateId ? "community_help_update" : "community_help_resolved",
+        communityHelpPostId: postId,
+        updateId: updateId || "",
+        notificationId,
+        imageUrl: safeTrim(post.photoUrl),
+      },
+    });
+  }
+}
+
+exports.publishCommunityHelpUpdate = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const postId = safeTrim(request.data?.postId);
+    const text = safeTrim(request.data?.text);
+    assert(uid, "unauthenticated", "Login required.");
+    assert(postId, "invalid-argument", "Missing Community Help post.");
+    assert(text, "invalid-argument", "Write a short update.");
+    assert(text.length <= 240, "invalid-argument", "Keep updates under 240 characters.");
+
+    const postRef = db.collection("communityHelpPosts").doc(postId);
+    const updateRef = postRef.collection("updates").doc();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    let post = null;
+
+    await db.runTransaction(async (tx) => {
+      const postSnap = await tx.get(postRef);
+      assert(postSnap.exists, "not-found", "Community Help post not found.");
+      post = postSnap.data() || {};
+      assert(safeTrim(post.createdBy) === uid, "permission-denied", "Only the post owner can publish updates.");
+      assert(isCommunityHelpActive(post), "failed-precondition", "This post is not active.");
+
+      const lastUpdateMillis = timestampToMillis(post.lastPublicUpdateAt);
+      assert(
+        lastUpdateMillis === null || Date.now() - lastUpdateMillis > 30 * 60 * 1000,
+        "resource-exhausted",
+        "Please wait before posting another update."
+      );
+
+      tx.set(updateRef, {
+        postId,
+        ownerId: uid,
+        text,
+        type: "owner_update",
+        createdAt: now,
+        imageUrl: safeTrim(post.photoUrl),
+      });
+      tx.set(
+        postRef,
+        {
+          lastPublicUpdateAt: now,
+          lastPublicUpdateText: text,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    });
+
+    await notifyCommunityHelpFollowers({
+      postId,
+      post,
+      title: `Update on ${safeTrim(post.title) || "Community Help"}`,
+      body: text,
+      updateId: updateRef.id,
+    });
+
+    return { ok: true, updateId: updateRef.id };
+  }
+);
+
+exports.notifyCommunityHelpResolved = onDocumentUpdated(
+  {
+    document: "communityHelpPosts/{postId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const before = event.data?.before.data() || {};
+    const after = event.data?.after.data() || {};
+    const wasResolved = before.status === "resolved" || before.resolvedAt;
+    const isResolved = after.status === "resolved" || after.resolvedAt;
+    if (wasResolved || !isResolved || after.followerResolutionNotifiedAt) return;
+
+    const title = safeTrim(after.title) || "This alert";
+    const isPet = safeTrim(after.itemCategory) === "Pet";
+    const notificationTitle = isPet
+      ? `${title} has been found`
+      : `Good news — ${title} was found`;
+    const body =
+      safeTrim(after.closingUpdate) ||
+      (isPet
+        ? `${title} has been reunited.`
+        : "This Community Help alert has been resolved.");
+
+    await notifyCommunityHelpFollowers({
+      postId: event.params.postId,
+      post: after,
+      title: notificationTitle,
+      body,
+    });
+
+    await event.data.after.ref.set(
+      {
+        followerResolutionNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+);
+
+function communityHelpExpiryReminderCopy(post) {
+  const mode = safeTrim(post.mode);
+  const type = safeTrim(post.type);
+  const category = safeTrim(post.itemCategory);
+  const title = safeTrim(post.title) || "your post";
+
+  if (mode === "lost" && category === "Pet") {
+    return {
+      title: "Still missing?",
+      body: `Your missing pet post expires tomorrow. Keep it active if you're still looking.`,
+    };
+  }
+  if (mode === "lost") {
+    return {
+      title: "Still looking?",
+      body: `Your lost item post expires tomorrow.`,
+    };
+  }
+  if (mode === "found") {
+    return {
+      title: "Still looking for the owner?",
+      body: `Your found item post expires tomorrow.`,
+    };
+  }
+  if (type === "free_item") {
+    return {
+      title: "Still available?",
+      body: `Your free item post expires tomorrow.`,
+    };
+  }
+  return {
+    title: "Community Help post expiring",
+    body: `${title} expires tomorrow.`,
+  };
+}
+
+exports.processCommunityHelpLifecycle = onSchedule(
+  {
+    schedule: "every 60 minutes",
+    region: "us-central1",
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const activeStatuses = ["active", "open", "missing", "looking_for_owner"];
+
+    const expiredSnapshot = await db
+      .collection("communityHelpPosts")
+      .where("isActive", "==", true)
+      .where("status", "in", activeStatuses)
+      .where("expiresAt", "<=", now)
+      .limit(300)
+      .get();
+
+    let expiredCount = 0;
+    for (const doc of expiredSnapshot.docs) {
+      const data = doc.data() || {};
+      if (data.resolvedAt || data.status === "resolved" || data.status === "expired") {
+        continue;
+      }
+
+      await doc.ref.set(
+        {
+          status: "expired",
+          isActive: false,
+          expiredAt: admin.firestore.FieldValue.serverTimestamp(),
+          expiryReminderStatus:
+            data.expiryReminderStatus === "sent" ? "sent" : "cancelled",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      expiredCount += 1;
+    }
+
+    const reminderSnapshot = await db
+      .collection("communityHelpPosts")
+      .where("isActive", "==", true)
+      .where("status", "in", activeStatuses)
+      .where("expiryReminderStatus", "==", "pending")
+      .where("expiryReminderAt", "<=", now)
+      .limit(300)
+      .get();
+
+    let reminderCount = 0;
+    for (const doc of reminderSnapshot.docs) {
+      const data = doc.data() || {};
+      const ownerId = safeTrim(data.createdBy);
+      const expiresAtMillis = timestampToMillis(data.expiresAt);
+      if (!ownerId || data.resolvedAt || data.status === "resolved") continue;
+      if (expiresAtMillis !== null && expiresAtMillis <= Date.now()) continue;
+
+      const copy = communityHelpExpiryReminderCopy(data);
+      const notificationId = `community_help_expiry_${doc.id}_${expiresAtMillis || "legacy"}`;
+      const notificationRef = db
+        .collection("users")
+        .doc(ownerId)
+        .collection("notifications")
+        .doc(notificationId);
+      let reminderCreated = false;
+
+      await db.runTransaction(async (tx) => {
+        const freshPostSnap = await tx.get(doc.ref);
+        const freshPost = freshPostSnap.data() || {};
+        if (
+          !freshPostSnap.exists ||
+          freshPost.expiryReminderStatus !== "pending" ||
+          freshPost.isActive === false ||
+          freshPost.resolvedAt ||
+          freshPost.status === "resolved" ||
+          freshPost.status === "expired"
+        ) {
+          return;
+        }
+
+        const freshExpiresAtMillis = timestampToMillis(freshPost.expiresAt);
+        if (freshExpiresAtMillis !== null && freshExpiresAtMillis <= Date.now()) {
+          return;
+        }
+
+        tx.set(notificationRef, {
+          type: "community_help_expiry",
+          title: copy.title,
+          body: copy.body,
+          communityHelpPostId: doc.id,
+          imageUrl: safeTrim(freshPost.photoUrl),
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        tx.set(
+          doc.ref,
+          {
+            expiryReminderStatus: "sent",
+            expiryReminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        reminderCreated = true;
+      });
+
+      if (reminderCreated) {
+        reminderCount += 1;
+        await sendPushToUser(ownerId, {
+          title: copy.title,
+          body: copy.body,
+          imageUrl: safeTrim(data.photoUrl),
+          preferenceKey: "reminders",
+          data: {
+            type: "community_help_expiry",
+            communityHelpPostId: doc.id,
+            notificationId,
+            imageUrl: safeTrim(data.photoUrl),
+          },
+        });
+      }
+    }
+
+    logger.info("Community Help lifecycle processed", {
+      expiredCount,
+      reminderCount,
+    });
+  }
+);
+
+exports.sendBookingMessage = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
+    const text = safeTrim(request.data?.text);
+
+    assert(text, "invalid-argument", "Message cannot be empty.");
+    assert(text.length <= 2000, "invalid-argument", "Message is too long.");
+
+    const {
+      conversationRef,
+      conversation,
+      senderType,
+      recipientId,
+    } = await requireConversationAccess(uid, conversationId);
+
+    assert(conversation.archived !== true, "failed-precondition", "This conversation is archived.");
+    assert(
+      senderType === "customer" || conversation.customerHasMessaged === true,
+      "failed-precondition",
+      "Customers must start the conversation."
+    );
+
+    const messageRef = conversationRef.collection("messages").doc();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    await db.runTransaction(async (tx) => {
+      const freshConversationSnap = await tx.get(conversationRef);
+      const freshConversation = freshConversationSnap.data() || {};
+
+      if (freshConversation.archived === true) {
+        throw new HttpsError("failed-precondition", "This conversation is archived.");
+      }
+
+      tx.set(messageRef, {
+        senderId: uid,
+        senderType,
+        text,
+        timestamp: now,
+        read: false,
+        edited: false,
+        deleted: false,
+        attachments: [],
+      });
+
+      tx.set(
+        conversationRef,
+        {
+          lastMessage: text,
+          lastMessageAt: now,
+          updatedAt: now,
+          lastMessageId: messageRef.id,
+          lastSenderId: uid,
+          lastSenderType: senderType,
+          customerHasMessaged: senderType === "customer"
+            ? true
+            : freshConversation.customerHasMessaged === true,
+          unreadCustomerCount: senderType === "business"
+            ? admin.firestore.FieldValue.increment(1)
+            : freshConversation.unreadCustomerCount || 0,
+          unreadBusinessCount: senderType === "customer"
+            ? admin.firestore.FieldValue.increment(1)
+            : freshConversation.unreadBusinessCount || 0,
+        },
+        { merge: true }
+      );
+    });
+
+    const isCommunityHelpConversation =
+      conversation.conversationType === "community_help" ||
+      conversation.conversationStatus === "community_help";
+    const notificationType = isCommunityHelpConversation
+      ? "community_help_message"
+      : "booking_message";
+    const notificationTitle = isCommunityHelpConversation
+      ? "New Community Help message"
+      : senderType === "customer"
+        ? "New customer enquiry"
+        : conversation.conversationStatus === "enquiry"
+          ? "Business replied to your enquiry"
+          : "New business message";
+    const notificationBody = isCommunityHelpConversation
+      ? "Open LocalLink to read and reply privately."
+      : text;
+    const notificationId = `${notificationType}_${conversationRef.id}_${messageRef.id}`;
+
+    await db
+      .collection("users")
+      .doc(recipientId)
+      .collection("notifications")
+      .doc(notificationId)
+      .set({
+        type: notificationType,
+        title: notificationTitle,
+        body: notificationBody,
+        bookingId: conversation.bookingId || "",
+        conversationId: conversationRef.id,
+        messageId: messageRef.id,
+        viewerType: senderType === "customer" ? "business" : "customer",
+        communityHelpPostId: conversation.communityHelpPostId || "",
+        imageUrl: isCommunityHelpConversation
+          ? safeTrim(conversation.serviceImageUrl)
+          : "",
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+    await sendPushToUser(recipientId, {
+      title: notificationTitle,
+      body: notificationBody,
+      imageUrl: isCommunityHelpConversation
+        ? safeTrim(conversation.serviceImageUrl)
+        : "",
+      preferenceKey: isCommunityHelpConversation
+        ? "communityMessages"
+        : "serviceBookingUpdates",
+      data: {
+        type: notificationType,
+        bookingId: conversation.bookingId || "",
+        conversationId: conversationRef.id,
+        messageId: messageRef.id,
+        viewerType: senderType === "customer" ? "business" : "customer",
+        communityHelpPostId: conversation.communityHelpPostId || "",
+        notificationId,
+      },
+    });
+
+    return {
+      ok: true,
+      messageId: messageRef.id,
+    };
+  }
+);
+
+exports.markBookingConversationRead = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
+    const {
+      conversationRef,
+      senderType,
+    } = await requireConversationAccess(request.auth?.uid, conversationId);
+
+    const unreadField = senderType === "customer"
+      ? "unreadCustomerCount"
+      : "unreadBusinessCount";
+    const oppositeSenderType = senderType === "customer"
+      ? "business"
+      : "customer";
+
+    const unreadMessages = await conversationRef
+      .collection("messages")
+      .where("read", "==", false)
+      .limit(100)
+      .get();
+
+    const batch = db.batch();
+
+    batch.set(
+      conversationRef,
+      {
+        [unreadField]: 0,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    unreadMessages.docs
+      .filter((doc) => doc.data()?.senderType === oppositeSenderType)
+      .forEach((doc) => {
+      batch.update(doc.ref, {
+        read: true,
+      });
+    });
+
+    await batch.commit();
+
+    return { ok: true };
+  }
+);
+
+exports.editBookingMessage = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
+    const messageId = safeTrim(request.data?.messageId);
+    const text = safeTrim(request.data?.text);
+
+    assert(messageId, "invalid-argument", "Missing messageId.");
+    assert(text, "invalid-argument", "Message cannot be empty.");
+    assert(text.length <= 2000, "invalid-argument", "Message is too long.");
+
+    const { conversationRef, conversation } =
+      await requireConversationAccess(uid, conversationId);
+
+    assert(conversation.archived !== true, "failed-precondition", "This conversation is archived.");
+
+    const messageRef = conversationRef.collection("messages").doc(messageId);
+
+    await db.runTransaction(async (tx) => {
+      const messageSnap = await tx.get(messageRef);
+
+      assert(messageSnap.exists, "not-found", "Message not found.");
+
+      const message = messageSnap.data() || {};
+      const sentAt = timestampToMillis(message.timestamp);
+      const withinEditWindow =
+        sentAt !== null && Date.now() - sentAt <= 5 * 60 * 1000;
+
+      assert(message.senderId === uid, "permission-denied", "You can only edit your own messages.");
+      assert(message.deleted !== true, "failed-precondition", "Deleted messages cannot be edited.");
+      assert(withinEditWindow, "failed-precondition", "Messages can only be edited for 5 minutes.");
+
+      tx.update(messageRef, {
+        text,
+        edited: true,
+        editedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const conversationSnap = await tx.get(conversationRef);
+      const currentConversation = conversationSnap.data() || {};
+
+      if (currentConversation.archived === true) {
+        throw new HttpsError("failed-precondition", "This conversation is archived.");
+      }
+
+      if (currentConversation.lastMessageId === messageId) {
+        tx.set(
+          conversationRef,
+          {
+            lastMessage: text,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    });
+
+    return { ok: true };
+  }
+);
+
+exports.deleteBookingMessage = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = request.auth?.uid;
+    const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
+    const messageId = safeTrim(request.data?.messageId);
+
+    assert(messageId, "invalid-argument", "Missing messageId.");
+
+    const { conversationRef, conversation } =
+      await requireConversationAccess(uid, conversationId);
+
+    assert(conversation.archived !== true, "failed-precondition", "This conversation is archived.");
+
+    const messageRef = conversationRef.collection("messages").doc(messageId);
+
+    await db.runTransaction(async (tx) => {
+      const messageSnap = await tx.get(messageRef);
+
+      assert(messageSnap.exists, "not-found", "Message not found.");
+
+      const message = messageSnap.data() || {};
+
+      assert(message.senderId === uid, "permission-denied", "You can only delete your own messages.");
+
+      tx.update(messageRef, {
+        text: "",
+        deleted: true,
+        deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const conversationSnap = await tx.get(conversationRef);
+      const currentConversation = conversationSnap.data() || {};
+
+      if (currentConversation.archived === true) {
+        throw new HttpsError("failed-precondition", "This conversation is archived.");
+      }
+
+      if (currentConversation.lastMessageId === messageId) {
+        tx.set(
+          conversationRef,
+          {
+            lastMessage: "Message deleted",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    });
+
+    return { ok: true };
+  }
+);
+
+exports.archiveCompletedBookingConversations = onSchedule(
+  {
+    schedule: "every 24 hours",
+    region: "us-central1",
+  },
+  async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 90 * 24 * 60 * 60 * 1000
+    );
+
+    const snap = await db.collection("bookings")
+      .where("status", "==", "completed")
+      .where("completedAt", "<=", cutoff)
+      .limit(300)
+      .get();
+
+    if (snap.empty) return;
+
+    const batch = db.batch();
+
+    for (const doc of snap.docs) {
+      await ensureBookingConversationDoc(doc.id, doc.data() || {});
+
+      batch.set(
+        bookingConversationRef(doc.id),
+        {
+          archived: true,
+          archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+          bookingStatus: "completed",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+
+    await batch.commit();
+  }
+);
 
 
 exports.autoCompleteBookings = onSchedule(
@@ -1932,10 +5199,11 @@ exports.stripeWebhook = onRequest(
         const slotId = pi.metadata?.slotId;
         const businessId = pi.metadata?.businessId;
         const staffId = pi.metadata?.staffId;
+        const directAvailability = pi.metadata?.directAvailability === "true";
 
         console.log("💰 PAYMENT SUCCEEDED:", bookingId);
 
-        if (!bookingId || !businessId || !staffId || !slotId) {
+        if (!bookingId || !businessId || (!directAvailability && (!staffId || !slotId))) {
           console.error("❌ Missing metadata on payment_intent:", pi.id, pi.metadata);
           return res.json({ received: true });
         }
@@ -1943,95 +5211,65 @@ exports.stripeWebhook = onRequest(
         const bookingRef = db.collection("bookings").doc(bookingId);
 
         await db.runTransaction(async (tx) => {
-          const bookingSnap = await tx.get(bookingRef);
-
-          if (!bookingSnap.exists) {
-            console.error("❌ Booking not found:", bookingId);
-            return;
-          }
-
-          const data = bookingSnap.data();
-
-          if (data.status === "confirmed") {
-            console.log("✅ Already confirmed — skipping");
-            return;
-          }
-
-        tx.update(bookingRef, {
-  status: "confirmed",
-  paymentStatus: "paid",
-  confirmedAt: admin.firestore.FieldValue.serverTimestamp()
-});
-
-       const bookingSlotIds =
-  Array.isArray(data.slotIds)
-    ? data.slotIds
-    : [slotId];
-
-for (const bookingSlotId of bookingSlotIds) {
-
-  const slotRef = db
-    .collection("businesses")
-    .doc(businessId)
-    .collection("staff")
-    .doc(staffId)
-    .collection("availableSlots")
-    .doc(bookingSlotId);
-
-  const slotSnap =
-    await tx.get(slotRef);
-
-  if (!slotSnap.exists) {
-    throw new Error("Slot missing");
-  }
-
-  const slotData =
-    slotSnap.data();
-
-  if (
-    slotData.lockedByBookingId !== bookingId
-  ) {
-    throw new Error(
-      "Slot lock mismatch"
-    );
-  }
-
-  tx.update(slotRef, {
-
-    isBooked: true,
-
-    lockExpiresAt:
-      admin.firestore.FieldValue.delete(),
-
-    lockedByBookingId:
-      admin.firestore.FieldValue.delete(),
-  });
-}
+          await finalizePaidBookingInTransaction({
+            tx,
+            bookingRef,
+            bookingId,
+            paymentMetadata: {
+              businessId,
+              staffId,
+              slotId,
+              directAvailability: String(directAvailability),
+            },
+          });
         });
 
         const updatedSnap = await bookingRef.get();
         const booking = updatedSnap.data();
 
+        if (booking) {
+          await ensureBookingConversationDoc(bookingId, booking);
+        }
+
         if (booking && booking.customerId && businessId) {
           const businessSnap = await db.collection("businesses").doc(businessId).get();
           const ownerId = businessSnap.data()?.ownerId;
+          const awaitingApproval = booking.status === "pending_business_confirmation";
 
           await sendPushToUser(booking.customerId, {
-            title: "Booking confirmed",
-            body: `Your booking for ${booking.serviceName} is confirmed`,
-            data: { bookingId }
+            title: awaitingApproval
+              ? "Booking request sent"
+              : "Booking confirmed",
+            body: awaitingApproval
+              ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
+              : `Your booking for ${booking.serviceName} is confirmed`,
+            data: {
+              bookingId,
+              businessId,
+              type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
+            },
+            preferenceKey: "serviceBookingUpdates",
           });
 
           if (ownerId) {
             await sendPushToUser(ownerId, {
-              title: "Booking confirmed",
-              body: "You have a confirmed booking",
-              data: { bookingId }
-            });
+              title: awaitingApproval
+                ? "New Last-Minute Request"
+                : "Booking Confirmed",
+              body: awaitingApproval
+                ? `${booking.customerName || "A customer"} booked ${booking.serviceName || "a service"} soon. Please accept or decline within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
+                : `${booking.customerName || "A customer"} has a confirmed booking for ${booking.serviceName || "a service"}.`,
+	              data: {
+	                bookingId,
+	                businessId,
+	                type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
+	              },
+	              preferenceKey: "serviceBookingUpdates",
+	            });
           }
         }
 
-        console.log("✅ BOOKING CONFIRMED:", bookingId);
+        console.log("✅ PAYMENT BOOKING UPDATED:", bookingId);
       }
 
       // ===============================
@@ -2056,11 +5294,13 @@ for (const bookingSlotId of bookingSlotIds) {
   const staffId =
     pi.metadata?.staffId;
 
+  const directAvailability =
+    pi.metadata?.directAvailability === "true";
+
   if (
     !bookingId ||
-    !slotId ||
     !businessId ||
-    !staffId
+    (!directAvailability && (!slotId || !staffId))
   ) {
 
     console.error(
@@ -2094,16 +5334,17 @@ for (const bookingSlotId of bookingSlotIds) {
       return;
     }
 
-    tx.update(bookingRef, {
+    if (booking.directAvailability === true) {
+      await restoreDirectAvailabilityInTransaction(tx, bookingRef, booking, bookingId);
+      tx.update(bookingRef, {
+        status: "payment_failed",
+        paymentStatus: "failed",
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
-      status: "payment_failed",
-
-      paymentStatus: "failed",
-
-      cancelledAt:
-        admin.firestore.FieldValue
-          .serverTimestamp(),
-    });
+      return;
+    }
 
     const bookingSlotIds =
       Array.isArray(booking.slotIds)
@@ -2133,6 +5374,17 @@ for (const bookingSlotId of bookingSlotIds) {
             .delete(),
       });
     }
+
+    tx.update(bookingRef, {
+
+      status: "payment_failed",
+
+      paymentStatus: "failed",
+
+      cancelledAt:
+        admin.firestore.FieldValue
+          .serverTimestamp(),
+    });
   });
 
   const bookingSnap =
@@ -2148,9 +5400,14 @@ for (const bookingSlotId of bookingSlotIds) {
 
     title: "Payment failed",
 
-    body:
-      "Your booking payment failed. Please try again.",
-  });
+	    body:
+	      "Your booking payment failed. Please try again.",
+	    preferenceKey: "serviceBookingUpdates",
+	    data: {
+	      type: "payment_failed",
+	      bookingId,
+	    },
+	  });
 
   console.log(
     "❌ Payment failed — booking released"
@@ -2233,10 +5490,13 @@ for (const bookingSlotId of bookingSlotIds) {
 // =================================================
 
 exports.cleanupPendingBookings = onSchedule(
-  { schedule: "every 5 minutes", region: "us-central1" },
+  {
+    schedule: "every 5 minutes",
+    region: "us-central1",
+    secrets: ["STRIPE_SECRET_KEY"],
+  },
   async () => {
-    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
-
+    const stripe = getStripe();
     const snap = await db
       .collection("bookings")
       .where("status", "==", "pending_payment")
@@ -2245,44 +5505,103 @@ exports.cleanupPendingBookings = onSchedule(
 
     if (snap.empty) return;
 
-    const batch = db.batch();
+    let cancelled = 0;
+    let reconciled = 0;
+    let deferred = 0;
 
     for (const doc of snap.docs) {
-      const booking = doc.data();
+      const booking = doc.data() || {};
 
-      batch.update(doc.ref, {
-        status: "cancelled_by_system",
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      if (booking.paymentMethod !== "stripe") {
+        continue;
+      }
+
+      const paymentIntentState = await retrievePendingPaymentIntentForCleanup(
+        stripe,
+        { ...booking, bookingId: doc.id }
+      );
+
+      if (paymentIntentState.decision === "retry_later") {
+        deferred += 1;
+        continue;
+      }
+
+      if (paymentIntentState.decision === "keep_pending") {
+        deferred += 1;
+        logger.info("Pending booking cleanup deferred by Stripe state", {
+          bookingId: doc.id,
+          paymentIntentStatus: paymentIntentState.reason,
+        });
+        continue;
+      }
+
+      if (paymentIntentState.decision === "reconcile_paid") {
+        const outcome = await db.runTransaction(async (tx) => {
+          return finalizePaidBookingInTransaction({
+            tx,
+            bookingRef: doc.ref,
+            bookingId: doc.id,
+            paymentMetadata: {
+              businessId: booking.businessId,
+              staffId: booking.staffId,
+              slotId: booking.slotId,
+              directAvailability: String(booking.directAvailability === true),
+            },
+          });
+        });
+
+        if (outcome.changed) {
+          reconciled += 1;
+          logger.info("Pending booking reconciled from Stripe success", {
+            bookingId: doc.id,
+            status: outcome.status,
+          });
+        }
+
+        continue;
+      }
+
+      await cancelAbandonedPaymentIntentIfNeeded(
+        stripe,
+        paymentIntentState.paymentIntent,
+        doc.id
+      );
+
+      await db.runTransaction(async (tx) => {
+        const bookingSnap = await tx.get(doc.ref);
+        if (!bookingSnap.exists) return;
+
+        const fresh = bookingSnap.data() || {};
+        if (fresh.status !== "pending_payment") return;
+        if (fresh.paymentStatus === "paid") return;
+
+        if (fresh.directAvailability === true) {
+          await restoreDirectAvailabilityInTransaction(
+            tx,
+            doc.ref,
+            fresh,
+            doc.id
+          );
+        } else {
+          releaseBookingSlotsInTransaction(tx, fresh);
+        }
+
+        tx.update(doc.ref, {
+          status: "cancelled_by_system",
+          paymentStatus: "failed",
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        cancelled += 1;
       });
-
-      const bookingSlotIds =
-  Array.isArray(booking.slotIds)
-    ? booking.slotIds
-    : [booking.slotId];
-
-for (const bookingSlotId of bookingSlotIds) {
-
-  const sRef = slotRef(
-    booking.businessId,
-    booking.staffId,
-    bookingSlotId
-  );
-
-  batch.update(sRef, {
-
-    lockedByBookingId:
-      admin.firestore.FieldValue.delete(),
-
-    lockExpiresAt:
-      admin.firestore.FieldValue.delete(),
-  });
-}
     }
 
-    await batch.commit();
-
-    logger.info("Cancelled stale pending bookings + unlocked slots", {
+    logger.info("Pending booking cleanup complete", {
       count: snap.size,
+      cancelled,
+      reconciled,
+      deferred,
     });
   }
 );
@@ -2329,16 +5648,26 @@ exports.createConnectedAccount = onCall(
 
     const stripe = getStripe();
     const uid = request.auth.uid;
+    const requestedBusinessId = safeTrim(request.data?.businessId);
 
-    const snap = await db
-      .collection("businesses")
-      .where("ownerId", "==", uid)
-      .limit(1)
-      .get();
+    let businessDoc = null;
 
-    assert(!snap.empty, "not-found", "Business not found.");
+    if (requestedBusinessId) {
+      const businessSnap = await db.collection("businesses").doc(requestedBusinessId).get();
+      assert(businessSnap.exists, "not-found", "Business not found.");
+      assert(businessSnap.data().ownerId === uid, "permission-denied", "Not your business.");
+      businessDoc = businessSnap;
+    } else {
+      const snap = await db
+        .collection("businesses")
+        .where("ownerId", "==", uid)
+        .limit(1)
+        .get();
 
-    const businessDoc = snap.docs[0];
+      assert(!snap.empty, "not-found", "Business not found.");
+      businessDoc = snap.docs[0];
+    }
+
     let stripeAccountId = businessDoc.data().stripeAccountId || null;
 
     // ✅ CREATE ACCOUNT IF NOT EXISTS
@@ -2488,8 +5817,6 @@ exports.createStripePortalLink = onCall(
         .doc("default")
         .set({ stripeCustomerId }, { merge: true });
     }
-
-    console.log("Stripe customer ID:", stripeCustomerId);
 
     const session = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
@@ -2807,6 +6134,76 @@ exports.onReviewCreatedAnalytics = onDocumentCreated(
   }
 );
 
+exports.onBookingCreatedAnalytics = onDocumentCreated(
+  "bookings/{bookingId}",
+  async (event) => {
+    const data = event.data?.data() || {};
+    const fields = {
+      "bookings.started": 1,
+    };
+
+    if (data.status === "pending_business_confirmation") {
+      fields["bookings.pendingBusinessApproval"] = 1;
+    }
+
+    if (data.status === "confirmed") {
+      fields["bookings.completedBookingFlow"] = 1;
+    }
+
+    await incrementAnalytics(fields);
+  }
+);
+
+exports.onBookingUpdatedAnalytics = onDocumentUpdated(
+  "bookings/{bookingId}",
+  async (event) => {
+    const before = event.data?.before?.data() || {};
+    const after = event.data?.after?.data() || {};
+
+    if (before.status === after.status && before.refundStatus === after.refundStatus) {
+      return;
+    }
+
+    const fields = {};
+
+    if (before.status !== after.status) {
+      if (after.status === "confirmed") fields["bookings.confirmed"] = 1;
+      if (after.status === "completed") fields["bookings.completed"] = 1;
+      if (String(after.status || "").startsWith("cancelled")) {
+        fields["bookings.cancelled"] = 1;
+      }
+      if (after.status === "declined") fields["bookings.declined"] = 1;
+      if (after.status === "pending_business_confirmation") {
+        fields["bookings.pendingBusinessApproval"] = 1;
+      }
+    }
+
+    if (before.refundStatus !== after.refundStatus && after.refundStatus === "refunded") {
+      fields["payments.refundsIssued"] = 1;
+    }
+
+    if (Object.keys(fields).length > 0) {
+      await incrementAnalytics(fields);
+    }
+  }
+);
+
+exports.onNotificationOpenedAnalytics = onDocumentUpdated(
+  "users/{userId}/notifications/{notificationId}",
+  async (event) => {
+    const before = event.data?.before?.data() || {};
+    const after = event.data?.after?.data() || {};
+
+    if (before.isRead === true || after.isRead !== true) {
+      return;
+    }
+
+    await incrementAnalytics({
+      "notifications.opened": 1,
+    });
+  }
+);
+
 exports.onSavedOpportunityAnalytics = onDocumentCreated(
   "users/{userId}/savedOpportunities/{savedId}",
   async () => {
@@ -2844,6 +6241,43 @@ exports.onReportUpdatedAnalytics = onDocumentUpdated("reports/{reportId}", async
     });
   }
 });
+
+exports.banUserForReport = onCall(
+  {
+    region: "us-central1",
+  },
+  async (request) => {
+    try {
+      await assertAdminRequest(request);
+
+      const reportId = safeTrim(request.data?.reportId);
+      const userId = safeTrim(request.data?.userId);
+
+      assert(reportId, "invalid-argument", "Missing report ID.");
+      assert(userId, "invalid-argument", "Missing user ID.");
+
+      await db.collection("users").doc(userId).set({
+        isBanned: true,
+        bannedAt: admin.firestore.FieldValue.serverTimestamp(),
+        bannedBy: request.auth.uid,
+        moderationStatus: "banned",
+      }, { merge: true });
+
+      await db.collection("reports").doc(reportId).set({
+        status: "resolved",
+        actionTaken: "user_banned",
+        resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        resolvedBy: request.auth.uid,
+      }, { merge: true });
+
+      return { ok: true };
+    } catch (error) {
+      logger.error("banUserForReport failed", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "Could not ban this user.");
+    }
+  }
+);
 
 exports.onDailyActiveUser = onDocumentCreated(
   "activityDaily/{day}/users/{uid}",

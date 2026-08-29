@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.locallink.app",
+      "sha256_cert_fingerprints": [
+        "B0:2D:8F:31:7F:E6:15:AC:34:17:E9:79:2C:82:40:6C:FB:BB:D3:87:5E:F6:FC:74:4E:E4:C5:EE:5B:CC:16:89"
+      ]
+    }
+  }
+]

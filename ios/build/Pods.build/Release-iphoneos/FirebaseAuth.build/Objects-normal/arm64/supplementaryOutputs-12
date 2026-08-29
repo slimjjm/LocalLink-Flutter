@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseAuth/FirebaseAuth/Sources/Swift/ActionCode/ActionCodeInfo.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseAuth.build/Objects-normal/arm64/FirebaseAuth.swiftsourceinfo"
+  }
+}

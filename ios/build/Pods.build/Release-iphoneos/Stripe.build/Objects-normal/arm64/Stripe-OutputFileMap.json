@@ -1,0 +1,31 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe-primary.swiftdeps"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/Stripe/Stripe/StripeiOS/Source/PKPaymentAuthorizationViewController+Stripe_Blocks.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/PKPaymentAuthorizationViewController+Stripe_Blocks.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/PKPaymentAuthorizationViewController+Stripe_Blocks.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/PKPaymentAuthorizationViewController+Stripe_Blocks.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/Stripe/Stripe/StripeiOS/Source/STPAnalyticsClient+Payments.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPAnalyticsClient+Payments.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPAnalyticsClient+Payments.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPAnalyticsClient+Payments.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/Stripe/Stripe/StripeiOS/Source/STPApplePayContextDelegate.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPApplePayContextDelegate.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPApplePayContextDelegate.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/STPApplePayContextDelegate.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/Stripe/Stripe/StripeiOS/Source/Stripe+Exports.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe+Exports.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe+Exports.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/Stripe.build/Objects-normal/arm64/Stripe+Exports.o"
+  }
+}

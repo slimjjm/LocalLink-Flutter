@@ -1,0 +1,23 @@
+{
+  "version": 0,
+  "use-external-names": false,
+  "case-sensitive": false,
+  "roots": [{
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/cloud_functions/cloud_functions.framework/Modules",
+    "contents": [{
+      "type": "file",
+      "name": "module.modulemap",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/unextended-module.modulemap",
+    }]
+    },
+    {
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/cloud_functions/cloud_functions.framework/Headers",
+    "contents": [{
+      "type": "file",
+      "name": "cloud_functions-Swift.h",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/unextended-interface-header.h",
+    }]
+  }]
+}

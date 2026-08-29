@@ -1,0 +1,46 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.swiftdeps"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/Callable+Codable.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Callable+Codable.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Callable+Codable.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Callable+Codable.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/Functions.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Functions.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Functions.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/Functions.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/FunctionsError.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsError.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsError.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsError.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/HTTPSCallable.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallable.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallable.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallable.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/HTTPSCallableOptions.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallableOptions.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallableOptions.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/HTTPSCallableOptions.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/Internal/FunctionsContext.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsContext.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsContext.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsContext.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/Internal/FunctionsSerializer.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsSerializer.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsSerializer.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FunctionsSerializer.o"
+  }
+}

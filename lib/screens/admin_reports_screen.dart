@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../services/admin_access_service.dart';
@@ -69,18 +70,10 @@ class AdminReportsScreen extends StatelessWidget {
     required String reportId,
     required String userId,
   }) async {
-    await FirebaseFirestore.instance.collection('users').doc(userId).set({
-      'isBanned': true,
-      'bannedAt': Timestamp.now(),
-      'bannedBy': FirebaseAuth.instance.currentUser?.uid,
-      'moderationStatus': 'banned',
-    }, SetOptions(merge: true));
-
-    await _updateReport(
-      reportId: reportId,
-      status: 'resolved',
-      actionTaken: 'user_banned',
-    );
+    await FirebaseFunctions.instance.httpsCallable('banUserForReport').call({
+      'reportId': reportId,
+      'userId': userId,
+    });
   }
 
   Future<void> _confirmAction({

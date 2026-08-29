@@ -73,30 +73,55 @@ class AccountDeletionService {
 
   Future<String?> _requestPassword(BuildContext context) async {
     final controller = TextEditingController();
+    var obscurePassword = true;
 
     try {
       return await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (context) {
-          return AlertDialog(
-            title: const Text('Confirm your password'),
-            content: TextField(
-              controller: controller,
-              obscureText: true,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Password'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, controller.text),
-                child: const Text('Continue'),
-              ),
-            ],
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('Confirm your password'),
+                content: TextField(
+                  controller: controller,
+                  obscureText: obscurePassword,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        setDialogState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                      tooltip: obscurePassword
+                          ? 'Show password'
+                          : 'Hide password',
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        semanticLabel: obscurePassword
+                            ? 'Show password'
+                            : 'Hide password',
+                      ),
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, controller.text),
+                    child: const Text('Continue'),
+                  ),
+                ],
+              );
+            },
           );
         },
       );

@@ -1,0 +1,131 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/FirebaseStorage-primary.swiftdeps"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/AsyncAwait.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/AsyncAwait.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/AsyncAwait.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/AsyncAwait.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageDeleteTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDeleteTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDeleteTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDeleteTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageFetcherService.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageFetcherService.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageFetcherService.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageFetcherService.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageGetDownloadURLTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetDownloadURLTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetDownloadURLTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetDownloadURLTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageGetMetadataTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetMetadataTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetMetadataTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageGetMetadataTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageInternalTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageInternalTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageInternalTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageInternalTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageListTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StoragePath.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StoragePath.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StoragePath.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StoragePath.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageTaskState.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskState.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskState.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskState.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageTokenAuthorizer.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTokenAuthorizer.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTokenAuthorizer.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTokenAuthorizer.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageUpdateMetadataTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUpdateMetadataTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUpdateMetadataTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUpdateMetadataTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Internal/StorageUtils.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUtils.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUtils.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUtils.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Result.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Result.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Result.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Result.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/Storage.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Storage.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Storage.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/Storage.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageConstants.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageConstants.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageConstants.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageConstants.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageDownloadTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDownloadTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDownloadTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageDownloadTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageError.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageError.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageError.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageError.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageListResult.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListResult.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListResult.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageListResult.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageMetadata.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageMetadata.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageMetadata.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageMetadata.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageObservableTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageObservableTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageObservableTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageObservableTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageReference.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageReference.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageReference.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageReference.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTask.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageTaskSnapshot.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskSnapshot.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskSnapshot.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageTaskSnapshot.o"
+  },
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseStorage/FirebaseStorage/Sources/StorageUploadTask.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUploadTask.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUploadTask.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseStorage.build/Objects-normal/arm64/StorageUploadTask.o"
+  }
+}

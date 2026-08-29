@@ -5,6 +5,10 @@ class AdminAccessService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  static bool hasAdminProfileFlag(Map<String, dynamic>? userData) {
+    return userData?['isAdmin'] == true;
+  }
+
   Future<bool> isCurrentUserAdmin() async {
     final user = _auth.currentUser;
 
@@ -15,7 +19,7 @@ class AdminAccessService {
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
     final userData = userDoc.data();
 
-    if (userData?['isAdmin'] == true) {
+    if (hasAdminProfileFlag(userData)) {
       return true;
     }
 

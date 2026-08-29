@@ -1,8 +1,14 @@
 class BusinessDashboardModel {
-
   final int todayBookings;
-  final int todayRevenue;
+  final int upcomingBookings;
+  final int upcomingRevenue;
+  final int unreadMessages;
+  final int newEnquiries;
   final int activeStaff;
+  final int liveAvailability;
+  final int scheduledAvailability;
+  final int pendingApprovalBookings;
+  final int expiredAvailabilityToday;
 
   final int freeStaffSlots;
   final int extraStaffSlots;
@@ -14,15 +20,20 @@ class BusinessDashboardModel {
   final bool hasAvailability;
   final bool hasStaff;
 
-  // NEW
   final bool hasPhotos;
   final bool profileComplete;
 
   BusinessDashboardModel({
-
     required this.todayBookings,
-    required this.todayRevenue,
+    required this.upcomingBookings,
+    required this.upcomingRevenue,
+    required this.unreadMessages,
+    required this.newEnquiries,
     required this.activeStaff,
+    required this.liveAvailability,
+    required this.scheduledAvailability,
+    required this.pendingApprovalBookings,
+    required this.expiredAvailabilityToday,
 
     required this.freeStaffSlots,
     required this.extraStaffSlots,
@@ -34,7 +45,6 @@ class BusinessDashboardModel {
     required this.hasAvailability,
     required this.hasStaff,
 
-    // NEW
     required this.hasPhotos,
     required this.profileComplete,
   });
@@ -43,21 +53,14 @@ class BusinessDashboardModel {
   // COMPUTED
   // =====================================
 
-  int get allowedStaff =>
-      freeStaffSlots + extraStaffSlots;
+  int get allowedStaff => freeStaffSlots + extraStaffSlots;
 
   String get healthTitle {
-
-    if (!hasServices ||
-        !hasStaff ||
-        !hasPhotos) {
-
+    if (!hasServices || !hasStaff || !hasPhotos) {
       return 'Needs Attention';
     }
 
-    if (!hasAvailability ||
-        !stripeConnected) {
-
+    if (!hasAvailability || !stripeConnected) {
       return 'Almost Ready';
     }
 
@@ -65,7 +68,6 @@ class BusinessDashboardModel {
   }
 
   bool get isHealthy {
-
     return hasServices &&
         hasStaff &&
         hasAvailability &&
@@ -73,4 +75,14 @@ class BusinessDashboardModel {
         hasPhotos &&
         !restrictionMode;
   }
+}
+
+class BusinessDashboardMessagingModel {
+  final int unreadMessages;
+  final int newEnquiries;
+
+  const BusinessDashboardMessagingModel({
+    required this.unreadMessages,
+    required this.newEnquiries,
+  });
 }

@@ -1,0 +1,4 @@
+
+module StripePaymentSheet.__Swift {
+  exclude header "StripePaymentSheet-Swift.h"
+}

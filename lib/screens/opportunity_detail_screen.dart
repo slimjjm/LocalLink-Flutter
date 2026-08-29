@@ -5,12 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 import '../services/comment_service.dart';
 import '../services/attendee_service.dart';
+import '../services/local_link_share_service.dart';
 import '../widgets/report_sheet.dart';
+import '../utils/helpers.dart';
 import 'profile_screen.dart';
 import '../services/review_service.dart';
 import 'package:locallink_flutter/screens/recurring_series_manager_screen.dart';
-
-import 'package:share_plus/share_plus.dart';
 
 Future<Map<String, dynamic>?> showRecurringSeriesManager(
   BuildContext context,
@@ -152,6 +152,12 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
   final reviewService = ReviewService();
 
   final commentController = TextEditingController();
+
+  @override
+  void dispose() {
+    commentController.dispose();
+    super.dispose();
+  }
 
   Future<void> _reportOpportunity() async {
     final reportedUserId = widget.opportunity['createdBy']?.toString() ?? '';
@@ -316,17 +322,30 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
 
       final attendeeRef = opportunityRef.collection('attendees').doc(user.uid);
 
-      final attendeeDoc = await attendeeRef.get();
+      var joinedNow = false;
 
-      if (!attendeeDoc.exists) {
-        await attendeeRef.set({
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final attendeeDoc = await transaction.get(attendeeRef);
+
+        if (attendeeDoc.exists) {
+          return;
+        }
+
+        transaction.set(attendeeRef, {
           'userId': user.uid,
           'userName': user.displayName ?? 'User',
           'photoUrl': user.photoURL,
           'joinedAt': Timestamp.now(),
         });
 
-        await opportunityRef.update({'attendeeCount': FieldValue.increment(1)});
+        transaction.update(opportunityRef, {
+          'attendeeCount': FieldValue.increment(1),
+        });
+
+        joinedNow = true;
+      });
+
+      if (joinedNow) {
         final organiserId = widget.opportunity['createdBy'];
 
         if (organiserId != null && organiserId != user.uid) {
@@ -336,21 +355,16 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
               .collection('notifications')
               .add({
                 'type': 'opportunity_join',
-
                 'title': 'New attendee',
-
                 'body':
-                    '${user.displayName ?? 'Someone'} joined "${widget.opportunity['title'] ?? 'your opportunity'}"',
-
+                    '${user.displayName ?? 'Someone'} joined "${widget.opportunity['title'] ?? 'your activity'}"',
                 'createdAt': Timestamp.now(),
-
                 'isRead': false,
-
                 'opportunityId': widget.opportunityId,
-
                 'userId': user.uid,
               });
         }
+
         if (!mounted) return;
 
         setState(() {
@@ -373,9 +387,9 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
         isJoining = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to join opportunity')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unable to join activity')));
     }
   }
 
@@ -407,7 +421,7 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
             'title': 'New comment',
 
             'body':
-                '${user.displayName ?? 'Someone'} commented on "${widget.opportunity['title'] ?? 'your opportunity'}"',
+                '${user.displayName ?? 'Someone'} commented on "${widget.opportunity['title'] ?? 'your activity'}"',
 
             'createdAt': Timestamp.now(),
 
@@ -493,26 +507,24 @@ class _OpportunityDetailScreenState extends State<OpportunityDetailScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.share_outlined),
-            onPressed: () {
-              SharePlus.instance.share(
-                ShareParams(
-                  text:
-                      '''
-${widget.opportunity['title']}
-
-${widget.opportunity['description']}
-
-Join me on LocalLink:
-
-https://apps.apple.com/gb/app/locallink/id6757247743
-''',
-                ),
-              );
-              FirebaseFirestore.instance.collection('shares').add({
-                'opportunityId': widget.opportunityId,
-                'userId': FirebaseAuth.instance.currentUser?.uid,
-                'createdAt': Timestamp.now(),
-              });
+            tooltip: 'Share',
+            onPressed: () async {
+              try {
+                await LocalLinkShareService().shareItem(
+                  item: LocalLinkShareItem(
+                    type: LocalLinkShareItemType.activity,
+                    id: widget.opportunityId,
+                    data: widget.opportunity,
+                  ),
+                );
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Sharing could not be started.'),
+                  ),
+                );
+              }
             },
           ),
 
@@ -525,10 +537,7 @@ https://apps.apple.com/gb/app/locallink/id6757247743
             },
             itemBuilder: (context) {
               return const [
-                PopupMenuItem(
-                  value: 'report',
-                  child: Text('Report opportunity'),
-                ),
+                PopupMenuItem(value: 'report', child: Text('Report activity')),
               ];
             },
           ),
@@ -569,7 +578,7 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                   context: context,
                   builder: (context) {
                     return AlertDialog(
-                      title: const Text('Edit Opportunity'),
+                      title: const Text('Edit Activity'),
                       content: SingleChildScrollView(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -689,7 +698,7 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                 if (!mounted) return;
 
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Opportunity updated')),
+                  const SnackBar(content: Text('Activity updated')),
                 );
               },
             ),
@@ -752,7 +761,7 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                 context: context,
                 builder: (context) {
                   return AlertDialog(
-                    title: const Text('Delete Opportunity?'),
+                    title: const Text('Delete Activity?'),
                     content: const Text('This cannot be undone.'),
                     actions: [
                       TextButton(
@@ -793,15 +802,35 @@ https://apps.apple.com/gb/app/locallink/id6757247743
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (photoUrl != null && photoUrl.toString().isNotEmpty)
-              Container(
-                height: 220,
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: ClipRRect(
                   borderRadius: BorderRadius.circular(24),
-                  image: DecorationImage(
-                    image: NetworkImage(photoUrl),
+                  child: Image.network(
+                    photoUrl,
+                    height: 220,
+                    width: double.infinity,
                     fit: BoxFit.cover,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return Container(
+                        height: 220,
+                        width: double.infinity,
+                        color: AppColors.activityBlue.withValues(alpha: 0.08),
+                        child: const Center(child: CircularProgressIndicator()),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        height: 220,
+                        width: double.infinity,
+                        color: AppColors.activityBlue.withValues(alpha: 0.10),
+                        child: const Icon(
+                          Icons.image_not_supported_outlined,
+                          color: AppColors.activityBlue,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -916,14 +945,16 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                             ? CircleAvatar(
                                 radius: 28,
                                 backgroundImage: NetworkImage(photoUrl),
+                                onBackgroundImageError:
+                                    (exception, stackTrace) {},
                               )
                             : CircleAvatar(
                                 radius: 28,
                                 child: Text(
-                                  (userData?['userName']?.toString() ??
-                                          organiser)
-                                      .substring(0, 1)
-                                      .toUpperCase(),
+                                  safeInitial(
+                                    userData?['userName']?.toString() ??
+                                        organiser,
+                                  ),
                                 ),
                               ),
 
@@ -978,7 +1009,7 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                     icon: Icon(
                       isSaved ? Icons.bookmark : Icons.bookmark_border,
                     ),
-                    label: Text(isSaved ? 'Saved' : 'Save Opportunity'),
+                    label: Text(isSaved ? 'Saved' : 'Save Activity'),
                     onPressed: () async {
                       if (uid == null) return;
 
@@ -1212,12 +1243,12 @@ https://apps.apple.com/gb/app/locallink/id6757247743
                                   ? CircleAvatar(
                                       radius: 24,
                                       backgroundImage: NetworkImage(photoUrl),
+                                      onBackgroundImageError:
+                                          (exception, stackTrace) {},
                                     )
                                   : CircleAvatar(
                                       radius: 22,
-                                      child: Text(
-                                        name.substring(0, 1).toUpperCase(),
-                                      ),
+                                      child: Text(safeInitial(name)),
                                     ),
 
                               const SizedBox(height: 4),

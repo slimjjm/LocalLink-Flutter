@@ -10,6 +10,35 @@ const { getMessaging } =
 
 const db = admin.firestore();
 
+const NOTIFICATION_PREFERENCE_DEFAULTS = {
+  communityResponses: true,
+  communityMessages: true,
+  communityFollowing: true,
+  nearbyCommunityAlerts: true,
+  activityUpdates: true,
+  serviceBookingUpdates: true,
+  reminders: true,
+  localDiscovery: false,
+  // Legacy key kept for older preference documents. New Community Help alert
+  // pushes use nearbyCommunityAlerts.
+  communityAlertsNearby: false,
+};
+
+async function userAllowsPush(userRef, preferenceKey) {
+  if (!preferenceKey) return true;
+
+  const fallback = NOTIFICATION_PREFERENCE_DEFAULTS[preferenceKey] !== false;
+  const prefSnap = await userRef
+    .collection("preferences")
+    .doc("notifications")
+    .get();
+
+  if (!prefSnap.exists) return fallback;
+
+  const value = prefSnap.data()?.[preferenceKey];
+  return typeof value === "boolean" ? value : fallback;
+}
+
 // =================================================
 // PUSH HELPER
 // =================================================
@@ -34,6 +63,17 @@ async function sendPushToUser(
     console.log(
       "⏭️ sendPushToUser skipped: user doc missing",
       uid
+    );
+    return;
+  }
+
+  if (!(await userAllowsPush(userRef, payload.preferenceKey))) {
+    console.log(
+      "⏭️ sendPushToUser skipped: preference disabled",
+      {
+        uid,
+        preferenceKey: payload.preferenceKey,
+      }
     );
     return;
   }
@@ -64,6 +104,7 @@ async function sendPushToUser(
         "LocalLink",
       body:
         payload.body || "",
+      ...(payload.imageUrl ? { imageUrl: String(payload.imageUrl) } : {}),
     },
 
     data: Object.fromEntries(
@@ -91,9 +132,27 @@ async function sendPushToUser(
           sound: "default",
           badge: 1,
           contentAvailable: true,
+          mutableContent: Boolean(payload.imageUrl),
         },
       },
+      ...(payload.imageUrl
+        ? { fcmOptions: { imageUrl: String(payload.imageUrl) } }
+        : {}),
     },
+    ...(payload.imageUrl
+      ? {
+          android: {
+            notification: {
+              imageUrl: String(payload.imageUrl),
+            },
+          },
+          webpush: {
+            notification: {
+              image: String(payload.imageUrl),
+            },
+          },
+        }
+      : {}),
   };
 
   const response =
@@ -152,107 +211,6 @@ async function sendPushToUser(
 }
 exports.sendPushToUser =
   sendPushToUser;
-// =================================================
-// NEW MESSAGE NOTIFICATION
-// =================================================
-
-exports.notifyNewMessage =
-  onDocumentCreated(
-    {
-      document:
-        "businessChats/{chatId}/messages/{messageId}",
-      region:
-        "us-central1",
-    },
-    async (event) => {
-      try {
-        const message =
-          event.data?.data();
-
-        if (!message) return;
-
-        if (
-          message.senderRole ===
-            "system" ||
-          message.senderId ===
-            "system"
-        ) {
-          return;
-        }
-
-        const chatId =
-          event.params.chatId;
-
-        const chatSnap =
-          await db
-            .collection(
-              "businessChats"
-            )
-            .doc(chatId)
-            .get();
-
-        if (!chatSnap.exists)
-          return;
-
-        const chat =
-          chatSnap.data();
-
-        let targetUserId =
-          null;
-
-        if (
-          message.senderId ===
-          chat.customerId
-        ) {
-          const businessSnap =
-            await db
-              .collection(
-                "businesses"
-              )
-              .doc(
-                chat.businessId
-              )
-              .get();
-
-          targetUserId =
-            businessSnap.data()
-              ?.ownerId ||
-            null;
-        } else {
-          targetUserId =
-            chat.customerId ||
-            null;
-        }
-
-        if (!targetUserId)
-          return;
-
-        await sendPushToUser(
-          targetUserId,
-          {
-            title:
-              "New message",
-            body:
-              message.text ||
-              "You have a new message",
-            data: {
-              chatId,
-              messageId:
-                event.params
-                  .messageId,
-              type:
-                "new_message",
-            },
-          }
-        );
-      } catch (error) {
-        console.error(
-          "❌ notifyNewMessage error:",
-          error
-        );
-      }
-    }
-  );
 
 // =================================================
 // BOOKING CANCELLED NOTIFICATION
@@ -310,13 +268,15 @@ exports.notifyBookingCancelled =
               event.params
                 .bookingId,
           },
+          preferenceKey:
+            "serviceBookingUpdates",
         }
       );
     }
   );
 
   // =================================================
-// NEW FOLLOWER NOTIFICATION
+// FOLLOWER NOTIFICATION
 // =================================================
 
 exports.notifyNewFollower =
@@ -387,6 +347,8 @@ exports.notifyNewFollower =
               followerId:
                 follower.userId || "",
             },
+            preferenceKey:
+              "activityUpdates",
           }
         );
 
@@ -459,6 +421,8 @@ exports.notifyOpportunityJoin =
                   .opportunityId ||
                 "",
             },
+            preferenceKey:
+              "activityUpdates",
           }
         );
 
@@ -529,6 +493,8 @@ exports.notifyOpportunityComment =
                   .opportunityId ||
                 "",
             },
+            preferenceKey:
+              "activityUpdates",
           }
         );
 
@@ -581,6 +547,8 @@ exports.notifyOpportunityComment =
               reviewerId:
                 notification.reviewerId || "",
             },
+            preferenceKey:
+              "activityUpdates",
           }
         );
 

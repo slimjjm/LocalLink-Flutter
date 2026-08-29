@@ -2,55 +2,63 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-
-	<key>FirebaseAppDelegateProxyEnabled</key>
-	<true/>
-
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
-
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
-
 	<key>CFBundleDisplayName</key>
 	<string>LocalLink</string>
-
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
-
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-
 	<key>CFBundleName</key>
-	<string>locallink_flutter</string>
-
+	<string>LocalLink</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
-
 	<key>CFBundleShortVersionString</key>
 	<string>$(FLUTTER_BUILD_NAME)</string>
-
 	<key>CFBundleSignature</key>
 	<string>????</string>
-
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.126981571024-hjpfhln362q2iadd2mp9gblvg2sjnfll</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>locallink.claim</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>locallink</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
-
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
+	<key>GoogleMapsAPIKey</key>
+	<string>AIzaSyArlHe9g6GqxOwrHcir3o2X6fGC31z2hTo</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-
 	<key>NSCameraUsageDescription</key>
 	<string>LocalLink uses your camera when you choose to add a profile or business photo.</string>
-
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>LocalLink uses your location to show nearby opportunities, services and community activity.</string>
-
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>LocalLink uses your location only to show nearby opportunities, services and community activity while you are using the app.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>LocalLink uses your photo library when you choose a profile or business image.</string>
-
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -72,23 +80,22 @@
 			</array>
 		</dict>
 	</dict>
-
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
-
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
-
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -96,19 +103,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>com.googleusercontent.apps.126981571024-p0fsgkrrkb3865j6f37utjiks4f29fk8</string>
-			</array>
-		</dict>
-	</array>
-
 </dict>
 </plist>

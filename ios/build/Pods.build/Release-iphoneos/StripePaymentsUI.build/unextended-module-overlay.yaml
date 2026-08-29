@@ -1,0 +1,23 @@
+{
+  "version": 0,
+  "use-external-names": false,
+  "case-sensitive": false,
+  "roots": [{
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/StripePaymentsUI/StripePaymentsUI.framework/Modules",
+    "contents": [{
+      "type": "file",
+      "name": "module.modulemap",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripePaymentsUI.build/unextended-module.modulemap",
+    }]
+    },
+    {
+    "type": "directory",
+    "name": "/Users/jamesevans/locallink_flutter/ios/build/Release-iphoneos/StripePaymentsUI/StripePaymentsUI.framework/Headers",
+    "contents": [{
+      "type": "file",
+      "name": "StripePaymentsUI-Swift.h",
+      "external-contents": "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/StripePaymentsUI.build/unextended-interface-header.h",
+    }]
+  }]
+}

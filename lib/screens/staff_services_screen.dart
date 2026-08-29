@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 class StaffServicesScreen extends StatefulWidget {
-
   final String businessId;
   final String staffId;
   final String staffName;
@@ -16,13 +15,10 @@ class StaffServicesScreen extends StatefulWidget {
   });
 
   @override
-  State<StaffServicesScreen> createState() =>
-      _StaffServicesScreenState();
+  State<StaffServicesScreen> createState() => _StaffServicesScreenState();
 }
 
-class _StaffServicesScreenState
-    extends State<StaffServicesScreen> {
-
+class _StaffServicesScreenState extends State<StaffServicesScreen> {
   List<String> selectedServiceIds = [];
 
   bool isLoading = true;
@@ -33,25 +29,18 @@ class _StaffServicesScreenState
   // =====================================================
 
   Future<void> loadStaffServices() async {
-
-    final doc = await FirebaseFirestore
-        .instance
+    final doc = await FirebaseFirestore.instance
         .collection('businesses')
         .doc(widget.businessId)
         .collection('staff')
         .doc(widget.staffId)
         .get();
 
-    final data =
-        doc.data() ?? {};
+    final data = doc.data() ?? {};
 
-    final ids =
-        List<String>.from(
-          data['serviceIds'] ?? [],
-        );
+    final ids = List<String>.from(data['serviceIds'] ?? []);
 
     setState(() {
-
       selectedServiceIds = ids;
 
       isLoading = false;
@@ -62,102 +51,68 @@ class _StaffServicesScreenState
   // TOGGLE SERVICE
   // =====================================================
 
-Future<void> toggleService(
-  String serviceId,
-) async {
+  Future<void> toggleService(String serviceId) async {
+    final isRemoving = selectedServiceIds.contains(serviceId);
 
-  final isRemoving =
-      selectedServiceIds.contains(serviceId);
-
-  if (isSaving) return;
-
-  setState(() {
-    isSaving = true;
-  });
-
-  // Prevent removing last service
-  if (isRemoving &&
-      selectedServiceIds.length == 1) {
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-
-      const SnackBar(
-        content: Text(
-          'Staff must have at least one service',
-        ),
-      ),
-    );
+    if (isSaving) return;
 
     setState(() {
-      isSaving = false;
+      isSaving = true;
     });
 
-    return;
-  }
+    // Prevent removing last service
+    if (isRemoving && selectedServiceIds.length == 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Each team member needs at least one service'),
+        ),
+      );
 
-  try {
+      setState(() {
+        isSaving = false;
+      });
 
-    setState(() {
+      return;
+    }
 
-      if (selectedServiceIds.contains(serviceId)) {
+    try {
+      setState(() {
+        if (selectedServiceIds.contains(serviceId)) {
+          selectedServiceIds.remove(serviceId);
+        } else {
+          selectedServiceIds.add(serviceId);
+        }
+      });
 
-        selectedServiceIds.remove(serviceId);
+      await FirebaseFirestore.instance
+          .collection('businesses')
+          .doc(widget.businessId)
+          .collection('staff')
+          .doc(widget.staffId)
+          .update({'serviceIds': selectedServiceIds});
 
-      } else {
+      // =====================================================
+      // REGENERATE AVAILABILITY
+      // =====================================================
 
-        selectedServiceIds.add(serviceId);
+      await FirebaseFunctions.instance
+          .httpsCallable('regenerateAvailability')
+          .call({'businessId': widget.businessId, 'staffId': widget.staffId});
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('We could not save those services. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSaving = false;
+        });
       }
-    });
-
-    await FirebaseFirestore.instance
-        .collection('businesses')
-        .doc(widget.businessId)
-        .collection('staff')
-        .doc(widget.staffId)
-        .update({
-
-      'serviceIds': selectedServiceIds,
-    });
-
-    // =====================================================
-    // REGENERATE AVAILABILITY
-    // =====================================================
-
-    await FirebaseFunctions.instance
-        .httpsCallable(
-          'regenerateAvailability',
-        )
-    .call({
-
-  'businessId': widget.businessId,
-  'staffId': widget.staffId,
-});
-
-    debugPrint("✅ SAVED SERVICES");
-    debugPrint("📦 SERVICE IDS: $selectedServiceIds");
-
-  } catch (e) {
-
-    debugPrint("❌ SAVE FAILED: $e");
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-
-      SnackBar(
-        content: Text(
-          'Failed to save services: $e',
-        ),
-      ),
-    );
-
-  } finally {
-
-    setState(() {
-      isSaving = false;
-    });
+    }
   }
-}
   // =====================================================
   // INIT
   // =====================================================
@@ -175,26 +130,13 @@ Future<void> toggleService(
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-
-      appBar: AppBar(
-        title: Text(
-          '${widget.staffName} Services',
-        ),
-      ),
+      appBar: AppBar(title: Text('${widget.staffName} Services')),
 
       body: isLoading
-
-          ? const Center(
-              child:
-                  CircularProgressIndicator(),
-            )
-
+          ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<QuerySnapshot>(
-
-              stream: FirebaseFirestore
-                  .instance
+              stream: FirebaseFirestore.instance
                   .collection('businesses')
                   .doc(widget.businessId)
                   .collection('services')
@@ -202,78 +144,47 @@ Future<void> toggleService(
                   .snapshots(),
 
               builder: (context, snapshot) {
-
                 if (!snapshot.hasData) {
-
-                  return const Center(
-                    child:
-                        CircularProgressIndicator(),
-                  );
+                  return const Center(child: CircularProgressIndicator());
                 }
 
-                final docs =
-                    snapshot.data!.docs;
+                final docs = snapshot.data!.docs;
 
                 if (docs.isEmpty) {
-
-                  return const Center(
-                    child:
-                        Text('No services yet'),
-                  );
+                  return const Center(child: Text('No services yet'));
                 }
 
                 return ListView.builder(
+                  itemCount: docs.length,
 
-                  itemCount:
-                      docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = docs[index];
 
-                  itemBuilder:
-                      (context, index) {
+                    final data = doc.data() as Map<String, dynamic>;
 
-                    final doc =
-                        docs[index];
+                    final serviceName = data['name'] ?? 'Service';
 
-                    final data =
-                        doc.data()
-                            as Map<String, dynamic>;
+                    final duration = data['durationMinutes'] ?? 30;
 
-                final serviceName =
-    data['name']
-        ?? 'Service';
+                    final price = (data['price'] ?? 0).toDouble();
 
-final duration =
-    data['durationMinutes']
-        ?? 30;
+                    final isSelected = selectedServiceIds.contains(doc.id);
 
-final price =
-    (data['price'] ?? 0)
-        .toDouble();
+                    return CheckboxListTile(
+                      title: Text(serviceName),
 
-                    final isSelected =
-                        selectedServiceIds
-                            .contains(doc.id);
+                      subtitle: Text(
+                        '$duration mins • £${price.toStringAsFixed(2)}',
+                      ),
 
-                 return CheckboxListTile(
+                      value: isSelected,
 
-  title: Text(
-    serviceName,
-  ),
-
-  subtitle: Text(
-    '${duration} mins • £${price.toStringAsFixed(2)}',
-  ),
-
-  value: isSelected,
-
-  onChanged: isSaving
-    ? null
-    : (_) {
-
-    toggleService(
-      doc.id,
-    );
-  },
-);
+                      onChanged: isSaving
+                          ? null
+                          : (_) {
+                              toggleService(doc.id);
+                            },
+                    );
                   },
                 );
               },

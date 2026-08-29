@@ -11,7 +11,7 @@ import '../theme/app_colors.dart';
 class CommunityActivityHero extends StatelessWidget {
   const CommunityActivityHero({super.key});
 
-  static const LatLng _defaultCenter = LatLng(52.6816, -1.8260);
+  static const LatLng _ukFallbackCenter = LatLng(54.5, -3.0);
 
   @override
   Widget build(BuildContext context) {
@@ -68,13 +68,13 @@ class CommunityActivityHero extends StatelessWidget {
 
                 return Material(
                   color: AppColors.card,
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(18),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
                     onTap: () => _openMap(context),
                     child: Container(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(28),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: AppColors.border.withValues(alpha: 0.70),
                         ),
@@ -83,7 +83,7 @@ class CommunityActivityHero extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -96,7 +96,7 @@ class CommunityActivityHero extends StatelessWidget {
                                         'Explore Nearby',
                                         style: TextStyle(
                                           color: AppColors.charcoal,
-                                          fontSize: 22,
+                                          fontSize: 19,
                                           height: 1.08,
                                           fontWeight: FontWeight.w900,
                                         ),
@@ -106,7 +106,7 @@ class CommunityActivityHero extends StatelessWidget {
                                         'Open the map to discover what is close by.',
                                         style: TextStyle(
                                           color: AppColors.textMuted,
-                                          fontSize: 13,
+                                          fontSize: 12.5,
                                           height: 1.34,
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -125,11 +125,11 @@ class CommunityActivityHero extends StatelessWidget {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
                             child: AspectRatio(
-                              aspectRatio: 1.78,
+                              aspectRatio: 2.35,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(22),
+                                borderRadius: BorderRadius.circular(14),
                                 child: Stack(
                                   children: [
                                     Positioned.fill(
@@ -145,6 +145,7 @@ class CommunityActivityHero extends StatelessWidget {
                                         myLocationButtonEnabled: false,
                                         zoomControlsEnabled: false,
                                         mapToolbarEnabled: false,
+                                        mapType: MapType.normal,
                                         compassEnabled: false,
                                         rotateGesturesEnabled: false,
                                         scrollGesturesEnabled: false,
@@ -155,8 +156,8 @@ class CommunityActivityHero extends StatelessWidget {
                                       ),
                                     ),
                                     const Positioned(
-                                      right: 14,
-                                      bottom: 14,
+                                      right: 10,
+                                      bottom: 10,
                                       child: _MapHint(),
                                     ),
                                   ],
@@ -165,7 +166,7 @@ class CommunityActivityHero extends StatelessWidget {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                             child: SizedBox(
                               width: double.infinity,
                               child: FilledButton.icon(
@@ -175,10 +176,10 @@ class CommunityActivityHero extends StatelessWidget {
                                 style: FilledButton.styleFrom(
                                   backgroundColor: AppColors.charcoal,
                                   foregroundColor: Colors.white,
-                                  minimumSize: const Size.fromHeight(52),
+                                  minimumSize: const Size.fromHeight(44),
                                   elevation: 0,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(18),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
                                   textStyle: const TextStyle(
                                     fontSize: 15,
@@ -268,7 +269,7 @@ class CommunityActivityHero extends StatelessWidget {
 
   static LatLng _centerFromMarkers(Set<Marker> markers) {
     if (markers.isEmpty) {
-      return _defaultCenter;
+      return _ukFallbackCenter;
     }
 
     var lat = 0.0;

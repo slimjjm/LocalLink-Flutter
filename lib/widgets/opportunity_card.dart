@@ -29,7 +29,7 @@ class OpportunityCard extends StatelessWidget {
       case 'Hobbies':
         return Colors.purple;
       case 'Social':
-        return Colors.blue;
+        return AppColors.activityBlue;
       case 'Volunteering':
         return Colors.red;
       case 'Learning':
@@ -37,7 +37,7 @@ class OpportunityCard extends StatelessWidget {
       case 'Local Deals':
         return Colors.indigo;
       default:
-        return AppColors.primary;
+        return AppColors.activityBlue;
     }
   }
 
@@ -89,6 +89,49 @@ class OpportunityCard extends StatelessWidget {
     return '';
   }
 
+  String _relativePostedAt() {
+    final rawCreatedAt = data['createdAt'];
+
+    DateTime? createdAt;
+    if (rawCreatedAt is Timestamp) {
+      createdAt = rawCreatedAt.toDate();
+    } else if (rawCreatedAt is DateTime) {
+      createdAt = rawCreatedAt;
+    }
+
+    if (createdAt == null) return '';
+
+    final difference = DateTime.now().difference(createdAt);
+    if (difference.inMinutes < 1) return 'Posted just now';
+    if (difference.inMinutes < 60) {
+      return 'Posted ${difference.inMinutes} mins ago';
+    }
+    if (difference.inHours < 24) {
+      return 'Posted ${difference.inHours}h ago';
+    }
+    if (difference.inDays < 7) {
+      return 'Posted ${difference.inDays}d ago';
+    }
+    return '';
+  }
+
+  String _organiserName() {
+    final possibleNames = [
+      data['organiserName'],
+      data['organizerName'],
+      data['hostName'],
+      data['createdByName'],
+      data['businessName'],
+    ];
+
+    for (final value in possibleNames) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isNotEmpty) return text;
+    }
+
+    return '';
+  }
+
   double? _milesAway() {
     if (userPosition == null) return null;
 
@@ -123,6 +166,8 @@ class OpportunityCard extends StatelessWidget {
     final badge = _dateBadge();
     final milesAway = _milesAway();
     final colour = _categoryColor(category);
+    final organiserName = _organiserName();
+    final postedAt = _relativePostedAt();
 
     return LocalLinkSurfaceCard(
       onTap: () {
@@ -154,6 +199,8 @@ class OpportunityCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
+                    const _ActivityBadge(),
+                    const SizedBox(width: 8),
                     if (badge.isNotEmpty) ...[
                       _DateBadge(label: badge),
                       const SizedBox(width: 8),
@@ -185,6 +232,23 @@ class OpportunityCard extends StatelessWidget {
                     color: AppColors.charcoal,
                   ),
                 ),
+                if (organiserName.isNotEmpty || postedAt.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    [
+                      if (organiserName.isNotEmpty) 'By $organiserName',
+                      if (postedAt.isNotEmpty) postedAt,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.5,
+                      height: 1.25,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
                 if (location.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -193,7 +257,7 @@ class OpportunityCard extends StatelessWidget {
                       Icon(
                         Icons.place_outlined,
                         size: 16,
-                        color: AppColors.charcoal.withOpacity(0.48),
+                        color: AppColors.charcoal.withValues(alpha: 0.48),
                       ),
                       const SizedBox(width: 5),
                       Expanded(
@@ -222,14 +286,17 @@ class OpportunityCard extends StatelessWidget {
                         icon: Icons.near_me_outlined,
                         label: '${milesAway.toStringAsFixed(1)} miles',
                       ),
-                    _MetaItem(
-                      icon: Icons.people_alt_outlined,
-                      label: '$attendeeCount going',
-                    ),
-                    _MetaItem(
-                      icon: Icons.chat_bubble_outline_rounded,
-                      label: '$commentCount comments',
-                    ),
+                    if (attendeeCount > 0)
+                      _MetaItem(
+                        icon: Icons.people_alt_outlined,
+                        label: '$attendeeCount going',
+                      ),
+                    if (commentCount > 0)
+                      _MetaItem(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        label:
+                            '$commentCount ${commentCount == 1 ? 'comment' : 'comments'}',
+                      ),
                   ],
                 ),
               ],
@@ -262,7 +329,11 @@ class _OpportunityImage extends StatelessWidget {
           width: 76,
           height: 76,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) {
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return _FallbackImage(colour: colour, icon: icon);
+          },
+          errorBuilder: (context, error, stackTrace) {
             return _FallbackImage(colour: colour, icon: icon);
           },
         ),
@@ -285,7 +356,7 @@ class _FallbackImage extends StatelessWidget {
       width: 76,
       height: 76,
       decoration: BoxDecoration(
-        color: colour.withOpacity(0.11),
+        color: colour.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Icon(icon, color: colour, size: 28),
@@ -303,13 +374,36 @@ class _DateBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.12),
+        color: AppColors.activityBlue.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: const TextStyle(
-          color: AppColors.primary,
+          color: AppColors.activityBlue,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActivityBadge extends StatelessWidget {
+  const _ActivityBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.activityBlue.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: const Text(
+        'Activity',
+        style: TextStyle(
+          color: AppColors.activityBlue,
           fontSize: 10,
           fontWeight: FontWeight.w900,
         ),
@@ -329,7 +423,7 @@ class _MetaItem extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: AppColors.charcoal.withOpacity(0.54)),
+        Icon(icon, size: 15, color: AppColors.charcoal.withValues(alpha: 0.54)),
         const SizedBox(width: 4),
         Text(
           label,

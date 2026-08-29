@@ -1,0 +1,17 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "3XJ7737Y29.Canine-Connections.LocalLink",
+        "paths": [
+          "/community-help/*",
+          "/opportunities/*",
+          "/availability/*",
+          "/businesses/*",
+          "/services/*"
+        ]
+      }
+    ]
+  }
+}

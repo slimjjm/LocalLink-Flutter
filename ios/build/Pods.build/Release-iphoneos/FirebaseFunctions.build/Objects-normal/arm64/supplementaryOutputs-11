@@ -1,0 +1,12 @@
+{
+  "/Users/jamesevans/locallink_flutter/ios/Pods/FirebaseFunctions/FirebaseFunctions/Sources/Callable+Codable.swift" : {
+    "abi-baseline-json" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions.abi.json",
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-primary.dia",
+    "objc-header" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions-Swift.h",
+    "swiftdoc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions.swiftdoc",
+    "swiftmodule" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions.swiftmodule",
+    "swiftsourceinfo" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/FirebaseFunctions.build/Objects-normal/arm64/FirebaseFunctions.swiftsourceinfo"
+  }
+}

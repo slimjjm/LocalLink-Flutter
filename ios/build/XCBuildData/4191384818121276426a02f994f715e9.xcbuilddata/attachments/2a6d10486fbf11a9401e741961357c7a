@@ -1,0 +1,4 @@
+
+module stripe_ios.__Swift {
+  exclude header "stripe_ios-Swift.h"
+}

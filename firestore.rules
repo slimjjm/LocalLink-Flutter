@@ -6,30 +6,624 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(uid) {
-      return signedIn() && request.auth.uid == uid;
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && uid() == userId;
+    }
+
+    function isApprovedAdminEmail() {
+      return signedIn()
+        && request.auth.token.email in [
+          'jae19882011@hotmail.co.uk',
+          'founder@locallinkapp.co.uk'
+        ];
     }
 
     function isAdmin() {
-      return signedIn()
-        && (
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
-          || (
-            request.auth.token.email != null
-            && exists(/databases/$(database)/documents/adminEmails/$(request.auth.token.email))
-            && get(/databases/$(database)/documents/adminEmails/$(request.auth.token.email)).data.enabled != false
-          )
-        );
+      return isApprovedAdminEmail()
+        && exists(/databases/$(database)/documents/adminEmails/$(request.auth.token.email));
     }
 
     function isNotBanned() {
       return signedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isBanned != true;
+        && (
+          !exists(/databases/$(database)/documents/users/$(uid()))
+          || !('isBanned' in get(/databases/$(database)/documents/users/$(uid())).data)
+          || get(/databases/$(database)/documents/users/$(uid())).data.isBanned != true
+        );
+    }
+
+    function business(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    function businessAfter(businessId) {
+      return getAfter(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    function isBusinessOwner(businessId) {
+      let data = business(businessId).data;
+
+      return signedIn()
+        && (
+          ('ownerId' in data && data.ownerId == uid())
+          || ('businessOwnerId' in data && data.businessOwnerId == uid())
+          || ('ownerUid' in data && data.ownerUid == uid())
+          || ('claimedBy' in data && data.claimedBy == uid())
+          || ('ownerIds' in data && data.ownerIds is list && uid() in data.ownerIds)
+          || ('adminUserIds' in data && data.adminUserIds is list && uid() in data.adminUserIds)
+        );
+    }
+
+    function isBusinessOwnerOrCreator(businessId) {
+      let data = business(businessId).data;
+
+      return isBusinessOwner(businessId)
+        || (
+          signedIn()
+          && 'createdBy' in data
+          && data.createdBy == uid()
+        );
+    }
+
+    function isBusinessOwnerOrCreatorAfter(businessId) {
+      let data = businessAfter(businessId).data;
+
+      return signedIn()
+        && (
+          ('ownerId' in data && data.ownerId == uid())
+          || ('businessOwnerId' in data && data.businessOwnerId == uid())
+          || ('ownerUid' in data && data.ownerUid == uid())
+          || ('claimedBy' in data && data.claimedBy == uid())
+          || ('ownerIds' in data && data.ownerIds is list && uid() in data.ownerIds)
+          || ('adminUserIds' in data && data.adminUserIds is list && uid() in data.adminUserIds)
+          || ('createdBy' in data && data.createdBy == uid())
+        );
+    }
+
+    function isActiveBusinessStaff(businessId) {
+      let staffPath = /databases/$(database)/documents/businesses/$(businessId)/staff/$(uid());
+
+      return signedIn()
+        && exists(staffPath)
+        && get(staffPath).data.isActive == true;
+    }
+
+    function canManageBusinessAvailability(businessId) {
+      return isBusinessOwnerOrCreator(businessId)
+        || isActiveBusinessStaff(businessId);
+    }
+
+    function canManageBusinessServices(businessId) {
+      return isBusinessOwnerOrCreator(businessId)
+        || isActiveBusinessStaff(businessId);
+    }
+
+    function canAccessBusinessWorkspace(businessId) {
+      return isBusinessOwnerOrCreator(businessId)
+        || isActiveBusinessStaff(businessId);
+    }
+
+    function validPageProfileUpdate(businessId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return canAccessBusinessWorkspace(businessId)
+        && changed.hasOnly([
+          'businessName',
+          'address',
+          'category',
+          'serviceMode',
+          'serviceRadiusMiles',
+          'acceptingLeads',
+          'paymentMethods',
+          'stripeRequested',
+          'photoURLs'
+        ]);
+    }
+
+    function validUserCreate(userId) {
+      let data = request.resource.data;
+
+      return isOwner(userId)
+        && data.keys().hasOnly([
+          'name',
+          'userName',
+          'displayName',
+          'photoUrl',
+          'photoURL',
+          'bio',
+          'reviewCount',
+          'ratingTotal',
+          'averageRating',
+          'createdAt',
+          'updatedAt',
+          'fcmTokens'
+        ])
+        && (!('reviewCount' in data) || data.reviewCount == 0)
+        && (!('ratingTotal' in data) || data.ratingTotal == 0)
+        && (!('averageRating' in data) || data.averageRating == 0.0 || data.averageRating == 0)
+        && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 50));
+    }
+
+    function validUserProfileUpdate(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let data = request.resource.data;
+
+      return isOwner(userId)
+        && isNotBanned()
+        && changed.hasOnly([
+          'name',
+          'userName',
+          'displayName',
+          'photoUrl',
+          'photoURL',
+          'bio',
+          'updatedAt',
+          'fcmTokens'
+        ])
+        && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 50));
+    }
+
+    function noSecuritySensitiveFieldsChanged() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return !changed.hasAny([
+        'isAdmin',
+        'isBanned',
+        'roles',
+        'permissions',
+        'claims',
+        'isVerified',
+        'verified',
+        'verification',
+        'verificationStatus',
+        'reputation',
+        'reviewCount',
+        'ratingTotal',
+        'averageRating',
+        'followerCount',
+        'followingCount',
+        'attendeeCount',
+        'bookingCount',
+        'completedBookingCount',
+        'subscription',
+        'subscriptionStatus',
+        'paymentStatus',
+        'stripeStatus',
+        'stripeCustomerId',
+        'stripeSubscriptionId',
+        'stripeAccountId',
+        'stripeConnected',
+        'stripeFullyEnabled',
+        'stripeDetailsSubmitted',
+        'stripeChargesEnabled',
+        'stripePayoutsEnabled',
+        'stripeRequirements',
+        'ownerId',
+        'businessOwnerId',
+        'ownerUid',
+        'ownerIds',
+        'adminUserIds',
+        'claimedBy',
+        'createdBy',
+        'creatorId',
+        'customerId',
+        'userId',
+        'businessId',
+        'staffId',
+        'reviewerId',
+        'reporterUserId'
+      ]);
+    }
+
+    function validNotificationReadUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly(['isRead'])
+        && request.resource.data.isRead is bool;
+    }
+
+    function validNotificationPreferences() {
+      let data = request.resource.data;
+
+      return data.keys().hasOnly([
+          'communityResponses',
+          'communityMessages',
+          'communityFollowing',
+          'nearbyCommunityAlerts',
+          'activityUpdates',
+          'serviceBookingUpdates',
+          'reminders',
+          'localDiscovery',
+          'communityAlertsNearby',
+          'updatedAt'
+        ])
+        && (!('communityResponses' in data) || data.communityResponses is bool)
+        && (!('communityMessages' in data) || data.communityMessages is bool)
+        && (!('communityFollowing' in data) || data.communityFollowing is bool)
+        && (!('nearbyCommunityAlerts' in data) || data.nearbyCommunityAlerts is bool)
+        && (!('activityUpdates' in data) || data.activityUpdates is bool)
+        && (!('serviceBookingUpdates' in data) || data.serviceBookingUpdates is bool)
+        && (!('reminders' in data) || data.reminders is bool)
+        && (!('localDiscovery' in data) || data.localDiscovery is bool)
+        && (!('communityAlertsNearby' in data) || data.communityAlertsNearby is bool);
+    }
+
+    function validCommunityAlertSubscription(userId) {
+      return isOwner(userId)
+        && request.resource.data.userId == userId
+        && request.resource.data.communityAlertsEnabled is bool
+        && request.resource.data.isActive is bool
+        && request.resource.data.subscriptionType in ['localArea', 'chosenArea', 'temporaryArea']
+        && request.resource.data.approxLatitude is number
+        && request.resource.data.approxLongitude is number
+        && request.resource.data.placeLabel is string
+        && request.resource.data.maxRadiusMiles in [1, 3, 5, 10]
+        && request.resource.data.enabledCategories is list
+        && request.resource.data.keys().hasOnly([
+          'userId',
+          'communityAlertsEnabled',
+          'enabledCategories',
+          'categoryPreferences',
+          'subscriptionType',
+          'approxLatitude',
+          'approxLongitude',
+          'placeLabel',
+          'maxRadiusMiles',
+          'isActive',
+          'createdAt',
+          'updatedAt',
+          'expiresAt',
+          'firstSeenAt',
+          'establishedAt',
+          'lastSeenAt',
+          'leftAt'
+        ])
+        && (!('expiresAt' in request.resource.data) || request.resource.data.expiresAt is timestamp)
+        && (!('firstSeenAt' in request.resource.data) || request.resource.data.firstSeenAt is timestamp)
+        && (!('establishedAt' in request.resource.data) || request.resource.data.establishedAt is timestamp)
+        && (!('lastSeenAt' in request.resource.data) || request.resource.data.lastSeenAt is timestamp)
+        && (!('leftAt' in request.resource.data) || request.resource.data.leftAt is timestamp);
+    }
+
+    function validBusinessProfileUpdate(businessId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return canAccessBusinessWorkspace(businessId)
+        && changed.hasOnly([
+          'businessName',
+          'name',
+          'description',
+          'address',
+          'category',
+          'serviceMode',
+          'serviceRadiusMiles',
+          'acceptingLeads',
+          'paymentMethods',
+          'stripeRequested',
+          'photoURLs',
+          'phone',
+          'email',
+          'website',
+          'updatedAt'
+        ])
+        && (
+          !changed.hasAny(['paymentMethods'])
+          || (
+            request.resource.data.paymentMethods is list
+            && (
+              !('stripe' in request.resource.data.paymentMethods)
+              || (
+                resource.data.stripeConnected == true
+                && resource.data.stripeChargesEnabled == true
+              )
+            )
+          )
+        );
+    }
+
+    function validBusinessClaimUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return signedIn()
+        && resource.data.ownerId == ''
+        && resource.data.isClaimed != true
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && changed.hasOnly([
+          'ownerId',
+          'isClaimed',
+          'claimedBy',
+          'claimedAt',
+          'claimEmail',
+          'updatedAt'
+        ])
+        && (
+          !changed.hasAny(['claimEmail'])
+          || !('claimEmail' in request.resource.data)
+        );
+    }
+
+    function validServiceRequestCustomerUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return signedIn()
+        && resource.data.customerId == uid()
+        && request.resource.data.customerId == resource.data.customerId
+        && changed.hasOnly([
+          'title',
+          'description',
+          'details',
+          'category',
+          'location',
+          'publicLocation',
+          'approxLatitude',
+          'approxLongitude',
+          'locationPrecision',
+          'budget',
+          'budgetText',
+          'neededBy',
+          'scheduleText',
+          'status',
+          'isActive',
+          'expiresAt',
+          'closedAt',
+          'acceptedBusinessId',
+          'updatedAt'
+        ]);
+    }
+
+    function validNewMarketplaceServiceRequest() {
+      return isNotBanned()
+        && request.resource.data.customerId == uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.isActive == true
+        && request.resource.data.locationPrecision == 'approximate'
+        && request.resource.data.publicLocation is string
+        && request.resource.data.approxLatitude is number
+        && request.resource.data.approxLongitude is number
+        && request.resource.data.category is string
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.scheduleText is string
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.keys().hasOnly([
+          'customerId',
+          'category',
+          'title',
+          'description',
+          'scheduleText',
+          'budgetText',
+          'publicLocation',
+          'location',
+          'locationPrecision',
+          'approxLatitude',
+          'approxLongitude',
+          'status',
+          'isActive',
+          'createdAt',
+          'updatedAt',
+          'expiresAt'
+        ])
+        && !request.resource.data.keys().hasAny([
+          'address',
+          'latitude',
+          'longitude',
+          'customerEmail',
+          'customerPhone',
+          'preciseAddress'
+        ]);
+    }
+
+    function validLegacyAvailabilityServiceRequest() {
+      return isNotBanned()
+        && request.resource.data.customerId == uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.keys().hasOnly([
+          'customerId',
+          'businessId',
+          'availabilityPostId',
+          'serviceId',
+          'category',
+          'title',
+          'description',
+          'timingType',
+          'status',
+          'isActive',
+          'createdAt',
+          'expiresAt'
+        ]);
+    }
+
+    function serviceRequestOpenForOffers(requestId) {
+      let requestDoc = get(/databases/$(database)/documents/serviceRequests/$(requestId));
+      return requestDoc.data.status == 'open'
+        && requestDoc.data.isActive == true
+        && requestDoc.data.expiresAt is timestamp
+        && requestDoc.data.expiresAt > request.time;
+    }
+
+    function businessAcceptsRequestOffers(businessId) {
+      let data = business(businessId).data;
+      return data.isActive != false
+        && data.isClaimed == true
+        && data.acceptingLeads != false;
+    }
+
+    function serviceIsActiveForOffer(businessId, serviceId) {
+      let serviceDoc = get(/databases/$(database)/documents/businesses/$(businessId)/services/$(serviceId));
+      return serviceDoc.data.isActive != false
+        && serviceDoc.data.isPublished != false
+        && serviceDoc.data.isEnabled != false;
+    }
+
+    function validServiceRequestOfferCreate(requestId, businessId) {
+      return isNotBanned()
+        && canManageBusinessServices(businessId)
+        && serviceRequestOpenForOffers(requestId)
+        && businessAcceptsRequestOffers(businessId)
+        && request.resource.data.businessId == businessId
+        && request.resource.data.serviceId is string
+        && serviceIsActiveForOffer(businessId, request.resource.data.serviceId)
+        && request.resource.data.status == 'active'
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'serviceId',
+          'serviceName',
+          'priceText',
+          'message',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]);
+    }
+
+    function validServiceRequestOfferProviderUpdate(requestId, businessId) {
+      return isNotBanned()
+        && resource.data.businessId == businessId
+        && request.resource.data.businessId == businessId
+        && canManageBusinessServices(businessId)
+        && request.resource.data.serviceId is string
+        && serviceIsActiveForOffer(businessId, request.resource.data.serviceId)
+        && request.resource.data.status in ['active', 'withdrawn']
+        && (
+          request.resource.data.status == 'withdrawn'
+          || serviceRequestOpenForOffers(requestId)
+        )
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.keys().hasOnly([
+          'businessId',
+          'businessName',
+          'serviceId',
+          'serviceName',
+          'priceText',
+          'message',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]);
+    }
+
+    function validServiceRequestOfferCustomerUpdate(requestId) {
+      let requestDoc = get(/databases/$(database)/documents/serviceRequests/$(requestId));
+      return signedIn()
+        && requestDoc.data.customerId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'updatedAt'
+        ])
+        && request.resource.data.status in ['accepted', 'declined'];
+    }
+
+    function notRestricted(businessId) {
+      return !exists(/databases/$(database)/documents/businesses/$(businessId)/entitlements/default)
+        || get(/databases/$(database)/documents/businesses/$(businessId)/entitlements/default).data.restrictionMode != true;
+    }
+
+    function conversation(conversationId) {
+      return get(/databases/$(database)/documents/conversations/$(conversationId));
+    }
+
+    function canAccessConversation(conversationDoc) {
+      return signedIn()
+        && (
+          isAdmin()
+          || conversationDoc.data.customerId == uid()
+          || conversationDoc.data.businessOwnerId == uid()
+          || (
+            conversationDoc.data.conversationType == 'community_help'
+            && conversationDoc.data.communityHelpParticipantIds is list
+            && uid() in conversationDoc.data.communityHelpParticipantIds
+          )
+          || canAccessBusinessWorkspace(conversationDoc.data.businessId)
+        );
+    }
+
+    function canAccessBooking(bookingDoc) {
+      return signedIn()
+        && (
+          isAdmin()
+          || bookingDoc.data.customerId == uid()
+          || bookingDoc.data.businessOwnerId == uid()
+          || canAccessBusinessWorkspace(bookingDoc.data.businessId)
+        );
+    }
+
+    function validBookingParticipantUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return (
+        canAccessBusinessWorkspace(resource.data.businessId)
+        && changed.hasOnly(['status', 'completedAt'])
+        && resource.data.status == 'confirmed'
+        && request.resource.data.status in ['completed', 'cancelled_by_business']
+      )
+      || (
+        canAccessBooking(resource)
+        && changed.hasOnly(['unreadForCustomer', 'unreadForBusiness'])
+      );
+    }
+
+    function validActivityJoinUpdate(opportunityId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let attendeePath = /databases/$(database)/documents/opportunities/$(opportunityId)/attendees/$(uid());
+
+      return isNotBanned()
+        && changed.hasOnly(['attendeeCount'])
+        && request.resource.data.attendeeCount == resource.data.attendeeCount + 1
+        && !exists(attendeePath)
+        && existsAfter(attendeePath);
+    }
+
+    function validActivityPayload(userId) {
+      return request.resource.data.keys().hasOnly(['uid', 'recordedAt'])
+        && request.resource.data.uid == userId
+        && 'recordedAt' in request.resource.data;
+    }
+
+    function validActivityRefresh(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly(['uid', 'recordedAt'])
+        && request.resource.data.uid == userId
+        && (
+          !('uid' in resource.data)
+          || request.resource.data.uid == resource.data.uid
+        )
+        && 'recordedAt' in request.resource.data;
+    }
+
+    function validServiceRequestInterestUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly([
+          'status',
+          'interestedBusinessIds',
+          'lastInterestedBusinessId',
+          'updatedAt'
+        ])
+        && request.resource.data.lastInterestedBusinessId is string
+        && canManageBusinessServices(request.resource.data.lastInterestedBusinessId)
+        && request.resource.data.interestedBusinessIds.hasAll([
+          request.resource.data.lastInterestedBusinessId
+        ]);
     }
 
     match /adminEmails/{email} {
-      allow read: if signedIn() && request.auth.token.email == email;
-      allow write: if false;
+      allow get: if isApprovedAdminEmail()
+        && email in [
+          'jae19882011@hotmail.co.uk',
+          'founder@locallinkapp.co.uk'
+        ];
+      allow list, create, update, delete: if false;
     }
 
     match /analytics/{document=**} {
@@ -42,32 +636,35 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /accountDeletionRequests/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
+    match /accountDeletionRequests/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
       allow write: if false;
     }
 
-    match /activityDaily/{day}/users/{uid} {
-      allow create, update: if isOwner(uid) && isNotBanned();
+    match /activityDaily/{day}/users/{userId} {
+      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
+      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
-    match /activityWeekly/{week}/users/{uid} {
-      allow create, update: if isOwner(uid) && isNotBanned();
+    match /activityWeekly/{week}/users/{userId} {
+      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
+      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
-    match /activityMonthly/{month}/users/{uid} {
-      allow create, update: if isOwner(uid) && isNotBanned();
+    match /activityMonthly/{month}/users/{userId} {
+      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
+      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
     match /reports/{reportId} {
       allow create: if isNotBanned()
-        && request.resource.data.reporterUserId == request.auth.uid
+        && request.resource.data.reporterUserId == uid()
         && request.resource.data.status == 'open';
       allow read, update: if isAdmin();
       allow delete: if false;
@@ -75,37 +672,58 @@ service cloud.firestore {
 
     match /shares/{shareId} {
       allow create: if isNotBanned()
-        && (!('userId' in request.resource.data) || request.resource.data.userId == request.auth.uid);
+        && (!('userId' in request.resource.data) || request.resource.data.userId == uid());
       allow read, update, delete: if isAdmin();
     }
 
-    match /users/{uid} {
-      allow read: if signedIn();
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid) || isAdmin();
+    match /users/{userId} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow create: if validUserCreate(userId);
+      allow update: if isAdmin() || validUserProfileUpdate(userId);
       allow delete: if false;
 
       match /notifications/{notificationId} {
-        allow read, update, delete: if isOwner(uid) || isAdmin();
-        allow create: if isAdmin();
+        allow read: if isOwner(userId) || isAdmin();
+        allow update: if isAdmin() || (isOwner(userId) && validNotificationReadUpdate());
+        allow delete: if isOwner(userId) || isAdmin();
+        allow create: if false;
+      }
+
+      match /preferences/{preferenceId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId)
+          && preferenceId == 'notifications'
+          && validNotificationPreferences();
+        allow delete: if false;
       }
 
       match /savedOpportunities/{savedId} {
-        allow read, create, update, delete: if isOwner(uid) && isNotBanned();
+        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
+      }
+
+      match /savedBusinesses/{businessId} {
+        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
+      }
+
+      match /businessPreferences/{businessId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
 
       match /blockedUsers/{blockedId} {
-        allow read, create, update, delete: if isOwner(uid) && isNotBanned();
+        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
       }
 
       match /followers/{followerId} {
         allow read: if signedIn();
-        allow create, update, delete: if isOwner(followerId) || isOwner(uid) || isAdmin();
+        allow create, delete: if signedIn() && (followerId == uid() || isOwner(userId) || isAdmin());
+        allow update: if false;
       }
 
       match /following/{followingId} {
         allow read: if signedIn();
-        allow create, update, delete: if isOwner(uid) || isAdmin();
+        allow create, delete: if isOwner(userId) || isAdmin();
+        allow update: if false;
       }
 
       match /reviews/{reviewId} {
@@ -115,30 +733,152 @@ service cloud.firestore {
       }
 
       match /{document=**} {
-        allow read, write: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /businesses/{businessId} {
+      allow read: if signedIn();
+      allow create: if isNotBanned()
+        && request.resource.data.createdBy == uid()
+        && (
+          request.resource.data.ownerId == uid()
+          || request.resource.data.ownerId == ''
+        );
+      allow update: if isAdmin()
+        || validBusinessProfileUpdate(businessId)
+        || validBusinessClaimUpdate();
+      allow delete: if isAdmin() || isBusinessOwner(businessId);
+
+      match /entitlements/{docId} {
+        allow read: if canAccessBusinessWorkspace(businessId) || isAdmin();
+        allow write: if false;
+      }
+
+      match /services/{serviceId} {
+        allow read: if signedIn();
+        allow create: if canManageBusinessServices(businessId) && isNotBanned();
+        allow update: if canManageBusinessServices(businessId)
+          && isNotBanned()
+          && noSecuritySensitiveFieldsChanged();
+        allow delete: if canManageBusinessServices(businessId) && isNotBanned();
+      }
+
+      match /staff/{staffId} {
+        allow read: if signedIn();
+        allow create: if isNotBanned()
+          && (
+            (
+              staffId == uid()
+              && isBusinessOwnerOrCreatorAfter(businessId)
+            )
+            || isBusinessOwnerOrCreator(businessId)
+          );
+        allow update: if isBusinessOwnerOrCreator(businessId) && isNotBanned();
+        allow delete: if isBusinessOwner(businessId) && notRestricted(businessId);
+
+        match /weeklyAvailability/{weekday} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+
+        match /dateOverrides/{dateId} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+
+        match /dayBlocks/{blockId} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+
+        match /timeBlocks/{blockId} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+
+        match /availableSlots/{slotId} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+
+        match /{document=**} {
+          allow read: if signedIn();
+          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        }
+      }
+
+      match /dayBlocks/{blockId} {
+        allow read: if signedIn();
+        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+      }
+
+      match /timeBlocks/{blockId} {
+        allow read: if signedIn();
+        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+      }
+
+      match /blockedTimes/{blockId} {
+        allow read: if signedIn();
+        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+      }
+    }
+
+    match /bookings/{bookingId} {
+      allow read: if canAccessBooking(resource);
+      allow update: if isAdmin() || validBookingParticipantUpdate();
+      allow create, delete: if false;
+
+      match /{document=**} {
+        allow read: if canAccessBooking(get(/databases/$(database)/documents/bookings/$(bookingId)));
+        allow write: if false;
+      }
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if canAccessConversation(resource);
+      allow create, update, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if canAccessConversation(conversation(conversationId));
+        allow create, update, delete: if false;
       }
     }
 
     match /opportunities/{opportunityId} {
       allow read: if signedIn()
-        && (resource.data.isActive == true || resource.data.createdBy == request.auth.uid || isAdmin());
+        && (resource.data.isActive == true || resource.data.createdBy == uid() || isAdmin());
       allow create: if isNotBanned()
-        && request.resource.data.createdBy == request.auth.uid;
+        && request.resource.data.createdBy == uid();
       allow update: if isAdmin()
-        || (isNotBanned() && resource.data.createdBy == request.auth.uid);
-      allow delete: if isAdmin();
+        || (
+          isNotBanned()
+          && (resource.data.createdBy == uid() || resource.data.organiserId == uid())
+          && noSecuritySensitiveFieldsChanged()
+        )
+        || validActivityJoinUpdate(opportunityId);
+      allow delete: if isAdmin()
+        || (signedIn() && (resource.data.createdBy == uid() || resource.data.organiserId == uid()));
 
       match /comments/{commentId} {
         allow read: if signedIn();
         allow create: if isNotBanned()
-          && request.resource.data.userId == request.auth.uid;
-        allow update, delete: if isAdmin()
-          || (isNotBanned() && resource.data.userId == request.auth.uid);
+          && request.resource.data.userId == uid();
+        allow update: if isAdmin()
+          || (
+            isNotBanned()
+            && resource.data.userId == uid()
+            && noSecuritySensitiveFieldsChanged()
+          );
+        allow delete: if isAdmin()
+          || (isNotBanned() && resource.data.userId == uid());
       }
 
-      match /attendees/{uid} {
+      match /attendees/{userId} {
         allow read: if signedIn();
-        allow create, update, delete: if isOwner(uid) && isNotBanned();
+        allow create, delete: if isOwner(userId) && isNotBanned();
+        allow update: if false;
       }
 
       match /{document=**} {
@@ -147,30 +887,269 @@ service cloud.firestore {
       }
     }
 
-    match /businesses/{businessId} {
+    match /serviceRequests/{requestId} {
       allow read: if signedIn();
-      allow create: if isNotBanned();
-      allow update, delete: if isAdmin()
-        || (signedIn() && resource.data.ownerId == request.auth.uid);
+      allow create: if validNewMarketplaceServiceRequest()
+        || validLegacyAvailabilityServiceRequest();
+      allow update: if isNotBanned()
+        && (
+          validServiceRequestCustomerUpdate()
+          || validServiceRequestInterestUpdate()
+        );
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.customerId == uid());
 
-      match /{document=**} {
-        allow read: if signedIn();
-        allow write: if isAdmin()
-          || (signedIn() && get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid);
+      match /offers/{businessId} {
+        allow read: if isAdmin()
+          || get(/databases/$(database)/documents/serviceRequests/$(requestId)).data.customerId == uid()
+          || canManageBusinessServices(businessId);
+        allow create: if validServiceRequestOfferCreate(requestId, businessId);
+        allow update: if validServiceRequestOfferProviderUpdate(requestId, businessId)
+          || validServiceRequestOfferCustomerUpdate(requestId);
+        allow delete: if false;
       }
     }
 
-    match /bookings/{bookingId} {
-      allow read, update: if isAdmin()
-        || (signedIn()
-          && (resource.data.customerId == request.auth.uid
-            || resource.data.businessOwnerId == request.auth.uid));
-      allow create: if isNotBanned();
-      allow delete: if isAdmin();
+    match /communityHelpPosts/{postId} {
+      allow read: if signedIn()
+        && (resource.data.isActive == true || resource.data.createdBy == uid() || isAdmin());
+      allow create: if isNotBanned()
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.status in ['active', 'missing', 'looking_for_owner', 'open']
+        && request.resource.data.isActive == true
+        && request.resource.data.allowsPayment == false
+        && request.resource.data.keys().hasAll([
+          'createdBy',
+          'createdByName',
+          'type',
+          'mode',
+          'title',
+          'description',
+          'location',
+          'publicLocation',
+          'locationPrecision',
+          'locationSource',
+          'approxLatitude',
+          'approxLongitude',
+          'discoveryRadiusMiles',
+          'timing',
+          'eventDateText',
+          'itemCategory',
+          'keywords',
+          'collectionDetails',
+          'isFree',
+          'allowsPayment',
+          'status',
+          'lifecycleKind',
+          'renewalCount',
+          'expiryReminderAt',
+          'expiryReminderStatus',
+          'isActive',
+          'createdAt',
+          'expiresAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'createdBy',
+          'createdByName',
+          'type',
+          'mode',
+          'title',
+          'description',
+          'location',
+          'publicLocation',
+          'locationPrecision',
+          'locationSource',
+          'placeId',
+          'approxLatitude',
+          'approxLongitude',
+          'discoveryRadiusMiles',
+          'timing',
+          'eventDateText',
+          'itemCategory',
+          'keywords',
+          'collectionDetails',
+          'photoUrl',
+          'isFree',
+          'allowsPayment',
+          'status',
+          'lifecycleKind',
+          'renewalCount',
+          'expiryReminderAt',
+          'expiryReminderStatus',
+          'lastRenewedAt',
+          'resolvedAt',
+          'resolvedBy',
+          'resolvedReason',
+          'closingUpdate',
+          'isActive',
+          'createdAt',
+          'expiresAt'
+        ])
+        && request.resource.data.type in ['lost_found', 'free_item']
+        && request.resource.data.mode in ['lost', 'found', 'wanted', 'offering']
+        && (
+          request.resource.data.type == 'lost_found'
+          || request.resource.data.isFree == true
+        )
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && request.resource.data.location is string
+        && request.resource.data.publicLocation is string
+        && request.resource.data.locationPrecision == 'approximate'
+        && request.resource.data.locationSource in [
+          'place_search',
+          'current_location_approximate'
+        ]
+        && request.resource.data.approxLatitude is number
+        && request.resource.data.approxLongitude is number
+        && request.resource.data.discoveryRadiusMiles is number
+        && request.resource.data.itemCategory is string
+        && request.resource.data.keywords is list
+        && request.resource.data.lifecycleKind in [
+          'lost_pet',
+          'lost_object',
+          'found_object',
+          'free_item'
+        ]
+        && request.resource.data.renewalCount == 0
+        && request.resource.data.expiryReminderAt is timestamp
+        && request.resource.data.expiryReminderStatus == 'pending'
+        && request.resource.data.expiresAt is timestamp
+        && !request.resource.data.keys().hasAny([
+          'budget',
+          'price',
+          'priceCents',
+          'bids',
+          'businessId',
+          'serviceId'
+        ]);
+      allow update: if isAdmin()
+        || (
+          isNotBanned()
+          && resource.data.createdBy == uid()
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.allowsPayment == false
+          && !request.resource.data.keys().hasAny([
+            'budget',
+            'price',
+            'priceCents',
+            'bids',
+            'businessId',
+            'serviceId'
+          ])
+        );
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.createdBy == uid());
 
-      match /{document=**} {
-        allow read, write: if signedIn();
+      match /responses/{responseId} {
+        allow read: if signedIn()
+          && (
+            isAdmin()
+            || resource.data.responderId == uid()
+            || resource.data.postOwnerId == uid()
+          );
+        allow create: if isNotBanned()
+          && request.resource.data.responderId == uid()
+          && request.resource.data.postOwnerId ==
+            get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.createdBy
+          && request.resource.data.status == 'open'
+          && request.resource.data.keys().hasAll([
+            'postId',
+            'postOwnerId',
+            'responderId',
+            'responderName',
+            'message',
+            'status',
+            'createdAt'
+          ])
+          && request.resource.data.keys().hasOnly([
+            'postId',
+            'postOwnerId',
+            'responderId',
+            'responderName',
+            'message',
+            'status',
+            'createdAt'
+          ])
+          && request.resource.data.postId == postId
+          && request.resource.data.message is string;
+        allow update: if false;
+        allow delete: if isAdmin();
       }
+
+      match /followers/{followerId} {
+        allow get: if isOwner(followerId) || isAdmin();
+        allow list: if false;
+        allow create, update, delete: if false;
+      }
+
+      match /updates/{updateId} {
+        allow read: if signedIn()
+          && (
+            get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.isActive == true
+            || get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.createdBy == uid()
+            || isAdmin()
+          );
+        allow write: if false;
+      }
+    }
+
+    match /communityAlertSubscriptions/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isNotBanned() && validCommunityAlertSubscription(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /communityAlertCampaigns/{campaignId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /recipients/{recipientId} {
+        allow read: if isOwner(recipientId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /availabilityPosts/{postId} {
+      allow read: if signedIn()
+        && (
+          resource.data.isActive == true
+          || resource.data.businessOwnerId == uid()
+          || canManageBusinessAvailability(resource.data.businessId)
+          || isAdmin()
+        );
+      allow create: if isNotBanned()
+        && request.resource.data.businessOwnerId == uid()
+        && request.resource.data.businessId is string
+        && canManageBusinessAvailability(request.resource.data.businessId)
+        && request.resource.data.serviceId is string
+        && request.resource.data.availabilityAt is timestamp
+        && request.resource.data.isActive == true;
+      allow update: if isAdmin()
+        || (
+          isNotBanned()
+          && canManageBusinessAvailability(resource.data.businessId)
+          && request.resource.data.businessOwnerId == resource.data.businessOwnerId
+          && request.resource.data.businessId == resource.data.businessId
+          && noSecuritySensitiveFieldsChanged()
+        );
+      allow delete: if isAdmin()
+        || (
+          isNotBanned()
+          && canManageBusinessAvailability(resource.data.businessId)
+        );
+    }
+
+    match /{path=**}/availableSlots/{slotId} {
+      allow read: if signedIn();
+    }
+
+    match /{path=**}/services/{serviceId} {
+      allow read: if signedIn();
+    }
+
+    match /{path=**}/attendees/{userId} {
+      allow read: if signedIn();
     }
 
     match /{document=**} {

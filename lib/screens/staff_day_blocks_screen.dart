@@ -3,9 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'add_block_time_screen.dart';
 
-class StaffDayBlocksScreen
-    extends StatelessWidget {
-
+class StaffDayBlocksScreen extends StatelessWidget {
   final String businessId;
   final String staffId;
   final String staffName;
@@ -21,11 +19,7 @@ class StaffDayBlocksScreen
   // DELETE BLOCK
   // =====================================================
 
-  Future<void> deleteBlock(
-    String businessId,
-    String blockId,
-  ) async {
-
+  Future<void> deleteBlock(String businessId, String blockId) async {
     await FirebaseFirestore.instance
         .collection('businesses')
         .doc(businessId)
@@ -39,24 +33,17 @@ class StaffDayBlocksScreen
   // =====================================================
 
   String formatDate(DateTime date) {
+    final local = date.toLocal();
 
-    final local =
-        date.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
 
-    final day =
-        local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
 
-    final month =
-        local.month.toString().padLeft(2, '0');
+    final year = local.year;
 
-    final year =
-        local.year;
+    final hour = local.hour.toString().padLeft(2, '0');
 
-    final hour =
-        local.hour.toString().padLeft(2, '0');
-
-    final minute =
-        local.minute.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
 
     return '$day/$month/$year  $hour:$minute';
   }
@@ -67,129 +54,82 @@ class StaffDayBlocksScreen
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
+      appBar: AppBar(title: Text('$staffName Time Off')),
 
-      appBar: AppBar(
-        title:
-            Text('$staffName Blocks'),
-      ),
-
-      floatingActionButton:
-          FloatingActionButton(
-
-        child:
-            const Icon(Icons.add),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.add),
 
         onPressed: () {
-
           Navigator.push(
-
             context,
 
             MaterialPageRoute(
-
               builder: (_) =>
-                  AddBlockTimeScreen(
-
-                businessId:
-                    businessId,
-
-                staffId:
-                    staffId,
-              ),
+                  AddBlockTimeScreen(businessId: businessId, staffId: staffId),
             ),
           );
         },
       ),
 
-      body:
-          StreamBuilder<QuerySnapshot>(
-
-        stream:
-            FirebaseFirestore.instance
-                .collection('businesses')
-                .doc(businessId)
-                .collection('timeBlocks')
-                .where(
-                  'staffId',
-                  isEqualTo: staffId,
-                )
-                .orderBy(
-                  'startTime',
-                )
-                .snapshots(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('businesses')
+            .doc(businessId)
+            .collection('timeBlocks')
+            .where('staffId', isEqualTo: staffId)
+            .orderBy('startTime')
+            .snapshots(),
 
         builder: (context, snapshot) {
-
           // =====================================
           // LOADING
           // =====================================
 
           if (!snapshot.hasData) {
-
-            return const Center(
-              child:
-                  CircularProgressIndicator(),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
-          final docs =
-              snapshot.data!.docs;
+          final docs = snapshot.data!.docs;
 
           // =====================================
           // EMPTY
           // =====================================
 
           if (docs.isEmpty) {
-
             return Center(
-
               child: Padding(
-
-                padding:
-                    const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
 
                 child: Column(
-
-                  mainAxisAlignment:
-                      MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.center,
 
                   children: [
-
                     Icon(
                       Icons.event_busy,
                       size: 70,
-                      color:
-                          Colors.grey.shade400,
+                      color: Colors.grey.shade400,
                     ),
 
                     const SizedBox(height: 16),
 
                     const Text(
-
                       'No blocked time yet',
 
                       style: TextStyle(
                         fontSize: 18,
-                        fontWeight:
-                            FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
                     const SizedBox(height: 8),
 
                     Text(
+                      'Add holidays, lunches, sickness or time this team member cannot work.',
 
-                      'Add holidays, lunches, sickness or unavailable time for this staff member.',
+                      textAlign: TextAlign.center,
 
-                      textAlign:
-                          TextAlign.center,
-
-                      style: TextStyle(
-                        color:
-                            Colors.grey.shade600,
-                      ),
+                      style: TextStyle(color: Colors.grey.shade600),
                     ),
                   ],
                 ),
@@ -202,116 +142,72 @@ class StaffDayBlocksScreen
           // =====================================
 
           return ListView.builder(
+            padding: const EdgeInsets.only(top: 8, bottom: 100),
 
-            padding:
-                const EdgeInsets.only(
-              top: 8,
-              bottom: 100,
-            ),
+            itemCount: docs.length,
 
-            itemCount:
-                docs.length,
+            itemBuilder: (context, index) {
+              final doc = docs[index];
 
-            itemBuilder:
-                (context, index) {
+              final data = doc.data() as Map<String, dynamic>;
 
-              final doc =
-                  docs[index];
+              final start = (data['startTime'] as Timestamp).toDate();
 
-              final data =
-                  doc.data()
-                      as Map<String, dynamic>;
+              final end = (data['endTime'] as Timestamp).toDate();
 
-              final start =
-                  (data['startTime']
-                          as Timestamp)
-                      .toDate();
+              final title = data['title'] ?? 'Block';
 
-              final end =
-                  (data['endTime']
-                          as Timestamp)
-                      .toDate();
-
-              final title =
-                  data['title']
-                      ?? 'Block';
-
-              final isInvalid =
-                  end.isBefore(start);
+              final isInvalid = end.isBefore(start);
 
               return Card(
-
-                margin:
-                    const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
 
                 elevation: 2,
 
                 child: Padding(
-
-                  padding:
-                      const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
 
                   child: Row(
-
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
 
                     children: [
-
                       // =====================================
                       // TIMELINE
                       // =====================================
-
                       SizedBox(
-
                         width: 60,
 
                         child: Column(
-
-                          mainAxisAlignment:
-                              MainAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.center,
 
                           children: [
-
                             Container(
                               width: 18,
                               height: 18,
 
-                              decoration:
-                                  BoxDecoration(
-                                shape:
-                                    BoxShape.circle,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
 
-                                color:
-                                    isInvalid
-                                        ? Colors.red
-                                        : Colors.teal,
+                                color: isInvalid ? Colors.red : Colors.teal,
                               ),
                             ),
 
                             Container(
                               width: 2,
                               height: 50,
-                              color:
-                                  Colors.teal.shade200,
+                              color: Colors.teal.shade200,
                             ),
 
                             Container(
                               width: 18,
                               height: 18,
 
-                              decoration:
-                                  BoxDecoration(
-                                shape:
-                                    BoxShape.circle,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
 
-                                color:
-                                    isInvalid
-                                        ? Colors.red
-                                        : Colors.teal.shade300,
+                                color: isInvalid
+                                    ? Colors.red
+                                    : Colors.teal.shade300,
                               ),
                             ),
                           ],
@@ -321,49 +217,32 @@ class StaffDayBlocksScreen
                       // =====================================
                       // CONTENT
                       // =====================================
-
                       Expanded(
-
                         child: Column(
-
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
 
                           children: [
-
                             Row(
-
                               children: [
-
                                 Expanded(
-
                                   child: Text(
-
                                     title,
 
-                                    style:
-                                        const TextStyle(
+                                    style: const TextStyle(
                                       fontSize: 18,
-                                      fontWeight:
-                                          FontWeight.bold,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
 
                                 IconButton(
-
-                                  icon:
-                                      const Icon(
+                                  icon: const Icon(
                                     Icons.delete,
                                     color: Colors.red,
                                   ),
 
                                   onPressed: () {
-
-                                    deleteBlock(
-                                      businessId,
-                                      doc.id,
-                                    );
+                                    deleteBlock(businessId, doc.id);
                                   },
                                 ),
                               ],
@@ -371,28 +250,21 @@ class StaffDayBlocksScreen
 
                             const SizedBox(height: 8),
 
-                            Text(
-                              'Start: ${formatDate(start)}',
-                            ),
+                            Text('Start: ${formatDate(start)}'),
 
                             const SizedBox(height: 4),
 
-                            Text(
-                              'End: ${formatDate(end)}',
-                            ),
+                            Text('End: ${formatDate(end)}'),
 
                             if (isInvalid) ...[
-
                               const SizedBox(height: 10),
 
                               const Text(
-
                                 '⚠ End time is before start time',
 
                                 style: TextStyle(
                                   color: Colors.red,
-                                  fontWeight:
-                                      FontWeight.bold,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],

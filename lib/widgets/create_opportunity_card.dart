@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../screens/create_opportunity_screen.dart';
+import '../screens/create_choice_screen.dart';
 import '../theme/app_colors.dart';
 import 'local_link_surface_card.dart';
 
@@ -13,7 +13,7 @@ class CreateOpportunityCard extends StatelessWidget {
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const CreateOpportunityScreen()),
+          MaterialPageRoute(builder: (_) => const CreateChoiceScreen()),
         );
       },
       padding: const EdgeInsets.all(15),
@@ -33,7 +33,7 @@ class CreateOpportunityCard extends StatelessWidget {
           ),
           SizedBox(height: 4),
           Text(
-            'Start a local opportunity',
+            'Activity or service',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(

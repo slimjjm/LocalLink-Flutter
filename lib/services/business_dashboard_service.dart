@@ -3,14 +3,36 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/business_dashboard_model.dart';
 
 class BusinessDashboardService {
-
-  static Future<BusinessDashboardModel>
-      loadDashboard(
+  static Future<BusinessDashboardMessagingModel> loadMessagingSummary(
     String businessId,
   ) async {
+    final conversationsSnap = await FirebaseFirestore.instance
+        .collection('conversations')
+        .where('businessId', isEqualTo: businessId)
+        .where('archived', isEqualTo: false)
+        .get();
 
-    final firestore =
-        FirebaseFirestore.instance;
+    var unreadMessages = 0;
+    var newEnquiries = 0;
+
+    for (final doc in conversationsSnap.docs) {
+      final data = doc.data();
+
+      unreadMessages += ((data['unreadBusinessCount'] ?? 0) as num).toInt();
+
+      if (data['conversationStatus'] == 'enquiry') {
+        newEnquiries++;
+      }
+    }
+
+    return BusinessDashboardMessagingModel(
+      unreadMessages: unreadMessages,
+      newEnquiries: newEnquiries,
+    );
+  }
+
+  static Future<BusinessDashboardModel> loadDashboard(String businessId) async {
+    final firestore = FirebaseFirestore.instance;
 
     // =====================================
     // TODAY RANGE
@@ -18,223 +40,186 @@ class BusinessDashboardService {
 
     final now = DateTime.now();
 
-    final startOfDay = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
+    final startOfDay = DateTime(now.year, now.month, now.day);
 
-    final endOfDay = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      23,
-      59,
-      59,
-    );
+    final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
     // =====================================
     // BOOKINGS
     // =====================================
 
-    final bookingsSnap =
-        await firestore
-            .collection('bookings')
-            .where(
-              'businessId',
-              isEqualTo: businessId,
-            )
-            .where(
-              'status',
-              isEqualTo: 'confirmed',
-            )
-            .where(
-              'startDate',
-              isGreaterThanOrEqualTo:
-                  Timestamp.fromDate(
-                startOfDay,
-              ),
-            )
-            .where(
-              'startDate',
-              isLessThanOrEqualTo:
-                  Timestamp.fromDate(
-                endOfDay,
-              ),
-            )
-            .get();
+    final bookingsSnap = await firestore
+        .collection('bookings')
+        .where('businessId', isEqualTo: businessId)
+        .where('status', isEqualTo: 'confirmed')
+        .where(
+          'startDate',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+        )
+        .where('startDate', isLessThanOrEqualTo: Timestamp.fromDate(endOfDay))
+        .get();
 
-    int todayRevenue = 0;
+    final upcomingBookingsSnap = await firestore
+        .collection('bookings')
+        .where('businessId', isEqualTo: businessId)
+        .where('status', isEqualTo: 'confirmed')
+        .where('startDate', isGreaterThanOrEqualTo: Timestamp.fromDate(now))
+        .get();
 
-    for (final doc in bookingsSnap.docs) {
+    int upcomingRevenue = 0;
 
+    for (final doc in upcomingBookingsSnap.docs) {
       final data = doc.data();
 
-      final price =
-          (data['price'] ?? 0) as num;
+      final price = (data['price'] ?? 0) as num;
 
-      todayRevenue += price.toInt();
+      upcomingRevenue += price.toInt();
     }
+
+    final liveAvailabilitySnap = await firestore
+        .collection('availabilityPosts')
+        .where('businessId', isEqualTo: businessId)
+        .where('isActive', isEqualTo: true)
+        .where(
+          'availabilityAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(now),
+        )
+        .get();
+
+    final scheduledAvailabilitySnap = await firestore
+        .collection('availabilityPosts')
+        .where('businessId', isEqualTo: businessId)
+        .where('isActive', isEqualTo: true)
+        .where(
+          'availabilityAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(endOfDay),
+        )
+        .get();
+
+    final pendingApprovalSnap = await firestore
+        .collection('bookings')
+        .where('businessId', isEqualTo: businessId)
+        .where('status', isEqualTo: 'pending_business_confirmation')
+        .get();
+
+    final expiredAvailabilitySnap = await firestore
+        .collection('availabilityPosts')
+        .where('businessId', isEqualTo: businessId)
+        .where('isActive', isEqualTo: false)
+        .where('archivedReason', isEqualTo: 'expired')
+        .where(
+          'availabilityAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+        )
+        .where('availabilityAt', isLessThanOrEqualTo: Timestamp.fromDate(now))
+        .get();
 
     // =====================================
     // STAFF
     // =====================================
 
-    final staffSnap =
-        await firestore
-            .collection('businesses')
-            .doc(businessId)
-            .collection('staff')
-            .where(
-              'isActive',
-              isEqualTo: true,
-            )
-            .get();
+    final staffSnap = await firestore
+        .collection('businesses')
+        .doc(businessId)
+        .collection('staff')
+        .where('isActive', isEqualTo: true)
+        .get();
 
     // =====================================
     // SERVICES
     // =====================================
 
-    final servicesSnap =
-        await firestore
-            .collection('businesses')
-            .doc(businessId)
-            .collection('services')
-            .limit(1)
-            .get();
-
-    // =====================================
-    // AVAILABILITY
-    // =====================================
-
-    bool hasAvailability = false;
-
-    final staffDocs =
-        staffSnap.docs;
-
-    for (final staffDoc in staffDocs) {
-
-      final availabilitySnap =
-          await firestore
-              .collection('businesses')
-              .doc(businessId)
-              .collection('staff')
-              .doc(staffDoc.id)
-              .collection('availableSlots')
-              .limit(1)
-              .get();
-
-      if (availabilitySnap.docs.isNotEmpty) {
-
-        hasAvailability = true;
-        break;
-      }
-    }
+    final servicesSnap = await firestore
+        .collection('businesses')
+        .doc(businessId)
+        .collection('services')
+        .where('isActive', isEqualTo: true)
+        .limit(1)
+        .get();
 
     // =====================================
     // BUSINESS
     // =====================================
 
-    final businessSnap =
-        await firestore
-            .collection('businesses')
-            .doc(businessId)
-            .get();
+    final businessSnap = await firestore
+        .collection('businesses')
+        .doc(businessId)
+        .get();
 
-    final businessData =
-        businessSnap.data() ?? {};
+    final businessData = businessSnap.data() ?? {};
 
-        final photoURLs =
-    List<String>.from(
-  businessData['photoURLs'] ?? [],
-);
+    final photoURLs = List<String>.from(businessData['photoURLs'] ?? []);
 
-final hasPhotos =
-    photoURLs.isNotEmpty;
+    final hasPhotos = photoURLs.isNotEmpty;
 
-final profileComplete =
-    hasPhotos &&
-    (businessData['businessName'] ?? '')
-        .toString()
-        .isNotEmpty &&
-    (businessData['address'] ?? '')
-        .toString()
-        .isNotEmpty &&
-    (businessData['category'] ?? '')
-        .toString()
-        .isNotEmpty;
+    final profileComplete =
+        hasPhotos &&
+        (businessData['businessName'] ?? '').toString().isNotEmpty &&
+        (businessData['address'] ?? '').toString().isNotEmpty &&
+        (businessData['category'] ?? '').toString().isNotEmpty;
 
-    final stripeConnected =
-        businessData[
-            'stripeConnected'] ==
-        true;
+    final stripeConnected = businessData['stripeConnected'] == true;
 
     // =====================================
     // ENTITLEMENTS
     // =====================================
 
-    final entitlementsSnap =
-        await firestore
-            .collection('businesses')
-            .doc(businessId)
-            .collection('entitlements')
-            .doc('default')
-            .get();
+    final entitlementsSnap = await firestore
+        .collection('businesses')
+        .doc(businessId)
+        .collection('entitlements')
+        .doc('default')
+        .get();
 
-    final entitlements =
-        entitlementsSnap.data() ?? {};
+    final entitlements = entitlementsSnap.data() ?? {};
 
-    final restrictionMode =
-        entitlements[
-            'restrictionMode'] ==
-        true;
+    final restrictionMode = entitlements['restrictionMode'] == true;
 
-    final freeStaffSlots =
-        entitlements[
-            'freeStaffSlots'] ?? 1;
+    final freeStaffSlots = entitlements['freeStaffSlots'] ?? 1;
 
-    final extraStaffSlots =
-        entitlements[
-            'extraStaffSlots'] ?? 0;
+    final extraStaffSlots = entitlements['extraStaffSlots'] ?? 0;
 
     // =====================================
     // RETURN MODEL
     // =====================================
 
     return BusinessDashboardModel(
+      todayBookings: bookingsSnap.docs.length,
 
-      todayBookings:
-          bookingsSnap.docs.length,
+      upcomingBookings: upcomingBookingsSnap.docs.length,
 
-      todayRevenue:
-          todayRevenue,
+      upcomingRevenue: upcomingRevenue,
 
-      activeStaff:
-          staffSnap.docs.length,
+      unreadMessages: 0,
 
-      freeStaffSlots:
-          freeStaffSlots,
+      newEnquiries: 0,
 
-      extraStaffSlots:
-          extraStaffSlots,
+      activeStaff: staffSnap.docs.length,
 
-      stripeConnected:
-          stripeConnected,
+      liveAvailability: liveAvailabilitySnap.docs.length,
 
-      restrictionMode:
-          restrictionMode,
+      scheduledAvailability: scheduledAvailabilitySnap.docs.length,
 
-      hasServices:
-          servicesSnap.docs.isNotEmpty,
+      pendingApprovalBookings: pendingApprovalSnap.docs.length,
 
-      hasAvailability:
-          hasAvailability,
+      expiredAvailabilityToday: expiredAvailabilitySnap.docs.length,
 
-      hasStaff:
-          staffSnap.docs.isNotEmpty,
+      freeStaffSlots: freeStaffSlots,
 
-          hasPhotos: hasPhotos,
-profileComplete: profileComplete,
+      extraStaffSlots: extraStaffSlots,
+
+      stripeConnected: stripeConnected,
+
+      restrictionMode: restrictionMode,
+
+      hasServices: servicesSnap.docs.isNotEmpty,
+
+      hasAvailability: liveAvailabilitySnap.docs.isNotEmpty,
+
+      hasStaff: staffSnap.docs.isNotEmpty,
+
+      hasPhotos: hasPhotos,
+      profileComplete: profileComplete,
     );
   }
 }

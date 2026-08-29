@@ -83,6 +83,60 @@
 
             </intent-filter>
 
+            <!-- ================================================= -->
+            <!-- PUBLIC LOCAL LINK APP LINKS -->
+            <!-- ================================================= -->
+
+            <intent-filter android:autoVerify="true">
+
+                <action android:name="android.intent.action.VIEW"/>
+
+                <category android:name="android.intent.category.DEFAULT"/>
+
+                <category android:name="android.intent.category.BROWSABLE"/>
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/community-help" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/opportunities" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/availability" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/businesses" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/services" />
+
+            </intent-filter>
+
+            <intent-filter>
+
+                <action android:name="android.intent.action.VIEW"/>
+
+                <category android:name="android.intent.category.DEFAULT"/>
+
+                <category android:name="android.intent.category.BROWSABLE"/>
+
+                <data android:scheme="locallink" android:host="community-help" />
+                <data android:scheme="locallink" android:host="opportunity" />
+                <data android:scheme="locallink" android:host="availability" />
+                <data android:scheme="locallink" android:host="business" />
+
+            </intent-filter>
+
         </activity>
 
         <!-- ================================================= -->

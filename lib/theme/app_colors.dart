@@ -16,6 +16,12 @@ class AppColors {
   /// LocalLink Orange
   static const Color primary = Color(0xFFF26A2E);
 
+  /// Activities: free community and social opportunities
+  static const Color activityBlue = Color(0xFF2563EB);
+
+  /// Services: paid provider/customer service opportunities
+  static const Color serviceGreen = Color(0xFF168A5A);
+
   // ---------------------------------------------------------------------------
   // Backgrounds
   // ---------------------------------------------------------------------------

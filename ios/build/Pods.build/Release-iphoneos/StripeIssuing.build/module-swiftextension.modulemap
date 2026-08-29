@@ -1,0 +1,4 @@
+
+module StripeIssuing.Swift {
+  header "StripeIssuing-Swift.h"
+}

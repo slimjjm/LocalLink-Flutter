@@ -1,0 +1,4 @@
+
+module Stripe.__Swift {
+  exclude header "Stripe-Swift.h"
+}

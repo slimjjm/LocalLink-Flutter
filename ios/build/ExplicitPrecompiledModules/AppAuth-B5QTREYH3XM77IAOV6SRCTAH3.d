@@ -1,0 +1,43 @@
+moduledependenciestarget: \
+  /Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/AppAuth.build/module.modulemap \
+  /Users/jamesevans/locallink_flutter/ios/Pods/Target\ Support\ Files/AppAuth/AppAuth-umbrella.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Modules/module.modulemap \
+  /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk/System/Library/Frameworks/Foundation.framework/Modules/module.modulemap \
+  /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk/usr/include/DarwinFoundation1.modulemap \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthState.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthStateChangeDelegate.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthStateErrorDelegate.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthorizationRequest.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDExternalUserAgentRequest.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDResponseTypes.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDScopes.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthorizationResponse.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDAuthorizationService.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDError.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDErrorUtilities.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDExternalUserAgent.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDExternalUserAgentSession.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDGrantTypes.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDIDToken.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDRegistrationRequest.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDRegistrationResponse.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDScopeUtilities.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDServiceConfiguration.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDServiceDiscovery.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDTokenRequest.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDTokenResponse.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDTokenUtilities.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDURLSessionProvider.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDEndSessionRequest.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDEndSessionResponse.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDClientMetadataParameters.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDDefines.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDFieldMapping.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuthCore/OIDURLQueryComponent.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth/iOS/OIDAuthState+IOS.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth/iOS/OIDAuthorizationService+IOS.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth/iOS/OIDExternalUserAgentIOS.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth/iOS/OIDExternalUserAgentIOSCustomBrowser.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/AppAuth/Sources/AppAuth/iOS/OIDExternalUserAgentCatalyst.h

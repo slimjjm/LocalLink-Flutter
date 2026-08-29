@@ -89,7 +89,11 @@ class LocalLinkMarker {
 
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
 
-    return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
+    if (bytes == null) {
+      return BitmapDescriptor.defaultMarker;
+    }
+
+    return BitmapDescriptor.bytes(bytes.buffer.asUint8List());
   }
 
   static String _emoji(String category) {

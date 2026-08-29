@@ -1,0 +1,47 @@
+dependencies: \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/check_op.cc \
+  /Users/jamesevans/locallink_flutter/ios/Pods/Target\ Support\ Files/abseil/abseil-prefix.pch \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/check_op.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/attributes.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/config.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/options.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/policy_checks.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/optimization.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/nullguard.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/nullstream.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/log_severity.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/string_view.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/nullability.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/nullability_impl.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/meta/type_traits.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/throw_delegate.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/macros.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/port.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/strip.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/log_message.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/errno_saver.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/log_entry.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/internal/config.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/time/time.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/time/civil_time.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/time/internal/cctz/include/cctz/civil_time.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/time/internal/cctz/include/cctz/civil_time_detail.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/time/internal/cctz/include/cctz/time_zone.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/types/span.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/types/internal/span.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/algorithm/algorithm.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/log/log_sink.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/has_absl_stringify.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/str_cat.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/internal/resize_uninitialized.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/internal/stringify_sink.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/strings/numbers.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/endian.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/casts.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/identity.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/base/internal/unaligned_access.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/numeric/bits.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/numeric/internal/bits.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/numeric/int128.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/types/compare.h \
+  /Users/jamesevans/locallink_flutter/ios/Pods/abseil/absl/numeric/int128_have_intrinsic.inc

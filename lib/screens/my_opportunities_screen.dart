@@ -10,31 +10,19 @@ class MyOpportunitiesScreen extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
     if (uid == null) {
-      return const Scaffold(
-        body: Center(
-          child: Text('Please sign in.'),
-        ),
-      );
+      return const Scaffold(body: Center(child: Text('Please sign in.')));
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'My Opportunities',
-        ),
-      ),
+      appBar: AppBar(title: const Text('My Activities')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               'Created By Me',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
             ),
 
             const SizedBox(height: 12),
@@ -42,45 +30,30 @@ class MyOpportunitiesScreen extends StatelessWidget {
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('opportunities')
-                  .where(
-                    'createdBy',
-                    isEqualTo: uid,
-                  )
+                  .where('createdBy', isEqualTo: uid)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
-                  return const Center(
-                    child:
-                        CircularProgressIndicator(),
-                  );
+                  return const Center(child: CircularProgressIndicator());
                 }
 
-                final docs =
-                    snapshot.data!.docs;
+                final docs = snapshot.data!.docs;
 
                 if (docs.isEmpty) {
                   return const _EmptyCard(
-                    text:
-                        'You have not created any opportunities yet.',
+                    text: 'You have not created any activities yet.',
                   );
                 }
 
                 return Column(
                   children: docs.map((doc) {
-                    final data =
-                        doc.data()
-                            as Map<String, dynamic>;
+                    final data = doc.data() as Map<String, dynamic>;
 
                     return _OpportunityTile(
-                      title:
-                          data['title'] ?? '',
-                      subtitle:
-                          data['location'] ?? '',
+                      title: data['title'] ?? '',
+                      subtitle: data['location'] ?? '',
                       attendeeCount:
-                          (data['attendeeCount']
-                                  as num?)
-                              ?.toInt() ??
-                              0,
+                          (data['attendeeCount'] as num?)?.toInt() ?? 0,
                     );
                   }).toList(),
                 );
@@ -91,90 +64,64 @@ class MyOpportunitiesScreen extends StatelessWidget {
 
             const Text(
               'Going To',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
             ),
 
             const SizedBox(height: 12),
 
-    StreamBuilder<QuerySnapshot>(
-  stream: FirebaseFirestore.instance
-      .collectionGroup('attendees')
-      .snapshots(),
-  builder: (
-    context,
-    attendeeSnapshot,
-  ) {
-    if (!attendeeSnapshot.hasData) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collectionGroup('attendees')
+                  .snapshots(),
+              builder: (context, attendeeSnapshot) {
+                if (!attendeeSnapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-    final attendeeDocs =
-        attendeeSnapshot.data!.docs;
+                final attendeeDocs = attendeeSnapshot.data!.docs;
 
-    final myAttendees =
-        attendeeDocs.where((doc) {
-      final data =
-          doc.data()
-              as Map<String, dynamic>;
+                final myAttendees = attendeeDocs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
 
-      return data['userId'] == uid;
-    }).toList();
+                  return data['userId'] == uid;
+                }).toList();
 
-    if (myAttendees.isEmpty) {
-      return const _EmptyCard(
-        text:
-            'You have not joined any opportunities yet.',
-      );
-    }
+                if (myAttendees.isEmpty) {
+                  return const _EmptyCard(
+                    text: 'You have not joined any activities yet.',
+                  );
+                }
 
-    return Column(
-      children: myAttendees.map(
-        (attendee) {
-          final opportunityRef =
-              attendee.reference.parent.parent;
+                return Column(
+                  children: myAttendees.map((attendee) {
+                    final opportunityRef = attendee.reference.parent.parent;
 
-          if (opportunityRef == null) {
-            return const SizedBox.shrink();
-          }
+                    if (opportunityRef == null) {
+                      return const SizedBox.shrink();
+                    }
 
-          return FutureBuilder<DocumentSnapshot>(
-            future: opportunityRef.get(),
-            builder: (
-              context,
-              snapshot,
-            ) {
-              if (!snapshot.hasData ||
-                  !snapshot.data!.exists) {
-                return const SizedBox.shrink();
-              }
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: opportunityRef.get(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData || !snapshot.data!.exists) {
+                          return const SizedBox.shrink();
+                        }
 
-              final data =
-                  snapshot.data!.data()
-                      as Map<String, dynamic>;
+                        final data =
+                            snapshot.data!.data() as Map<String, dynamic>;
 
-              return _OpportunityTile(
-                title:
-                    data['title'] ?? '',
-                subtitle:
-                    data['location'] ?? '',
-                attendeeCount:
-                    (data['attendeeCount']
-                            as num?)
-                        ?.toInt() ??
-                        0,
-              );
-            },
-          );
-        },
-      ).toList(),
-    );
-  },
-),
+                        return _OpportunityTile(
+                          title: data['title'] ?? '',
+                          subtitle: data['location'] ?? '',
+                          attendeeCount:
+                              (data['attendeeCount'] as num?)?.toInt() ?? 0,
+                        );
+                      },
+                    );
+                  }).toList(),
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -189,27 +136,18 @@ class MyOpportunitiesScreen extends StatelessWidget {
 class _EmptyCard extends StatelessWidget {
   final String text;
 
-  const _EmptyCard({
-    required this.text,
-  });
+  const _EmptyCard({required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding:
-          const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.grey.shade100,
-        borderRadius:
-            BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(18),
       ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w500)),
     );
   }
 }
@@ -218,8 +156,7 @@ class _EmptyCard extends StatelessWidget {
 // OPPORTUNITY TILE
 // =====================================================
 
-class _OpportunityTile
-    extends StatelessWidget {
+class _OpportunityTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final int attendeeCount;
@@ -233,93 +170,55 @@ class _OpportunityTile
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin:
-          const EdgeInsets.only(
-        bottom: 12,
-      ),
-      padding:
-          const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(
-          18,
-        ),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color:
-                Colors.black.withOpacity(
-              0.04,
-            ),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 10,
-            offset:
-                const Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.event_available,
-            size: 28,
-          ),
+          const Icon(Icons.event_available, size: 28),
 
           const SizedBox(width: 12),
 
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style:
-                      const TextStyle(
-                    fontWeight:
-                        FontWeight.w800,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
                     fontSize: 16,
                   ),
                 ),
 
-                const SizedBox(
-                  height: 4,
-                ),
+                const SizedBox(height: 4),
 
-                Text(
-                  subtitle,
-                  style:
-                      const TextStyle(
-                    color:
-                        Colors.black54,
-                  ),
-                ),
+                Text(subtitle, style: const TextStyle(color: Colors.black54)),
               ],
             ),
           ),
 
           Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
                 '$attendeeCount going',
-                style:
-                    const TextStyle(
-                  fontWeight:
-                      FontWeight.w700,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
 
-              const SizedBox(
-                height: 4,
-              ),
+              const SizedBox(height: 4),
 
-              const Icon(
-                Icons.chevron_right,
-                color:
-                    Colors.black38,
-              ),
+              const Icon(Icons.chevron_right, color: Colors.black38),
             ],
           ),
         ],

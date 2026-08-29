@@ -1,0 +1,4 @@
+
+module StripeIssuing.__Swift {
+  exclude header "StripeIssuing-Swift.h"
+}

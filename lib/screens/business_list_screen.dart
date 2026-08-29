@@ -3,10 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/business.dart';
+import '../services/local_discovery_filters.dart';
 import '../services/location_service.dart';
+import '../services/service_catalog_discovery_service.dart';
 import '../utils/distance_helper.dart';
 import '../widgets/business_card.dart';
-
 
 class BusinessListScreen extends StatefulWidget {
   final String? initialPostcode;
@@ -29,6 +30,7 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
   final TextEditingController postcodeController = TextEditingController();
 
   Position? userPosition;
+  Map<String, List<Map<String, dynamic>>> serviceDataByBusinessId = const {};
 
   String searchText = '';
   String postcodeText = '';
@@ -68,6 +70,8 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
     if (widget.useCurrentLocation) {
       loadLocation();
     }
+
+    _loadServiceDiscoveryData();
   }
 
   @override
@@ -85,6 +89,42 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
     setState(() {
       userPosition = position;
     });
+  }
+
+  Future<void> _loadServiceDiscoveryData() async {
+    try {
+      final grouped = <String, List<Map<String, dynamic>>>{};
+      final services =
+          await ServiceCatalogDiscoveryService.loadDiscoverableServices();
+
+      for (final service in services) {
+        grouped
+            .putIfAbsent(service.businessId, () => [])
+            .add(service.serviceData);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        serviceDataByBusinessId = grouped;
+      });
+    } catch (error) {
+      assert(() {
+        debugPrint('BusinessListScreen service discovery failed: $error');
+        if (error is FirebaseException) {
+          debugPrint(
+            'BusinessListScreen service discovery FirebaseException code=${error.code} plugin=${error.plugin} message=${error.message}',
+          );
+        }
+        return true;
+      }());
+
+      if (!mounted) return;
+
+      setState(() {
+        serviceDataByBusinessId = const {};
+      });
+    }
   }
 
   String _normalise(String value) {
@@ -148,27 +188,26 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
     required Map<String, dynamic> data,
     required String query,
   }) {
-    final value = query.toLowerCase().trim();
-
-    if (value.isEmpty) return true;
-
-    final searchableText = [
-      business.name,
-      data['businessName'],
-      data['category'],
-      data['address'],
-      data['town'],
-      data['city'],
-      data['description'],
-    ]
-        .whereType<Object>()
-        .map((item) => item.toString().toLowerCase())
-        .join(' ');
-
-    return searchableText.contains(value);
+    return LocalDiscoveryFilters.matchesText(
+      data,
+      query,
+      extraValues: [
+        business.name,
+        for (final service
+            in serviceDataByBusinessId[business.id] ?? const []) ...[
+          service['name'],
+          service['serviceName'],
+          service['details'],
+          service['description'],
+          service['category'],
+          service['searchKeywords'],
+        ],
+      ],
+    );
   }
 
   bool _matchesCategory({
+    required String businessId,
     required Map<String, dynamic> data,
     required String? category,
   }) {
@@ -176,7 +215,11 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
 
     final businessCategory = data['category']?.toString() ?? '';
 
-    return businessCategory == category;
+    if (businessCategory == category) return true;
+
+    return (serviceDataByBusinessId[businessId] ?? const []).any(
+      (service) => service['category']?.toString() == category,
+    );
   }
 
   double? _distanceFor(BusinessModel business) {
@@ -331,26 +374,18 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('businesses')
-                  .where(
-                    'isActive',
-                    isEqualTo: true,
-                  )
-                  .where(
-                    'isClaimed',
-                    isEqualTo: true,
-                  )
+                  .where('isActive', isEqualTo: true)
+                  .where('isClaimed', isEqualTo: true)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
+                  return const Center(child: CircularProgressIndicator());
                 }
 
                 if (snapshot.hasError) {
-                  return Center(
+                  return const Center(
                     child: Text(
-                      'Error: ${snapshot.error}',
+                      "We couldn't load businesses. Please try again.",
                     ),
                   );
                 }
@@ -364,16 +399,11 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
 
                   originalDataById[doc.id] = data;
 
-                  return BusinessModel.fromFirestore(
-                    doc.id,
-                    data,
-                  );
+                  return BusinessModel.fromFirestore(doc.id, data);
                 }).toList();
 
                 businesses = businesses
-                    .where(
-                      (business) => business.canTakeBookings,
-                    )
+                    .where((business) => business.canTakeBookings)
                     .toList();
 
                 businesses = businesses.where((business) {
@@ -387,6 +417,7 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                         query: searchText,
                       ) &&
                       _matchesCategory(
+                        businessId: business.id,
                         data: data,
                         category: selectedCategory,
                       ) &&
@@ -396,31 +427,26 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                       );
                 }).toList();
 
-              if (userPosition != null) {
+                if (userPosition != null) {
+                  businesses = businesses.where((business) {
+                    final distance = _distanceFor(business);
 
-  businesses = businesses.where((business) {
+                    if (distance == null) return false;
 
-    final distance = _distanceFor(business);
+                    return distance <= 10;
+                  }).toList();
 
-    if (distance == null) return false;
+                  businesses.sort((a, b) {
+                    final aDistance = _distanceFor(a);
+                    final bDistance = _distanceFor(b);
 
-    return distance <= 10;
+                    if (aDistance == null && bDistance == null) return 0;
+                    if (aDistance == null) return 1;
+                    if (bDistance == null) return -1;
 
-  }).toList();
-
-  businesses.sort((a, b) {
-
-    final aDistance = _distanceFor(a);
-    final bDistance = _distanceFor(b);
-
-    if (aDistance == null && bDistance == null) return 0;
-    if (aDistance == null) return 1;
-    if (bDistance == null) return -1;
-
-    return aDistance.compareTo(bDistance);
-
-  });
-}
+                    return aDistance.compareTo(bDistance);
+                  });
+                }
 
                 if (businesses.isEmpty) {
                   return Center(
@@ -439,7 +465,8 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                 return ListView.separated(
                   padding: const EdgeInsets.all(16),
                   itemCount: businesses.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final business = businesses[index];
 
@@ -452,10 +479,7 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                       children: [
                         if (distance != null)
                           Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: 6,
-                              left: 4,
-                            ),
+                            padding: const EdgeInsets.only(bottom: 6, left: 4),
                             child: Text(
                               '${distance.toStringAsFixed(1)} miles away',
                             ),

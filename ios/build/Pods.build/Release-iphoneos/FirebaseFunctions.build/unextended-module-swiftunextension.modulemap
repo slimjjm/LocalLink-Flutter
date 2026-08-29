@@ -1,0 +1,4 @@
+
+module FirebaseFunctions.__Swift {
+  exclude header "FirebaseFunctions-Swift.h"
+}

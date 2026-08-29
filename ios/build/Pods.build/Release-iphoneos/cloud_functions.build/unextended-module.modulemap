@@ -1,0 +1,10 @@
+framework module cloud_functions {
+  umbrella header "cloud_functions-umbrella.h"
+
+  export *
+  module * { export * }
+}
+
+module cloud_functions.__Swift {
+  exclude header "cloud_functions-Swift.h"
+}

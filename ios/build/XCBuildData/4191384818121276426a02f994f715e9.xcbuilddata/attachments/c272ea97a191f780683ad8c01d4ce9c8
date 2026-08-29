@@ -1,0 +1,36 @@
+{
+  "" : {
+    "const-values" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary.swiftconstvalues",
+    "dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary.d",
+    "diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary.dia",
+    "emit-module-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary-emit-module.dia",
+    "pch" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/cloud_functions-primary.swiftdeps"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/cloud_functions-6.3.1/ios/cloud_functions/Sources/cloud_functions/CloudFunctionsMessages.g.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CloudFunctionsMessages.g.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CloudFunctionsMessages.g.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CloudFunctionsMessages.g.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/cloud_functions-6.3.1/ios/cloud_functions/Sources/cloud_functions/CodecUtility.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CodecUtility.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CodecUtility.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/CodecUtility.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/cloud_functions-6.3.1/ios/cloud_functions/Sources/cloud_functions/Constants.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/Constants.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/Constants.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/Constants.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/cloud_functions-6.3.1/ios/cloud_functions/Sources/cloud_functions/FirebaseFunctionsPlugin.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FirebaseFunctionsPlugin.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FirebaseFunctionsPlugin.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FirebaseFunctionsPlugin.o"
+  },
+  "/Users/jamesevans/.pub-cache/hosted/pub.dev/cloud_functions-6.3.1/ios/cloud_functions/Sources/cloud_functions/FunctionsStreamHandler.swift" : {
+    "index-unit-output-path" : "/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FunctionsStreamHandler.o",
+    "llvm-bc" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FunctionsStreamHandler.bc",
+    "object" : "/Users/jamesevans/locallink_flutter/ios/build/Pods.build/Release-iphoneos/cloud_functions.build/Objects-normal/arm64/FunctionsStreamHandler.o"
+  }
+}

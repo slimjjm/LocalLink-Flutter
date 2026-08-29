@@ -1,52 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-String safeText(
-  dynamic value,
-  String fallback,
-) {
+String safeText(dynamic value, String fallback) {
   if (value == null) {
     return fallback;
   }
 
-  final text =
-      value.toString().trim();
+  final text = value.toString().trim();
 
-  return text.isEmpty
-      ? fallback
-      : text;
+  return text.isEmpty ? fallback : text;
 }
 
-String formatSlotTime(
-  dynamic timestamp,
-) {
+String formatSlotTime(dynamic timestamp) {
   if (timestamp == null) {
     return '';
   }
 
-  final date =
-      (timestamp as Timestamp)
-          .toDate();
+  final date = (timestamp as Timestamp).toDate();
 
-  final hour =
-      date.hour > 12
-          ? date.hour - 12
-          : date.hour == 0
-              ? 12
-              : date.hour;
+  final hour = date.hour > 12
+      ? date.hour - 12
+      : date.hour == 0
+      ? 12
+      : date.hour;
 
-  final minute =
-      date.minute
-          .toString()
-          .padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
 
-  final period =
-      date.hour >= 12
-          ? 'PM'
-          : 'AM';
+  final period = date.hour >= 12 ? 'PM' : 'AM';
 
   return '$hour:$minute $period';
 }
+
 class BookingServiceSummary extends StatelessWidget {
   final String serviceName;
   final String price;
@@ -61,8 +45,9 @@ class BookingServiceSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final durationText =
-        durationMinutes == null ? null : '${durationMinutes.toString()} mins';
+    final durationText = durationMinutes == null
+        ? null
+        : '${durationMinutes.toString()} mins';
 
     return Container(
       width: double.infinity,
@@ -74,7 +59,7 @@ class BookingServiceSummary extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             blurRadius: 12,
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             offset: const Offset(0, 4),
           ),
         ],
@@ -84,10 +69,7 @@ class BookingServiceSummary extends StatelessWidget {
         children: [
           Text(
             serviceName,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-            ),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
@@ -103,10 +85,7 @@ class BookingServiceSummary extends StatelessWidget {
 class SectionTitle extends StatelessWidget {
   final String title;
 
-  const SectionTitle({
-    super.key,
-    required this.title,
-  });
+  const SectionTitle({super.key, required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -116,10 +95,7 @@ class SectionTitle extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           title,
-          style: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
         ),
       ),
     );
@@ -147,8 +123,8 @@ class StaffSelector extends StatelessWidget {
             .collection('businesses')
             .doc(businessId)
             .collection('staff')
-           .where('isActive', isEqualTo: true)
-.orderBy('name')
+            .where('isActive', isEqualTo: true)
+            .orderBy('name')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -156,28 +132,26 @@ class StaffSelector extends StatelessWidget {
           }
 
           if (snapshot.hasError) {
-            return Center(
-              child: Text('Staff error: ${snapshot.error}'),
+            return const Center(
+              child: Text('We could not load the team. Please try again.'),
             );
           }
 
           final staff = snapshot.data?.docs ?? [];
 
           if (staff.isEmpty) {
-            return const Center(
-              child: Text('No active staff available'),
-            );
+            return const Center(child: Text('No team members available'));
           }
 
           return ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             itemCount: staff.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
             itemBuilder: (context, index) {
               final data = (staff[index].data() as Map<String, dynamic>?) ?? {};
               final staffId = staff[index].id;
-              final name = safeText(data['name'], 'Staff');
+              final name = safeText(data['name'], 'Team member');
               final isSelected = selectedStaffId == staffId;
 
               return ChoiceChip(
@@ -215,45 +189,41 @@ class SlotSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (selectedStaffId == null) {
-      return const Center(
-        child: Text('Select staff first'),
-      );
+      return const Center(child: Text('Choose a team member first'));
     }
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
-    .collection('businesses')
-    .doc(businessId)
-    .collection('staff')
-    .doc(selectedStaffId)
-    .collection('availableSlots')
-    .where('isBooked', isEqualTo: false)
-    .where('startTime', isGreaterThan: Timestamp.now())
-    .orderBy('startTime')
-    .snapshots(),
+          .collection('businesses')
+          .doc(businessId)
+          .collection('staff')
+          .doc(selectedStaffId)
+          .collection('availableSlots')
+          .where('isBooked', isEqualTo: false)
+          .where('startTime', isGreaterThan: Timestamp.now())
+          .orderBy('startTime')
+          .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         if (snapshot.hasError) {
-          return Center(
-            child: Text('Slot error: ${snapshot.error}'),
+          return const Center(
+            child: Text('We could not load appointments. Please try again.'),
           );
         }
 
         final slots = snapshot.data?.docs ?? [];
 
         if (slots.isEmpty) {
-          return const Center(
-            child: Text('No slots available'),
-          );
+          return const Center(child: Text('No appointments available'));
         }
 
         return ListView.separated(
           padding: const EdgeInsets.all(16),
           itemCount: slots.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final data = (slots[index].data() as Map<String, dynamic>?) ?? {};
             final slotId = slots[index].id;
@@ -322,10 +292,7 @@ class PaymentMethodSelector extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: Row(
         children: [
-          const Text(
-            'Payment:',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
+          const Text('Payment:', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(width: 12),
           ...paymentMethods.map((method) {
             final isSelected = selectedPaymentMethod == method;
@@ -391,10 +358,7 @@ class ConfirmBookingButton extends StatelessWidget {
                   )
                 : const Text(
                     'Confirm Booking',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
           ),
         ),

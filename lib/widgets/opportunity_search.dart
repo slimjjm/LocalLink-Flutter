@@ -13,7 +13,7 @@ class OpportunitySearch extends StatelessWidget {
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
       decoration: InputDecoration(
-        hintText: 'Search opportunities',
+        hintText: 'Search activities, services and help',
         hintStyle: const TextStyle(
           color: AppColors.textLight,
           fontWeight: FontWeight.w600,

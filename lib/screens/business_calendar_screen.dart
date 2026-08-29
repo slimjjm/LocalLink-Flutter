@@ -1,647 +1,748 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'add_block_time_screen.dart';
+import 'package:flutter/material.dart';
+
+import '../theme/app_colors.dart';
+import '../utils/helpers.dart';
+import '../widgets/booking_status_chip.dart';
+import 'business_booking_detail_screen.dart';
+import 'post_availability_screen.dart';
 
 class BusinessCalendarScreen extends StatefulWidget {
-
   final String businessId;
 
-  const BusinessCalendarScreen({
-    super.key,
-    required this.businessId,
-  });
+  const BusinessCalendarScreen({super.key, required this.businessId});
 
   @override
-  State<BusinessCalendarScreen> createState() =>
-      _BusinessCalendarScreenState();
+  State<BusinessCalendarScreen> createState() => _BusinessCalendarScreenState();
 }
 
-class _BusinessCalendarScreenState
-    extends State<BusinessCalendarScreen> {
-
+class _BusinessCalendarScreenState extends State<BusinessCalendarScreen> {
   DateTime selectedDate = DateTime.now();
-
   bool isLoading = true;
 
-  List<QueryDocumentSnapshot> bookings = [];
-  List<QueryDocumentSnapshot> staff = [];
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> bookings = [];
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> availabilityPosts = [];
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> blockedTime = [];
 
   @override
   void initState() {
     super.initState();
-    loadBookings();
-loadStaff();
+    loadDiary();
   }
 
-// =====================================================
-// LOAD BOOKINGS + DAY BLOCKS
-// =====================================================
+  Future<void> loadDiary() async {
+    setState(() => isLoading = true);
 
-List<QueryDocumentSnapshot> dayBlocks = [];
+    try {
+      final startOfDay = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+      );
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      final firestore = FirebaseFirestore.instance;
 
-Future<void> loadBookings() async {
+      final bookingSnapshot = await firestore
+          .collection('bookings')
+          .where('businessId', isEqualTo: widget.businessId)
+          .where(
+            'startDate',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+          )
+          .where('startDate', isLessThan: Timestamp.fromDate(endOfDay))
+          .orderBy('startDate')
+          .get();
 
-  try {
+      final availabilitySnapshot = await firestore
+          .collection('availabilityPosts')
+          .where('businessId', isEqualTo: widget.businessId)
+          .where('isActive', isEqualTo: true)
+          .where(
+            'availabilityAt',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+          )
+          .where('availabilityAt', isLessThan: Timestamp.fromDate(endOfDay))
+          .orderBy('availabilityAt')
+          .get();
 
-    setState(() {
-      isLoading = true;
-    });
-
-    final startOfDay = DateTime(
-      selectedDate.year,
-      selectedDate.month,
-      selectedDate.day,
-    );
-
-    final endOfDay =
-        startOfDay.add(
-          const Duration(days: 1),
-        );
-
-     
-
-    // =====================================================
-    // LOAD BOOKINGS
-    // =====================================================
-
-    final bookingSnapshot =
-        await FirebaseFirestore.instance
-            .collection('bookings')
-            .where(
-              'businessId',
-              isEqualTo: widget.businessId,
-            )
-            .where(
-              'startDate',
-              isGreaterThanOrEqualTo:
-                  Timestamp.fromDate(startOfDay),
-            )
-            .where(
-              'startDate',
-              isLessThan:
-                  Timestamp.fromDate(endOfDay),
-            )
-            .orderBy('startDate')
-            .get();
-
-    // =====================================================
-    // LOAD STAFF DAY BLOCKS
-    // =====================================================
-
-    List<QueryDocumentSnapshot> allBlocks = [];
-
-    for (final staffDoc in staff) {
-
-      final blockSnapshot =
-          await FirebaseFirestore.instance
-              .collection('businesses')
-              .doc(widget.businessId)
-              .collection('staff')
-              .doc(staffDoc.id)
-              .collection('dayBlocks')
-              .where(
-                'startDate',
-                isLessThan:
-                    Timestamp.fromDate(endOfDay),
-              )
-              .where(
-                'endDate',
-                isGreaterThanOrEqualTo:
-                    Timestamp.fromDate(startOfDay),
-              )
-              .get();
-
-      allBlocks.addAll(blockSnapshot.docs);
-    }
-
-    setState(() {
-
-      bookings =
-          bookingSnapshot.docs;
-
-      dayBlocks =
-          allBlocks;
-
-      isLoading = false;
-    });
-
-  } catch (e) {
-
-    debugPrint(
-      "🔥 CALENDAR LOAD ERROR: $e",
-    );
-
-    setState(() {
-      isLoading = false;
-    });
-  }
-}
-   Future<void> loadStaff() async {
-
-  final snapshot =
-      await FirebaseFirestore.instance
+      final staffSnapshot = await firestore
           .collection('businesses')
           .doc(widget.businessId)
           .collection('staff')
-          .where(
-            'isActive',
-            isEqualTo: true,
-          )
-          .orderBy('seatRank')
+          .where('isActive', isEqualTo: true)
           .get();
 
-  setState(() {
+      final blocks = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
-    staff = snapshot.docs;
-  });
-}
-  // =====================================================
-  // DATE PICKER
-  // =====================================================
+      for (final staffDoc in staffSnapshot.docs) {
+        final blockSnapshot = await firestore
+            .collection('businesses')
+            .doc(widget.businessId)
+            .collection('staff')
+            .doc(staffDoc.id)
+            .collection('dayBlocks')
+            .where('startDate', isLessThan: Timestamp.fromDate(endOfDay))
+            .where(
+              'endDate',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay),
+            )
+            .get();
 
-  Future<void> pickDate() async {
+        blocks.addAll(blockSnapshot.docs);
+      }
 
-    final picked =
-        await showDatePicker(
-          context: context,
-          initialDate: selectedDate,
-          firstDate:
-              DateTime.now()
-                  .subtract(
-                    const Duration(days: 365),
-                  ),
-          lastDate:
-              DateTime.now()
-                  .add(
-                    const Duration(days: 365),
-                  ),
-        );
-
-    if (picked != null) {
+      if (!mounted) return;
 
       setState(() {
-        selectedDate = picked;
+        bookings = bookingSnapshot.docs;
+        availabilityPosts = availabilitySnapshot.docs;
+        blockedTime = blocks;
+        isLoading = false;
       });
-
-      await loadBookings();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => isLoading = false);
     }
   }
-Future<void> showStaffPicker() async {
 
-  if (staff.isEmpty) {
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-
-      const SnackBar(
-        content: Text(
-          'No active staff',
-        ),
-      ),
+  Future<void> pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
     );
 
-    return;
+    if (picked == null || !mounted) return;
+
+    setState(() => selectedDate = picked);
+    await loadDiary();
   }
 
-  showModalBottomSheet(
+  String formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
 
-    context: context,
+  String formatTime(Timestamp? timestamp) {
+    if (timestamp == null) return 'Time not set';
 
-    builder: (_) {
-
-      return SafeArea(
-
-        child: ListView.builder(
-
-          shrinkWrap: true,
-
-          itemCount: staff.length,
-
-          itemBuilder: (context, index) {
-
-            final data =
-                staff[index].data()
-                    as Map<String, dynamic>;
-
-            final staffId =
-                staff[index].id;
-
-            final staffName =
-                data['name'] ?? 'Staff';
-
-            return ListTile(
-
-              title: Text(staffName),
-
-              leading:
-                  const Icon(Icons.person),
-
-              onTap: () async {
-
-                Navigator.pop(context);
-
-                await Navigator.push(
-
-                  context,
-
-                  MaterialPageRoute(
-
-                    builder: (_) =>
-                        AddBlockTimeScreen(
-
-                      businessId:
-                          widget.businessId,
-
-                      staffId: staffId,
-                    ),
-                  ),
-                );
-
-                await loadBookings();
-              },
-            );
-          },
-        ),
-      );
-    },
-  );
-}
-  // =====================================================
-  // HELPERS
-  // =====================================================
-
-  String formatTime(Timestamp timestamp) {
-
-    final date =
-        timestamp.toDate();
-
-    return
-        '${date.hour.toString().padLeft(2, '0')}:'
+    final date = timestamp.toDate();
+    return '${date.hour.toString().padLeft(2, '0')}:'
         '${date.minute.toString().padLeft(2, '0')}';
   }
 
-  Color statusColor(String status) {
-
-    switch (status) {
-
-      case 'confirmed':
-        return Colors.green;
-
-      case 'pending_payment':
-        return Colors.orange;
-
-      case 'completed':
-        return Colors.blue;
-
-      case 'cancelled_by_customer':
-      case 'cancelled_by_business':
-      case 'payment_failed':
-        return Colors.red;
-
-      default:
-        return Colors.grey;
-    }
-  }
-
-  // =====================================================
-  // UI
-  // =====================================================
+  bool get hasDiaryItems =>
+      bookings.isNotEmpty ||
+      availabilityPosts.isNotEmpty ||
+      blockedTime.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-floatingActionButton:
-    FloatingActionButton(
-
-  onPressed: showStaffPicker,
-
-  child: const Icon(
-    Icons.block,
-  ),
-),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-
-        title:
-            const Text(
-              'Business Calendar',
-            ),
-
+        title: const Text('Diary'),
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.charcoal,
+        elevation: 0,
         actions: [
-
           IconButton(
-
-            onPressed: pickDate,
-
-            icon:
-                const Icon(
-                  Icons.calendar_month,
+            tooltip: 'Add availability',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      PostAvailabilityScreen(businessId: widget.businessId),
                 ),
+              );
+            },
+            icon: const Icon(Icons.add_circle_outline),
+          ),
+          IconButton(
+            tooltip: 'Choose date',
+            onPressed: pickDate,
+            icon: const Icon(Icons.calendar_month_outlined),
           ),
         ],
       ),
-
-      body: Padding(
-
-        padding:
-            const EdgeInsets.all(16),
-
-        child: Column(
-
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
-
+      body: RefreshIndicator(
+        color: AppColors.serviceGreen,
+        onRefresh: loadDiary,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
-
-            Text(
-
-              '${selectedDate.day}/'
-              '${selectedDate.month}/'
-              '${selectedDate.year}',
-
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
+            _DiaryHeader(
+              date: formatDate(selectedDate),
+              bookingCount: bookings.length,
+              pendingCount: bookings
+                  .where(
+                    (doc) =>
+                        doc.data()['status'] == 'pending_business_confirmation',
+                  )
+                  .length,
+              availabilityCount: availabilityPosts.length,
             ),
+            const SizedBox(height: 18),
+            if (isLoading)
+              const _DiaryLoading()
+            else if (!hasDiaryItems)
+              _DiaryEmpty(
+                onPostAvailability: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          PostAvailabilityScreen(businessId: widget.businessId),
+                    ),
+                  );
+                },
+              )
+            else ...[
+              if (bookings.isNotEmpty) ...[
+                const _DiarySectionTitle(
+                  title: 'Bookings',
+                  subtitle: 'Confirmed and pending customer appointments.',
+                ),
+                const SizedBox(height: 10),
+                ...bookings.map(
+                  (doc) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _BookingDiaryCard(
+                      bookingId: doc.id,
+                      booking: doc.data(),
+                      formatTime: formatTime,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (availabilityPosts.isNotEmpty) ...[
+                const _DiarySectionTitle(
+                  title: 'Unfilled availability',
+                  subtitle: 'Live openings customers can still book.',
+                ),
+                const SizedBox(height: 10),
+                ...availabilityPosts.map(
+                  (doc) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _AvailabilityDiaryCard(
+                      postId: doc.id,
+                      post: doc.data(),
+                      formatTime: formatTime,
+                      onChanged: loadDiary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if (blockedTime.isNotEmpty) ...[
+                const _DiarySectionTitle(
+                  title: 'Blocked time',
+                  subtitle: 'Time currently unavailable for bookings.',
+                ),
+                const SizedBox(height: 10),
+                ...blockedTime.map(
+                  (doc) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _BlockedTimeCard(block: doc.data()),
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-            const SizedBox(height: 20),
+class _DiaryHeader extends StatelessWidget {
+  final String date;
+  final int bookingCount;
+  final int pendingCount;
+  final int availabilityCount;
 
-            // =====================================================
-// DAY BLOCKS
-// =====================================================
+  const _DiaryHeader({
+    required this.date,
+    required this.bookingCount,
+    required this.pendingCount,
+    required this.availabilityCount,
+  });
 
-if (!isLoading && dayBlocks.isNotEmpty)
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Operational diary',
+            style: TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            date,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _DiaryMetric(label: 'Bookings', value: bookingCount),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _DiaryMetric(label: 'Pending', value: pendingCount),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _DiaryMetric(
+                  label: 'Open slots',
+                  value: availabilityCount,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-  Container(
+class _DiaryMetric extends StatelessWidget {
+  final String label;
+  final int value;
 
-    margin:
-        const EdgeInsets.only(
-      bottom: 20,
-    ),
+  const _DiaryMetric({required this.label, required this.value});
 
-    child: Column(
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value.toString(),
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+class _DiarySectionTitle extends StatelessWidget {
+  final String title;
+  final String subtitle;
 
+  const _DiarySectionTitle({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-
-        const Text(
-
-          'Staff Time Off',
-
-          style: TextStyle(
+        Text(
+          title,
+          style: const TextStyle(
+            color: AppColors.charcoal,
             fontSize: 18,
-            fontWeight:
-                FontWeight.bold,
+            fontWeight: FontWeight.w900,
           ),
         ),
-
-        const SizedBox(height: 12),
-
-        ...dayBlocks.map((doc) {
-
-          final data =
-              doc.data()
-                  as Map<String, dynamic>;
-
-          final staffName =
-              data['staffName']
-                  ?? 'Staff';
-
-          final type =
-              data['type']
-                  ?? 'blocked';
-
-          final reason =
-              data['reason']
-                  ?? '';
-
-          Color color;
-
-          switch (type) {
-
-            case 'holiday':
-              color = Colors.purple;
-              break;
-
-            case 'sick':
-              color = Colors.red;
-              break;
-
-            case 'training':
-              color = Colors.indigo;
-              break;
-
-            default:
-              color = Colors.orange;
-          }
-
-          return Card(
-
-            child: ListTile(
-
-              leading: CircleAvatar(
-
-                backgroundColor: color,
-
-                child: const Icon(
-                  Icons.block,
-                  color: Colors.white,
-                ),
-              ),
-
-              title: Text(staffName),
-
-              subtitle: Text(
-                type.toUpperCase(),
-              ),
-
-              trailing:
-                  reason.isEmpty
-                      ? null
-                      : Text(reason),
-            ),
-          );
-        }),
+        const SizedBox(height: 3),
+        Text(
+          subtitle,
+          style: const TextStyle(color: AppColors.textMuted, height: 1.3),
+        ),
       ],
-    ),
-  ),
+    );
+  }
+}
 
-            if (isLoading)
-              const Expanded(
-                child: Center(
-                  child:
-                      CircularProgressIndicator(),
-                ),
-              ),
+class _BookingDiaryCard extends StatelessWidget {
+  final String bookingId;
+  final Map<String, dynamic> booking;
+  final String Function(Timestamp?) formatTime;
 
-            if (!isLoading && bookings.isEmpty)
-              const Expanded(
-                child: Center(
-                  child: Text(
-                    'No bookings for this day',
+  const _BookingDiaryCard({
+    required this.bookingId,
+    required this.booking,
+    required this.formatTime,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final serviceName = safeText(booking['serviceName'], 'Service');
+    final customerName = safeText(booking['customerName'], 'Customer');
+    final startDate = booking['startDate'] as Timestamp?;
+    final endDate = booking['endDate'] as Timestamp?;
+    final status = safeText(booking['status'], 'unknown');
+    final price = formatPrice(booking['price']);
+
+    return _DiaryCard(
+      icon: Icons.event_available_outlined,
+      color: AppColors.primary,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BusinessBookingDetailScreen(bookingId: bookingId),
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  serviceName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.charcoal,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              BookingStatusChip(status: status, compact: true),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$customerName • ${formatTime(startDate)} - ${formatTime(endDate)}',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            price,
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-            if (!isLoading && bookings.isNotEmpty)
-              Expanded(
+class _AvailabilityDiaryCard extends StatelessWidget {
+  final String postId;
+  final Map<String, dynamic> post;
+  final String Function(Timestamp?) formatTime;
+  final Future<void> Function() onChanged;
 
-                child: ListView.builder(
+  const _AvailabilityDiaryCard({
+    required this.postId,
+    required this.post,
+    required this.formatTime,
+    required this.onChanged,
+  });
 
-                  itemCount: bookings.length,
-
-                  itemBuilder: (context, index) {
-
-                    final booking =
-                        bookings[index]
-                            .data()
-                            as Map<String, dynamic>;
-
-                    final status =
-                        booking['status'] ?? '';
-
-                    final serviceName =
-                        booking['serviceName']
-                        ?? 'Service';
-
-                    final customerName =
-                        booking['customerName']
-                        ?? 'Customer';
-
-                    final staffName =
-                        booking['staffName']
-                        ?? 'Staff';
-
-                    final startDate =
-                        booking['startDate']
-                        as Timestamp;
-
-                    final endDate =
-                        booking['endDate']
-                        as Timestamp;
-
-                    final price =
-                        booking['price'] ?? 0;
-
-                    final pounds =
-                        (price as num) / 100;
-
-                    return Card(
-
-                      margin:
-                          const EdgeInsets.only(
-                            bottom: 12,
-                          ),
-
-                      child: ListTile(
-
-                        contentPadding:
-                            const EdgeInsets.all(16),
-
-                        leading: CircleAvatar(
-
-                          backgroundColor:
-                              statusColor(status),
-
-                          child: Text(
-                            formatTime(startDate),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-
-                        title: Text(
-                          serviceName,
-                          style: const TextStyle(
-                            fontWeight:
-                                FontWeight.bold,
-                          ),
-                        ),
-
-                        subtitle: Padding(
-
-                          padding:
-                              const EdgeInsets.only(
-                                top: 8,
-                              ),
-
-                          child: Column(
-
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-
-                            children: [
-
-                              Text(
-                                'Customer: $customerName',
-                              ),
-
-                              Text(
-                                'Staff: $staffName',
-                              ),
-
-                              Text(
-                                '${formatTime(startDate)} - ${formatTime(endDate)}',
-                              ),
-
-                              Text(
-                                '£${pounds.toStringAsFixed(2)}',
-                              ),
-
-                              const SizedBox(height: 6),
-
-                              Container(
-
-                                padding:
-                                    const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-
-                                decoration: BoxDecoration(
-
-                                  color:
-                                      statusColor(status)
-                                          .withOpacity(0.15),
-
-                                  borderRadius:
-                                      BorderRadius.circular(20),
-                                ),
-
-                                child: Text(
-
-                                  status.replaceAll('_', ' '),
-
-                                  style: TextStyle(
-                                    color:
-                                        statusColor(status),
-                                    fontWeight:
-                                        FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        onTap: () {
-
-                          // NEXT:
-                          // Booking detail screen
-                        },
-                      ),
-                    );
-                  },
-                ),
-              ),
+  Future<void> _removeAvailability(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Remove availability?'),
+          content: const Text(
+            'This removes the available time from LocalLink discovery. Existing bookings are not changed.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove'),
+            ),
           ],
+        );
+      },
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('availabilityPosts')
+          .doc(postId)
+          .set({
+            'isActive': false,
+            'archived': true,
+            'archivedReason': 'removed_by_business',
+            'updatedAt': FieldValue.serverTimestamp(),
+            'archivedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+      await onChanged();
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('We could not remove that time.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final serviceName = safeText(post['serviceName'], 'Service');
+    final start = post['startTime'] as Timestamp?;
+    final end = post['endTime'] as Timestamp?;
+    final type = safeText(
+      post['type'] ?? post['availabilityType'],
+      'available',
+    );
+    final capacity = post['remainingCapacity'] ?? post['capacity'];
+
+    return _DiaryCard(
+      icon: Icons.campaign_outlined,
+      color: AppColors.serviceGreen,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            serviceName,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${formatTime(start)} - ${formatTime(end)} • ${type.replaceAll('_', ' ')}',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (capacity != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '$capacity space${capacity == 1 ? '' : 's'} still available',
+              style: const TextStyle(
+                color: AppColors.serviceGreen,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => _removeAvailability(context),
+              icon: const Icon(Icons.remove_circle_outline),
+              label: const Text('Remove'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BlockedTimeCard extends StatelessWidget {
+  final Map<String, dynamic> block;
+
+  const _BlockedTimeCard({required this.block});
+
+  @override
+  Widget build(BuildContext context) {
+    final type = safeText(block['type'], 'blocked');
+    final reason = safeText(block['reason'], '');
+
+    return _DiaryCard(
+      icon: Icons.block_outlined,
+      color: AppColors.warning,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            type.replaceAll('_', ' '),
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              reason,
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DiaryCard extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final Widget child;
+  final VoidCallback? onTap;
+
+  const _DiaryCard({
+    required this.icon,
+    required this.color,
+    required this.child,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: child),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+class _DiaryEmpty extends StatelessWidget {
+  final VoidCallback onPostAvailability;
+
+  const _DiaryEmpty({required this.onPostAvailability});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 54),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.event_note_outlined,
+            size: 54,
+            color: AppColors.serviceGreen,
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Nothing scheduled for this day',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Bookings, pending requests, blocked time and unfilled availability will appear here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.textMuted, height: 1.35),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: onPostAvailability,
+            icon: const Icon(Icons.campaign_outlined),
+            label: const Text('Post availability'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiaryLoading extends StatelessWidget {
+  const _DiaryLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 54),
+      child: Column(
+        children: [
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          SizedBox(height: 14),
+          Text(
+            'Checking your diary...',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

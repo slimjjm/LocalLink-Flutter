@@ -6,26 +6,18 @@ import 'business_home_screen.dart';
 import 'login_screen.dart';
 
 class ClaimBusinessScreen extends StatefulWidget {
-
-  const ClaimBusinessScreen({
-    super.key,
-  });
+  const ClaimBusinessScreen({super.key});
 
   @override
-  State<ClaimBusinessScreen> createState() =>
-      _ClaimBusinessScreenState();
+  State<ClaimBusinessScreen> createState() => _ClaimBusinessScreenState();
 }
 
-class _ClaimBusinessScreenState
-    extends State<ClaimBusinessScreen> {
-
+class _ClaimBusinessScreenState extends State<ClaimBusinessScreen> {
   // =====================================================
   // CONTROLLERS
   // =====================================================
 
-  final TextEditingController
-      claimCodeController =
-          TextEditingController();
+  final TextEditingController claimCodeController = TextEditingController();
 
   // =====================================================
   // STATE
@@ -45,18 +37,13 @@ class _ClaimBusinessScreenState
   // =====================================================
 
   Future<void> searchBusiness() async {
-
-    final code =
-        claimCodeController.text
-            .trim()
-            .toUpperCase();
+    final code = claimCodeController.text.trim().toUpperCase();
 
     if (code.isEmpty) {
       return;
     }
 
     setState(() {
-
       isLoading = true;
 
       errorMessage = null;
@@ -67,49 +54,33 @@ class _ClaimBusinessScreenState
     });
 
     try {
-
-      final snapshot =
-          await FirebaseFirestore.instance
-              .collection('businesses')
-              .where(
-                'claimCode',
-                isEqualTo: code,
-              )
-              .limit(1)
-              .get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('businesses')
+          .where('claimCode', isEqualTo: code)
+          .limit(1)
+          .get();
 
       if (snapshot.docs.isEmpty) {
-
         setState(() {
-
-          errorMessage =
-              'No business found for that code.';
+          errorMessage = 'No business found for that code.';
         });
 
         return;
       }
 
-      final doc =
-          snapshot.docs.first;
+      final doc = snapshot.docs.first;
 
       final data = doc.data();
 
       setState(() {
-
         businessData = data;
         businessId = doc.id;
       });
-
     } catch (e) {
-
       setState(() {
-
-        errorMessage =
-            'Failed to search business.';
+        errorMessage = 'Failed to search business.';
       });
-
     } finally {
-
       setState(() {
         isLoading = false;
       });
@@ -121,40 +92,29 @@ class _ClaimBusinessScreenState
   // =====================================================
 
   Future<void> claimBusiness() async {
-
-    final user =
-        FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     // =====================================================
     // LOGIN REQUIRED
     // =====================================================
 
-    if (user == null ||
-        user.isAnonymous) {
-
+    if (user == null || user.isAnonymous) {
       if (!mounted) return;
 
       Navigator.push(
-
         context,
 
-        MaterialPageRoute(
-
-          builder: (_) =>
-              const LoginScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
 
       return;
     }
 
-    if (businessId == null ||
-        businessData == null) {
+    if (businessId == null || businessData == null) {
       return;
     }
 
     setState(() {
-
       isLoading = true;
 
       errorMessage = null;
@@ -162,54 +122,35 @@ class _ClaimBusinessScreenState
     });
 
     try {
+      final ref = FirebaseFirestore.instance
+          .collection('businesses')
+          .doc(businessId);
 
-      final ref =
-          FirebaseFirestore.instance
-              .collection('businesses')
-              .doc(businessId);
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
 
-      await FirebaseFirestore.instance
-          .runTransaction((transaction) async {
+        final data = snapshot.data() ?? {};
 
-        final snapshot =
-            await transaction.get(ref);
+        final ownerId = data['ownerId'] ?? '';
 
-        final data =
-            snapshot.data() ?? {};
+        final claimEmail = (data['claimEmail'] ?? '').toString().toLowerCase();
 
-        final ownerId =
-            data['ownerId'] ?? '';
-
-        final claimEmail =
-            (data['claimEmail'] ?? '')
-                .toString()
-                .toLowerCase();
-
-        final userEmail =
-            (user.email ?? '')
-                .toLowerCase();
+        final userEmail = (user.email ?? '').toLowerCase();
 
         // =========================================
         // ALREADY CLAIMED
         // =========================================
 
         if (ownerId.toString().isNotEmpty) {
-
-          throw Exception(
-            'This business has already been claimed.',
-          );
+          throw Exception('This business has already been claimed.');
         }
 
         // =========================================
         // EMAIL CHECK
         // =========================================
 
-        if (claimEmail.isNotEmpty &&
-            claimEmail != userEmail) {
-
-          throw Exception(
-            'This business was assigned to a different email.',
-          );
+        if (claimEmail.isNotEmpty && claimEmail != userEmail) {
+          throw Exception('This business was assigned to a different email.');
         }
 
         // =========================================
@@ -217,16 +158,13 @@ class _ClaimBusinessScreenState
         // =========================================
 
         transaction.update(ref, {
-
           'ownerId': user.uid,
 
           'isClaimed': true,
 
-          'claimedAt':
-              FieldValue.serverTimestamp(),
+          'claimedAt': FieldValue.serverTimestamp(),
 
-          'claimEmail':
-              FieldValue.delete(),
+          'claimEmail': FieldValue.delete(),
         });
       });
 
@@ -240,59 +178,40 @@ class _ClaimBusinessScreenState
           .collection('staff')
           .doc(user.uid)
           .set({
+            'name': 'Owner',
 
-        'name': 'Owner',
+            'email': user.email,
 
-        'email': user.email,
+            'isActive': true,
 
-        'isActive': true,
+            'seatRank': 0,
 
-        'seatRank': 0,
-
-        'createdAt':
-            FieldValue.serverTimestamp(),
-      });
+            'createdAt': FieldValue.serverTimestamp(),
+          });
 
       setState(() {
-
-        successMessage =
-            'Business claimed successfully 🎉';
+        successMessage = 'Business claimed successfully 🎉';
       });
 
       if (!mounted) return;
 
-      Future.delayed(
-        const Duration(milliseconds: 700),
-        () {
+      Future.delayed(const Duration(milliseconds: 700), () {
+        Navigator.pushReplacement(
+          context,
 
-          Navigator.pushReplacement(
-
-            context,
-
-            MaterialPageRoute(
-
-              builder: (_) =>
-                  BusinessHomeScreen(
-                businessId: businessId!,
-              ),
-            ),
-          );
-        },
-      );
-
-    } catch (e) {
+          MaterialPageRoute(
+            builder: (_) => BusinessHomeScreen(businessId: businessId!),
+          ),
+        );
+      });
+    } catch (_) {
+      if (!mounted) return;
 
       setState(() {
-
         errorMessage =
-            e.toString().replaceAll(
-                  'Exception: ',
-                  '',
-                );
+            'We could not claim this business. Please check the details and try again.';
       });
-
     } finally {
-
       setState(() {
         isLoading = false;
       });
@@ -305,62 +224,41 @@ class _ClaimBusinessScreenState
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
-
-      appBar: AppBar(
-        title: const Text(
-          'Claim Business',
-        ),
-      ),
+      appBar: AppBar(title: const Text('Claim Business')),
 
       body: SingleChildScrollView(
-
         padding: const EdgeInsets.all(20),
 
         child: Column(
-
-          crossAxisAlignment:
-              CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
 
           children: [
-
             const SizedBox(height: 20),
 
             // =================================================
             // HEADER
             // =================================================
-
-            const Icon(
-              Icons.business,
-              size: 70,
-            ),
+            const Icon(Icons.business, size: 70),
 
             const SizedBox(height: 20),
 
             const Text(
-
               'Claim your business',
 
               textAlign: TextAlign.center,
 
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
             ),
 
             const SizedBox(height: 10),
 
             const Text(
-
               'Enter the claim code provided by LocalLink.',
 
               textAlign: TextAlign.center,
 
-              style: TextStyle(
-                fontSize: 16,
-              ),
+              style: TextStyle(fontSize: 16),
             ),
 
             const SizedBox(height: 40),
@@ -368,21 +266,15 @@ class _ClaimBusinessScreenState
             // =================================================
             // CLAIM CODE
             // =================================================
-
             TextField(
+              controller: claimCodeController,
 
-              controller:
-                  claimCodeController,
-
-              textCapitalization:
-                  TextCapitalization.characters,
+              textCapitalization: TextCapitalization.characters,
 
               decoration: const InputDecoration(
-
                 labelText: 'Claim Code',
 
-                border:
-                    OutlineInputBorder(),
+                border: OutlineInputBorder(),
               ),
             ),
 
@@ -391,22 +283,12 @@ class _ClaimBusinessScreenState
             // =================================================
             // SEARCH
             // =================================================
-
             ElevatedButton(
+              onPressed: isLoading ? null : searchBusiness,
 
-              onPressed:
-                  isLoading
-                      ? null
-                      : searchBusiness,
-
-              child:
-                  isLoading
-
-                      ? const CircularProgressIndicator()
-
-                      : const Text(
-                          'Find Business',
-                        ),
+              child: isLoading
+                  ? const CircularProgressIndicator()
+                  : const Text('Find Business'),
             ),
 
             const SizedBox(height: 20),
@@ -414,28 +296,21 @@ class _ClaimBusinessScreenState
             // =================================================
             // ERROR
             // =================================================
-
             if (errorMessage != null)
-
               Container(
-
-                padding:
-                    const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(14),
 
                 decoration: BoxDecoration(
                   color: Colors.red,
-                  borderRadius:
-                      BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
 
                 child: Text(
-
                   errorMessage!,
 
                   style: const TextStyle(
                     color: Colors.white,
-                    fontWeight:
-                        FontWeight.bold,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
@@ -443,28 +318,21 @@ class _ClaimBusinessScreenState
             // =================================================
             // SUCCESS
             // =================================================
-
             if (successMessage != null)
-
               Container(
-
-                padding:
-                    const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(14),
 
                 decoration: BoxDecoration(
                   color: Colors.green,
-                  borderRadius:
-                      BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
 
                 child: Text(
-
                   successMessage!,
 
                   style: const TextStyle(
                     color: Colors.white,
-                    fontWeight:
-                        FontWeight.bold,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
@@ -472,75 +340,48 @@ class _ClaimBusinessScreenState
             // =================================================
             // BUSINESS RESULT
             // =================================================
-
             if (businessData != null) ...[
-
               const SizedBox(height: 30),
 
               Container(
-
-                padding:
-                    const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(20),
 
                 decoration: BoxDecoration(
-
                   color: Colors.grey.shade100,
 
-                  borderRadius:
-                      BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(16),
                 ),
 
                 child: Column(
-
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
 
                   children: [
-
                     Text(
-
-                      businessData!['businessName']
-                          ?? 'Business',
+                      businessData!['businessName'] ?? 'Business',
 
                       style: const TextStyle(
                         fontSize: 24,
-                        fontWeight:
-                            FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
                     const SizedBox(height: 8),
 
-                    Text(
-                      businessData!['category']
-                              ?.toString() ??
-                          '',
-                    ),
+                    Text(businessData!['category']?.toString() ?? ''),
 
                     const SizedBox(height: 4),
 
-                    Text(
-                      businessData!['address']
-                              ?.toString() ??
-                          '',
-                    ),
+                    Text(businessData!['address']?.toString() ?? ''),
 
                     const SizedBox(height: 20),
 
                     SizedBox(
-
                       width: double.infinity,
 
                       child: ElevatedButton(
+                        onPressed: isLoading ? null : claimBusiness,
 
-                        onPressed:
-                            isLoading
-                                ? null
-                                : claimBusiness,
-
-                        child: const Text(
-                          'Claim This Business',
-                        ),
+                        child: const Text('Claim This Business'),
                       ),
                     ),
                   ],
