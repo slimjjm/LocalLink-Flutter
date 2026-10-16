@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /stripe-return
+Disallow: /stripe-refresh
+Disallow: /*?mode=
+Disallow: /*?oobCode=
+
+Sitemap: https://locallinkapp.co.uk/sitemap.xml

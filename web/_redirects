@@ -1,6 +1,9 @@
 /.well-known/apple-app-site-association  /.well-known/apple-app-site-association  200
 /.well-known/assetlinks.json  /.well-known/assetlinks.json  200
 
+/download  /download/index.html  200
+/download/  /download/index.html  200
+
 /privacy  /privacy/index.html  200
 /privacy/  /privacy/index.html  200
 /terms  /terms/index.html  200
@@ -15,5 +18,9 @@
 /availability/*  /index.html  200
 /businesses/*  /index.html  200
 /services/*  /index.html  200
+/service-requests/*  /index.html  200
+/invitations/organisation/*  /index.html  200
+/stripe-return/*  /index.html  200
+/stripe-refresh/*  /index.html  200
 
 /*  /index.html  200

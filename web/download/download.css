@@ -1,0 +1,22 @@
+/* Uses the shared static-page typography and LocalLink app colour palette. */
+body { background: #f9f6f2; color: #1e1e1e; }
+.download-page { width: min(560px, calc(100% - 36px)); margin: 0 auto; padding: 28px 0 24px; }
+.brand { font-size: 23px; letter-spacing: -.6px; }
+.brand img { width: 44px; height: 44px; border-radius: 12px; }
+.download-card { margin-top: 24px; padding: clamp(22px, 5vw, 40px); background: #fffcf8; border: 1px solid #e6e1da; border-radius: 28px; box-shadow: 0 12px 36px #1e1e1e06; }
+.eyebrow { margin: 0 0 18px; color: #b8522f; font-size: 12px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; }
+h1 { font-size: clamp(32px, 7.5vw, 48px); line-height: 1.08; letter-spacing: -1.6px; }
+.intro { margin: 18px 0 26px; color: #6f6f6f; line-height: 1.6; }
+h2 { margin: 0 0 16px; font-size: 21px; letter-spacing: -.5px; }
+.store-buttons { display: flex; flex-direction: column; gap: 12px; }
+.store-button { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 14px 18px; border: 1px solid #1e1e1e; border-radius: 16px; background: #1e1e1e; color: #fff; text-decoration: none; font-size: 16px; font-weight: 700; line-height: 1.3; }
+.store-button svg { width: 25px; height: 25px; flex: 0 0 25px; }
+.arrow { margin-left: auto; color: #f26a2e; font-size: 23px; }
+.store-button:hover { background: #34302c; }
+a:focus-visible { outline: 3px solid #b8522f; outline-offset: 4px; }
+.download-note { margin: 16px 0 0; color: #6f6f6f; font-size: 13px; }
+footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 24px; color: #6f6f6f; font-size: 12px; }
+footer nav { display: flex; gap: 16px; }
+footer a { color: #6f6f6f; font-weight: 500; }
+@media (min-width: 768px) { .download-page { padding-top: 64px; } }
+@media (max-width: 360px), (max-height: 700px) { .download-page { padding-top: 16px; } .download-card { margin-top: 16px; padding: 22px; } .eyebrow { margin-bottom: 12px; } .intro { margin: 14px 0 20px; } footer { margin-top: 18px; } }

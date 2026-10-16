@@ -1,11 +1,11 @@
 {
-    "name": "locallink_flutter",
-    "short_name": "locallink_flutter",
+    "name": "LocalLink",
+    "short_name": "LocalLink",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F9F6F2",
+    "theme_color": "#F26A2E",
+    "description": "Discover local businesses, services, activities, community help and last-minute appointment availability near you with LocalLink.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -1,0 +1,5 @@
+# Cloudflare Pages static deploy configuration.
+# LocalLink's repo-root `functions/` directory is Firebase Cloud Functions,
+# not Cloudflare Pages Functions. The Pages output is Flutter's `build/web`.
+name = "locallink"
+pages_build_output_dir = "build/web"

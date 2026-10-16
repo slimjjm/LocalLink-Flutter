@@ -9,7 +9,11 @@
           "/opportunities/*",
           "/availability/*",
           "/businesses/*",
-          "/services/*"
+          "/services/*",
+          "/service-requests/*",
+          "/invitations/organisation/*",
+          "/stripe-return",
+          "/stripe-refresh"
         ]
       }
     ]

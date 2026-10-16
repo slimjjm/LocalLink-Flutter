@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en-GB">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -19,10 +19,27 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="LocalLink helps people discover nearby activities, services, availability and community help.">
+  <meta name="description" content="Discover local businesses, services, activities, community help and last-minute appointment availability near you with LocalLink.">
+  <meta name="theme-color" content="#F26A2E">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://locallinkapp.co.uk/">
+
+  <meta property="og:title" content="LocalLink | Find Local Services, Activities & Availability Near You">
+  <meta property="og:description" content="Discover local businesses, services, activities, community help and last-minute appointment availability near you with LocalLink.">
+  <meta property="og:url" content="https://locallinkapp.co.uk/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="LocalLink">
+  <meta property="og:image" content="https://locallinkapp.co.uk/icons/Icon-512.png">
+  <meta property="og:locale" content="en_GB">
+
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="LocalLink | Find Local Services, Activities & Availability Near You">
+  <meta name="twitter:description" content="Discover local businesses, services, activities, community help and last-minute appointment availability near you with LocalLink.">
+  <meta name="twitter:image" content="https://locallinkapp.co.uk/icons/Icon-512.png">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-itunes-app" content="app-id=6757247743">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="LocalLink">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -30,8 +47,36 @@
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>LocalLink</title>
+  <title>LocalLink | Find Local Services, Activities & Availability Near You</title>
   <link rel="manifest" href="manifest.json">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://locallinkapp.co.uk/#organization",
+          "name": "LocalLink",
+          "url": "https://locallinkapp.co.uk/",
+          "logo": "https://locallinkapp.co.uk/icons/Icon-512.png",
+          "sameAs": [
+            "https://apps.apple.com/gb/app/locallink/id6757247743"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://locallinkapp.co.uk/#website",
+          "name": "LocalLink",
+          "url": "https://locallinkapp.co.uk/",
+          "description": "Discover local businesses, services, activities, community help and last-minute appointment availability near you with LocalLink.",
+          "publisher": {
+            "@id": "https://locallinkapp.co.uk/#organization"
+          }
+        }
+      ]
+    }
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyArlHe9g6GqxOwrHcir3o2X6fGC31z2hTo"></script>
 </head>
 <body>
   <!--

@@ -1,0 +1,15 @@
+# Cloudflare Pages deploys only Flutter web output.
+# The repo-root functions/ directory is Firebase Cloud Functions and must never
+# be uploaded or bundled as Cloudflare Pages Functions.
+functions/**
+functions
+
+# Native app sources and local build state are not part of the static Pages site.
+android/**
+ios/**
+macos/**
+windows/**
+linux/**
+.dart_tool/**
+.firebase/**
+.wrangler/**
