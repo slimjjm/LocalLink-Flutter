@@ -1,12 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+
+import 'analytics_service.dart';
+import 'notification_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -21,6 +25,11 @@ class AuthService {
 
       password: password.trim(),
     );
+    await LocalLinkAnalytics.instance.logLogin(method: 'email');
+  }
+
+  Future<void> sendPasswordResetEmail({required String email}) async {
+    await _auth.sendPasswordResetEmail(email: email.trim());
   }
 
   // =====================================================
@@ -61,6 +70,7 @@ class AuthService {
 
           'createdAt': Timestamp.now(),
         });
+    await LocalLinkAnalytics.instance.logSignUp(method: 'email');
   }
 
   // =====================================================
@@ -73,9 +83,22 @@ class AuthService {
         ..addScope('email')
         ..addScope('profile');
 
-      final userCredential = await _auth.signInWithPopup(provider);
-      await _ensureUserDocument(userCredential.user);
-      return userCredential;
+      var stage = 'popup';
+      try {
+        final userCredential = await _auth.signInWithPopup(provider);
+        stage = 'ensure-user-document';
+        await _ensureUserDocument(userCredential.user);
+        await _logAuthSuccess(userCredential, method: 'google');
+        return userCredential;
+      } catch (error, stackTrace) {
+        _logWebAuthFailure(
+          provider: 'Google',
+          stage: stage,
+          error: error,
+          stackTrace: stackTrace,
+        );
+        rethrow;
+      }
     }
 
     final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
@@ -96,6 +119,7 @@ class AuthService {
     final userCredential = await _auth.signInWithCredential(credential);
 
     await _ensureUserDocument(userCredential.user);
+    await _logAuthSuccess(userCredential, method: 'google');
 
     return userCredential;
   }
@@ -129,9 +153,24 @@ class AuthService {
         ..addScope('email')
         ..addScope('name');
 
-      final userCredential = await _auth.signInWithPopup(provider);
-      await _ensureUserDocument(userCredential.user);
-      return userCredential;
+      var stage = 'set-local-persistence';
+      try {
+        await _auth.setPersistence(Persistence.LOCAL);
+        stage = 'popup';
+        final userCredential = await _auth.signInWithPopup(provider);
+        stage = 'ensure-user-document';
+        await _ensureUserDocument(userCredential.user);
+        await _logAuthSuccess(userCredential, method: 'apple');
+        return userCredential;
+      } catch (error, stackTrace) {
+        _logWebAuthFailure(
+          provider: 'Apple',
+          stage: stage,
+          error: error,
+          stackTrace: stackTrace,
+        );
+        rethrow;
+      }
     }
 
     final rawNonce = _generateNonce();
@@ -171,8 +210,20 @@ class AuthService {
     }
 
     await _ensureUserDocument(userCredential.user, name: fullName);
+    await _logAuthSuccess(userCredential, method: 'apple');
 
     return userCredential;
+  }
+
+  Future<void> _logAuthSuccess(
+    UserCredential credential, {
+    required String method,
+  }) async {
+    if (credential.additionalUserInfo?.isNewUser == true) {
+      await LocalLinkAnalytics.instance.logSignUp(method: method);
+    } else {
+      await LocalLinkAnalytics.instance.logLogin(method: method);
+    }
   }
 
   Future<void> _ensureUserDocument(User? user, {String? name}) async {
@@ -215,6 +266,47 @@ class AuthService {
   // =====================================================
 
   Future<void> logout() async {
+    await NotificationService.shared.unregisterCurrentDevice();
     await _auth.signOut();
+  }
+}
+
+void _logWebAuthFailure({
+  required String provider,
+  required String stage,
+  required Object error,
+  required StackTrace stackTrace,
+}) {
+  if (!kIsWeb) return;
+
+  debugPrint('[$provider Web Auth] failed during $stage');
+  debugPrint('[$provider Web Auth] exception type: ${error.runtimeType}');
+
+  if (error is FirebaseAuthException) {
+    debugPrint(
+      '[$provider Web Auth] FirebaseAuthException.code: ${error.code}',
+    );
+    debugPrint(
+      '[$provider Web Auth] FirebaseAuthException.message: ${error.message}',
+    );
+  } else if (error is FirebaseException) {
+    debugPrint('[$provider Web Auth] FirebaseException.code: ${error.code}');
+    debugPrint(
+      '[$provider Web Auth] FirebaseException.message: ${error.message}',
+    );
+  } else if (error is PlatformException) {
+    debugPrint('[$provider Web Auth] PlatformException.code: ${error.code}');
+    debugPrint(
+      '[$provider Web Auth] PlatformException.message: ${error.message}',
+    );
+    debugPrint(
+      '[$provider Web Auth] PlatformException.details: ${error.details}',
+    );
+  } else {
+    debugPrint('[$provider Web Auth] error: $error');
+  }
+
+  if (kDebugMode) {
+    debugPrint('[$provider Web Auth] stack trace: $stackTrace');
   }
 }

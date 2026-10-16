@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../services/analytics_service.dart';
+import '../services/booking_visibility_service.dart';
 import '../widgets/booking_message_button.dart';
 import '../widgets/booking_status_chip.dart';
 
@@ -41,13 +43,15 @@ class _BusinessBookingDetailScreenState
     });
 
     try {
-      await FirebaseFirestore.instance
-          .collection('bookings')
-          .doc(widget.bookingId)
-          .update({
-            'status': 'completed',
-            'completedAt': FieldValue.serverTimestamp(),
-          });
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'completeBooking',
+      );
+
+      await callable.call({'bookingId': widget.bookingId});
+
+      await LocalLinkAnalytics.instance.bookingCancelled(
+        source: 'business_booking_detail',
+      );
 
       if (!mounted) return;
 
@@ -302,14 +306,15 @@ class _BusinessBookingDetailScreenState
           final paymentMethod = data['paymentMethod'] ?? 'Unknown';
 
           final status = data['status'] ?? 'unknown';
+          final displayStatus = bookingDisplayStatus(data, DateTime.now());
 
           final duration = data['durationMinutes'];
 
           final startTime =
               (data['startDate'] ?? data['startTime']) as Timestamp?;
 
-          final canManage =
-              status == 'confirmed' || status == 'pending_payment';
+          final canComplete = canCompleteBookingFromUi(data);
+          final canCancel = canCancelBookingFromUi(data, DateTime.now());
 
           final canConfirmShortNotice =
               status == 'pending_business_confirmation';
@@ -345,7 +350,7 @@ class _BusinessBookingDetailScreenState
 
                 const SizedBox(height: 16),
 
-                BookingStatusChip(status: status),
+                BookingStatusChip(status: displayStatus),
 
                 const SizedBox(height: 30),
 
@@ -461,45 +466,48 @@ class _BusinessBookingDetailScreenState
                   const SizedBox(height: 12),
                 ],
 
-                if (canManage) ...[
-                  SizedBox(
-                    width: double.infinity,
+                if (canComplete || canCancel) ...[
+                  if (canComplete) ...[
+                    SizedBox(
+                      width: double.infinity,
 
-                    child: ElevatedButton(
-                      onPressed: isUpdating ? null : markCompleted,
+                      child: ElevatedButton(
+                        onPressed: isUpdating ? null : markCompleted,
 
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                        ),
+
+                        child: isUpdating
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('Mark Completed'),
                       ),
-
-                      child: isUpdating
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Mark Completed'),
                     ),
-                  ),
 
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
 
-                  SizedBox(
-                    width: double.infinity,
+                  if (canCancel)
+                    SizedBox(
+                      width: double.infinity,
 
-                    child: ElevatedButton(
-                      onPressed: isUpdating ? null : cancelBooking,
+                      child: ElevatedButton(
+                        onPressed: isUpdating ? null : cancelBooking,
 
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+
+                        child: const Text('Cancel Booking'),
                       ),
-
-                      child: const Text('Cancel Booking'),
                     ),
-                  ),
                 ],
 
                 const SizedBox(height: 12),

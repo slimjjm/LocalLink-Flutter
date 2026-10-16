@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 
 import 'notification_router.dart';
 
@@ -28,6 +30,7 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   String? _boundTokenUid;
+  String? _boundDeviceId;
 
   static const AndroidNotificationChannel _androidChannel =
       AndroidNotificationChannel(
@@ -43,11 +46,11 @@ class NotificationService {
     await _setupLocalNotifications();
 
     FirebaseAuth.instance.authStateChanges().listen((user) async {
-      if (_boundTokenUid != null && _boundTokenUid != user?.uid) {
-        await _removeTokenFromUser(_boundTokenUid!);
-      }
       if (user != null && !user.isAnonymous) {
         await saveFcmTokenForCurrentUser();
+      } else {
+        _boundTokenUid = null;
+        _boundDeviceId = null;
       }
     });
 
@@ -163,12 +166,43 @@ class NotificationService {
 
     if (user == null || user.isAnonymous) return;
 
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-      'fcmTokens': FieldValue.arrayUnion([token]),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    final deviceId = sha256.convert(utf8.encode(token)).toString();
+    final deviceRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('devices')
+        .doc(deviceId);
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final existing = await transaction.get(deviceRef);
+      if (existing.exists) {
+        transaction.update(deviceRef, {
+          'platform': Platform.operatingSystem,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        transaction.set(deviceRef, {
+          'token': token,
+          'platform': Platform.operatingSystem,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    });
+
+    if (_boundTokenUid == user.uid &&
+        _boundDeviceId != null &&
+        _boundDeviceId != deviceId) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('devices')
+          .doc(_boundDeviceId)
+          .delete();
+    }
 
     _boundTokenUid = user.uid;
+    _boundDeviceId = deviceId;
   }
 
   Future<String?> _waitForApnsToken() async {
@@ -180,17 +214,25 @@ class NotificationService {
     return null;
   }
 
-  Future<void> _removeTokenFromUser(String uid) async {
+  Future<void> unregisterCurrentDevice() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+
     try {
       final token = await _messaging.getToken();
       if (token == null || token.isEmpty) return;
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'fcmTokens': FieldValue.arrayRemove([token]),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      final deviceId = sha256.convert(utf8.encode(token)).toString();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('devices')
+          .doc(deviceId)
+          .delete();
+      _boundTokenUid = null;
+      _boundDeviceId = null;
     } catch (_) {
       if (kDebugMode) {
-        debugPrint('NotificationService: token cleanup failed for prior user.');
+        debugPrint('NotificationService: device token cleanup failed.');
       }
     }
   }

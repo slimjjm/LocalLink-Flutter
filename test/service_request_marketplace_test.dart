@@ -45,12 +45,13 @@ void main() {
     bool isActive = true,
     String category = 'Cleaner',
     String name = 'Home cleaning',
+    String details = 'Weekly house cleans',
   }) {
     return {
       'isActive': isActive,
       'category': category,
       'name': name,
-      'details': 'Weekly house cleans',
+      'details': details,
     };
   }
 
@@ -145,12 +146,30 @@ void main() {
       ServiceRequestMarketplace.canCreateOffer(
         request: request(category: 'Cleaner'),
         business: business(),
-        service: service(category: 'Gardener', name: 'Garden tidy'),
+        service: service(
+          category: 'Gardener',
+          name: 'Garden tidy',
+          details: 'Lawn mowing and hedge trimming',
+        ),
         businessId: 'business-1',
         customerBusinessId: null,
         now: now,
       ),
       isFalse,
+    );
+  });
+
+  test('service request can match provider service tags', () {
+    expect(
+      ServiceRequestMarketplace.isServiceMatchingRequest(
+        request: request(category: 'Dog Walker'),
+        service: {
+          'isActive': true,
+          'name': 'Pet visits',
+          'searchKeywords': ['dog walking', 'puppy care'],
+        },
+      ),
+      isTrue,
     );
   });
 
@@ -190,6 +209,31 @@ void main() {
         'longitude': -1.831234,
       }),
       'Burntwood',
+    );
+  });
+
+  test('image urls are optional and legacy tolerant', () {
+    expect(ServiceRequestMarketplace.imageUrls({}), isEmpty);
+    expect(ServiceRequestMarketplace.imageUrls({'imageUrls': null}), isEmpty);
+    expect(ServiceRequestMarketplace.imageUrls({'imageUrls': []}), isEmpty);
+  });
+
+  test('image urls keep up to three non-empty values', () {
+    expect(
+      ServiceRequestMarketplace.imageUrls({
+        'imageUrls': [
+          ' https://example.com/one.jpg ',
+          '',
+          'https://example.com/two.jpg',
+          'https://example.com/three.jpg',
+          'https://example.com/four.jpg',
+        ],
+      }),
+      [
+        'https://example.com/one.jpg',
+        'https://example.com/two.jpg',
+        'https://example.com/three.jpg',
+      ],
     );
   });
 }

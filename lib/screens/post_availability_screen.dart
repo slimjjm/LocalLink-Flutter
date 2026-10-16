@@ -6,7 +6,11 @@ import 'package:flutter/material.dart';
 
 import '../services/business_access_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import '../utils/helpers.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_states.dart';
+import '../widgets/local_link_surface_card.dart';
 import 'add_service_screen.dart';
 
 enum AvailabilityPostType { exact, window, flexible }
@@ -95,13 +99,24 @@ class _PostAvailabilityScreenState extends State<PostAvailabilityScreen> {
   }
 
   Future<void> _pickStartTime() async {
+    final previousStart = startTime;
+    final previousEnd = endTime;
     final picked = await showTimePicker(
       context: context,
       initialTime: startTime,
     );
 
     if (picked == null || !mounted) return;
-    setState(() => startTime = picked);
+    setState(() {
+      startTime = picked;
+      if (type == AvailabilityPostType.window &&
+          (previousEnd == null || !_isAfter(previousEnd, picked))) {
+        final duration = previousEnd == null
+            ? const Duration(hours: 1)
+            : _durationBetween(previousStart, previousEnd);
+        endTime = _advancedFinishTime(picked, duration);
+      }
+    });
   }
 
   Future<void> _pickEndTime() async {
@@ -113,11 +128,42 @@ class _PostAvailabilityScreenState extends State<PostAvailabilityScreen> {
     );
 
     if (picked == null || !mounted) return;
+    if (!_isAfter(picked, startTime)) {
+      setState(() {
+        endTime = _advancedFinishTime(startTime, const Duration(hours: 1));
+      });
+      _showSnack('Finish must be after Start.');
+      return;
+    }
+
     setState(() => endTime = picked);
   }
 
   DateTime _dateWithTime(DateTime date, TimeOfDay time) {
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  int _minutesOfDay(TimeOfDay time) => time.hour * 60 + time.minute;
+
+  bool _isAfter(TimeOfDay finish, TimeOfDay start) {
+    return _minutesOfDay(finish) > _minutesOfDay(start);
+  }
+
+  Duration _durationBetween(TimeOfDay start, TimeOfDay finish) {
+    final minutes = _minutesOfDay(finish) - _minutesOfDay(start);
+    return Duration(minutes: minutes > 0 ? minutes : 60);
+  }
+
+  TimeOfDay _advancedFinishTime(TimeOfDay from, Duration duration) {
+    final durationMinutes = duration.inMinutes > 0 ? duration.inMinutes : 60;
+    final minutes = (_minutesOfDay(from) + durationMinutes).clamp(
+      0,
+      23 * 60 + 59,
+    );
+    if (minutes <= _minutesOfDay(from)) {
+      return const TimeOfDay(hour: 23, minute: 59);
+    }
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
   }
 
   int? _priceInPence() {
@@ -662,32 +708,14 @@ class _PostAvailabilityScreenState extends State<PostAvailabilityScreen> {
                     ),
                   ),
                   const SizedBox(height: 22),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: isSaving ? null : () => _publish(businessData),
-                      icon: isSaving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.campaign_outlined),
-                      label: Text(
-                        isSaving
-                            ? 'Sharing your available time...'
-                            : 'Share available time',
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.serviceGreen,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        textStyle: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
+                  LocalLinkButton(
+                    label: isSaving
+                        ? 'Sharing your available time...'
+                        : 'Share available time',
+                    icon: Icons.campaign_outlined,
+                    isLoading: isSaving,
+                    onPressed: isSaving ? null : () => _publish(businessData),
+                    expand: true,
                   ),
                 ],
               );
@@ -704,39 +732,7 @@ class _PostAvailabilityLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 30,
-              height: 30,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Preparing your services...',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.charcoal,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            SizedBox(height: 6),
-            Text(
-              'This usually takes a few seconds.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return const LocalLinkLoadingState(label: 'Preparing your services...');
   }
 }
 
@@ -805,20 +801,8 @@ class _PostSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [
-          BoxShadow(
-            color: AppColors.shadow,
-            blurRadius: 18,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
+    return LocalLinkSurfaceCard(
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -830,7 +814,7 @@ class _PostSection extends StatelessWidget {
                 height: 36,
                 decoration: BoxDecoration(
                   color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(LocalLinkRadius.sm),
                 ),
                 child: Icon(icon, color: AppColors.serviceGreen, size: 20),
               ),
@@ -861,7 +845,7 @@ class _PostSection extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: LocalLinkSpacing.md),
           child,
         ],
       ),
@@ -974,32 +958,13 @@ class _PostAvailabilityMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 54, color: AppColors.serviceGreen),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.charcoal,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.textMuted),
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 16),
-              OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
-            ],
-          ],
+        padding: const EdgeInsets.all(LocalLinkSpacing.xl),
+        child: LocalLinkEmptyState(
+          icon: icon,
+          title: title,
+          message: message,
+          actionLabel: actionLabel,
+          onAction: onAction,
         ),
       ),
     );

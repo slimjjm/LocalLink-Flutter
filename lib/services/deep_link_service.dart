@@ -7,8 +7,11 @@ import 'package:flutter/material.dart';
 
 import '../screens/availability_detail_screen.dart';
 import '../screens/business_detail_screen.dart';
+import '../screens/customer_service_request_screen.dart';
+import '../screens/organisation_invitation_screen.dart';
 import '../screens/opportunity_detail_screen.dart';
 import '../screens/post_service_request_screen.dart';
+import '../screens/stripe_connect_return_screen.dart';
 
 class DeepLinkService {
   DeepLinkService._();
@@ -87,6 +90,28 @@ class DeepLinkService {
     await _openTarget(Navigator.of(context), target);
   }
 
+  Future<void> openTargetOrQueue(
+    BuildContext context,
+    LocalLinkDeepLinkTarget target,
+  ) async {
+    if (FirebaseAuth.instance.currentUser == null) {
+      _pendingTarget = target;
+      return;
+    }
+
+    await _openTarget(Navigator.of(context), target);
+  }
+
+  Future<void> openRouteTargetOrQueue(
+    BuildContext context,
+    Uri uri,
+    LocalLinkDeepLinkTarget target,
+  ) async {
+    if (_isDuplicate(uri)) return;
+
+    await openTargetOrQueue(context, target);
+  }
+
   Future<void> _openTarget(
     NavigatorState navigator,
     LocalLinkDeepLinkTarget target,
@@ -112,12 +137,47 @@ class DeepLinkService {
           ),
         );
         return;
+      case LocalLinkDeepLinkType.organisationInvitation:
+        await navigator.push(
+          MaterialPageRoute(
+            builder: (_) => OrganisationInvitationScreen(token: target.id),
+          ),
+        );
+        return;
       case LocalLinkDeepLinkType.service:
         await navigator.push(
           MaterialPageRoute(
             builder: (_) => BusinessDetailScreen(
               businessId: target.parentId,
               initialServiceId: target.id,
+            ),
+          ),
+        );
+        return;
+      case LocalLinkDeepLinkType.serviceRequest:
+        await navigator.push(
+          MaterialPageRoute(
+            builder: (_) =>
+                CustomerServiceRequestDetailScreen(requestId: target.id),
+          ),
+        );
+        return;
+      case LocalLinkDeepLinkType.stripeReturn:
+        await navigator.push(
+          MaterialPageRoute(
+            builder: (_) => StripeConnectReturnScreen(
+              businessId: target.id,
+              isRefresh: false,
+            ),
+          ),
+        );
+        return;
+      case LocalLinkDeepLinkType.stripeRefresh:
+        await navigator.push(
+          MaterialPageRoute(
+            builder: (_) => StripeConnectReturnScreen(
+              businessId: target.id,
+              isRefresh: true,
             ),
           ),
         );
@@ -191,7 +251,11 @@ enum LocalLinkDeepLinkType {
   opportunity,
   availability,
   business,
+  organisationInvitation,
   service,
+  serviceRequest,
+  stripeReturn,
+  stripeRefresh,
 }
 
 class LocalLinkDeepLinkTarget {
@@ -219,7 +283,7 @@ class LocalLinkDeepLinkTarget {
 
     if ((uri.scheme == 'https' || uri.scheme == 'http') &&
         host == 'locallinkapp.co.uk') {
-      return _fromPathSegments(segments);
+      return _fromPathSegments(segments, uri.queryParameters);
     }
 
     return null;
@@ -263,10 +327,41 @@ class LocalLinkDeepLinkTarget {
         id: segments.first,
       );
     }
+    if (host == 'service-request' && segments.isNotEmpty) {
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.serviceRequest,
+        id: segments.first,
+      );
+    }
+    if (host == 'organisation-invitation' && segments.isNotEmpty) {
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.organisationInvitation,
+        id: segments.first,
+      );
+    }
     return null;
   }
 
-  static LocalLinkDeepLinkTarget? _fromPathSegments(List<String> segments) {
+  static LocalLinkDeepLinkTarget? _fromPathSegments(
+    List<String> segments,
+    Map<String, String> queryParameters,
+  ) {
+    if (segments.length == 1 && segments.first == 'stripe-return') {
+      final businessId = queryParameters['businessId']?.trim() ?? '';
+      if (businessId.isEmpty) return null;
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.stripeReturn,
+        id: businessId,
+      );
+    }
+    if (segments.length == 1 && segments.first == 'stripe-refresh') {
+      final businessId = queryParameters['businessId']?.trim() ?? '';
+      if (businessId.isEmpty) return null;
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.stripeRefresh,
+        id: businessId,
+      );
+    }
     if (segments.length >= 2 && segments.first == 'community-help') {
       return LocalLinkDeepLinkTarget(
         type: LocalLinkDeepLinkType.communityHelp,
@@ -285,10 +380,24 @@ class LocalLinkDeepLinkTarget {
         id: segments[1],
       );
     }
+    if (segments.length >= 2 && segments.first == 'service-requests') {
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.serviceRequest,
+        id: segments[1],
+      );
+    }
     if (segments.length >= 2 && segments.first == 'businesses') {
       return LocalLinkDeepLinkTarget(
         type: LocalLinkDeepLinkType.business,
         id: segments[1],
+      );
+    }
+    if (segments.length >= 3 &&
+        segments.first == 'invitations' &&
+        segments[1] == 'organisation') {
+      return LocalLinkDeepLinkTarget(
+        type: LocalLinkDeepLinkType.organisationInvitation,
+        id: segments[2],
       );
     }
     if (segments.length >= 3 && segments.first == 'services') {

@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
+import '../utils/helpers.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_surface_card.dart';
 
 class BookingSummaryScreen extends StatelessWidget {
   const BookingSummaryScreen({
@@ -34,28 +38,24 @@ class BookingSummaryScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Booking Summary'),
+        title: const Text('Booking summary'),
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.charcoal,
+        elevation: 0,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(LocalLinkSpacing.lg),
         children: [
           const Text(
             'Review your booking',
-            style: TextStyle(
-              color: AppColors.charcoal,
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-            ),
+            style: LocalLinkTextStyles.screenTitle,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: LocalLinkSpacing.xs),
           const Text(
             'Check the details before confirming.',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontWeight: FontWeight.w600,
-            ),
+            style: LocalLinkTextStyles.secondary,
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: LocalLinkSpacing.xl),
           _SummaryCard(
             children: [
               _SummaryRow(label: 'Business', value: businessName),
@@ -75,7 +75,7 @@ class BookingSummaryScreen extends StatelessWidget {
               _SummaryRow(label: 'Address', value: address),
               _SummaryRow(
                 label: 'Payment',
-                value: paymentMethod == 'stripe' ? 'Card' : 'Cash',
+                value: paymentMethodLabel(paymentMethod),
               ),
               _SummaryRow(
                 label: 'Notes',
@@ -83,36 +83,26 @@ class BookingSummaryScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.serviceGreen.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
+          const SizedBox(height: LocalLinkSpacing.md),
+          LocalLinkSurfaceCard(
+            elevated: false,
+            color: AppColors.serviceGreen.withValues(alpha: 0.08),
+            padding: const EdgeInsets.all(LocalLinkSpacing.md),
+            child: Text(
               'Cancellation policy: you can cancel from your booking details. Refund eligibility depends on timing and payment method.',
-              style: TextStyle(
+              style: LocalLinkTextStyles.secondary.copyWith(
                 color: AppColors.charcoal,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
               ),
             ),
           ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context, true);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.serviceGreen,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: const Text('Confirm Booking'),
-            ),
+          const SizedBox(height: LocalLinkSpacing.xl),
+          LocalLinkButton(
+            label: 'Confirm booking',
+            icon: Icons.check_circle_outline_rounded,
+            expand: true,
+            onPressed: () {
+              Navigator.pop(context, true);
+            },
           ),
         ],
       ),
@@ -121,31 +111,22 @@ class BookingSummaryScreen extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.children,
-  });
+  const _SummaryCard({required this.children});
 
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
+    return LocalLinkSurfaceCard(
+      elevated: false,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
       child: Column(children: children),
     );
   }
 }
 
 class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({
-    required this.label,
-    required this.value,
-  });
+  const _SummaryRow({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -153,29 +134,15 @@ class _SummaryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.only(bottom: LocalLinkSpacing.sm),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 108,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            child: Text(label, style: LocalLinkTextStyles.metadata),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                color: AppColors.charcoal,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          Expanded(child: Text(value, style: LocalLinkTextStyles.bodyStrong)),
         ],
       ),
     );

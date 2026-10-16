@@ -162,7 +162,7 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                 const SizedBox(height: 20),
                 _DrawerAction(
                   icon: Icons.search_rounded,
-                  title: 'Find a service',
+                  title: 'Browse services',
                   subtitle: 'Book trusted local help',
                   onTap: () {
                     Navigator.push(
@@ -189,8 +189,8 @@ class _HomeActionDrawerState extends State<HomeActionDrawer> {
                 ),
                 _DrawerAction(
                   icon: Icons.volunteer_activism_outlined,
-                  title: 'Community help',
-                  subtitle: 'Lost, found and free items',
+                  title: 'Lost or found something?',
+                  subtitle: 'Pets, belongings & local alerts',
                   onTap: () {
                     Navigator.push(
                       context,

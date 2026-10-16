@@ -3,8 +3,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import '../utils/helpers.dart';
+import '../services/auth_required_action.dart';
+import '../services/booking_visibility_service.dart';
 import '../services/local_link_share_service.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_form.dart';
+import '../widgets/local_link_image.dart';
+import '../widgets/local_link_surface_card.dart';
 import 'booking_screen.dart';
 import 'business_detail_screen.dart';
 
@@ -20,35 +27,84 @@ class AvailabilityDetailScreen extends StatelessWidget {
     required this.businessData,
   });
 
-  String _dateTimeLabel(BuildContext context) {
+  DateTime? _startDate() {
+    final value =
+        availabilityData['startDateTime'] ?? availabilityData['availabilityAt'];
+    return value is Timestamp ? value.toDate() : null;
+  }
+
+  DateTime? _endDate() {
+    final value =
+        availabilityData['endDateTime'] ?? availabilityData['endTime'];
+    return value is Timestamp ? value.toDate() : null;
+  }
+
+  DateTime? _availableUntilDate() {
+    final value = availabilityData['availableUntil'];
+    return value is Timestamp ? value.toDate() : null;
+  }
+
+  String _dateLabel() {
     final type = safeText(
       availabilityData['type'] ?? availabilityData['availabilityType'],
       'exact',
     );
-    final value =
-        availabilityData['startDateTime'] ?? availabilityData['availabilityAt'];
-    if (value is! Timestamp) return 'Time to agree';
-
-    final date = value.toDate();
-    final time = TimeOfDay.fromDateTime(date).format(context);
+    final date = _startDate();
+    if (date == null) return 'Time to agree';
 
     if (type == 'flexible') {
-      final until = availabilityData['availableUntil'];
-      if (until is Timestamp) {
-        final untilDate = until.toDate();
-        return '${date.day}/${date.month}/${date.year} to ${untilDate.day}/${untilDate.month}/${untilDate.year}';
+      final untilDate = _availableUntilDate();
+      if (untilDate != null) {
+        return '${_shortDate(date)} to ${_shortDate(untilDate)}';
       }
     }
 
-    if (type == 'window') {
-      final end =
-          availabilityData['endDateTime'] ?? availabilityData['endTime'];
-      if (end is Timestamp) {
-        return '${date.day}/${date.month}/${date.year}, $time to ${TimeOfDay.fromDateTime(end.toDate()).format(context)}';
-      }
+    return '${_weekday(date)} ${date.day} ${_month(date)}';
+  }
+
+  String _timeLabel(BuildContext context) {
+    final type = safeText(
+      availabilityData['type'] ?? availabilityData['availabilityType'],
+      'exact',
+    );
+    final start = _startDate();
+    if (start == null) return 'Time to agree';
+    if (type == 'flexible') return 'Flexible timing';
+
+    final startTime = TimeOfDay.fromDateTime(start).format(context);
+    final end = _endDate();
+    if (end != null) {
+      return '$startTime - ${TimeOfDay.fromDateTime(end).format(context)}';
     }
 
-    return '${date.day}/${date.month}/${date.year} at $time';
+    return startTime;
+  }
+
+  String _shortDate(DateTime value) {
+    return '${value.day} ${_month(value)}';
+  }
+
+  String _weekday(DateTime value) {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return labels[value.weekday - 1];
+  }
+
+  String _month(DateTime value) {
+    const labels = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return labels[value.month - 1];
   }
 
   bool get _isFlexible {
@@ -60,13 +116,8 @@ class AvailabilityDetailScreen extends StatelessWidget {
   }
 
   String _buttonLabel() {
-    if (_isFlexible) return 'Ask to Book';
-    final type = safeText(
-      availabilityData['type'] ?? availabilityData['availabilityType'],
-      'exact',
-    );
-    if (type == 'window') return 'Choose a Time';
-    return 'Book This Time';
+    if (_isFlexible) return 'Ask to book';
+    return 'Choose this time';
   }
 
   Future<void> _requestFlexibleBooking(BuildContext context) async {
@@ -76,8 +127,9 @@ class AvailabilityDetailScreen extends StatelessWidget {
     if (businessId.isEmpty || serviceId.isEmpty) return;
 
     if (user == null || user.isAnonymous) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to request a booking.')),
+      await AuthRequiredAction.run(
+        context,
+        action: () => _requestFlexibleBooking(context),
       );
       return;
     }
@@ -123,12 +175,16 @@ class AvailabilityDetailScreen extends StatelessWidget {
       'Business',
     );
     final serviceName = safeText(availabilityData['serviceName'], 'Service');
-    final description = safeText(availabilityData['description'], '');
+    final description = safeText(
+      availabilityData['serviceDetails'] ??
+          availabilityData['details'] ??
+          availabilityData['description'],
+      '',
+    );
     final duration = availabilityData['durationMinutes'];
     final price = formatPrice(availabilityData['price']);
     final paymentMethods = resolvePaymentMethods(businessData);
-    final rating = businessData['averageRating'];
-    final reviewCount = businessData['reviewCount'];
+    final isUsable = isAvailabilityUsable(availabilityData, DateTime.now());
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -170,62 +226,61 @@ class AvailabilityDetailScreen extends StatelessWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(LocalLinkSpacing.lg),
         children: [
           Text(
             serviceName,
-            style: const TextStyle(
-              color: AppColors.charcoal,
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-            ),
+            style: LocalLinkTextStyles.screenTitle,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 8),
-          Text(
-            businessName,
-            style: const TextStyle(
-              color: AppColors.serviceGreen,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
+          const SizedBox(height: LocalLinkSpacing.sm),
+          _BusinessSummaryCard(
+            businessName: businessName,
+            businessData: businessData,
+            onTap: businessId.isEmpty
+                ? null
+                : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BusinessDetailScreen(businessId: businessId),
+                      ),
+                    );
+                  },
           ),
-          const SizedBox(height: 20),
-          _DetailRow(
-            icon: Icons.schedule_outlined,
-            label: _dateTimeLabel(context),
+          const SizedBox(height: LocalLinkSpacing.lg),
+          _AvailabilityHeroCard(
+            dateLabel: _dateLabel(),
+            timeLabel: _timeLabel(context),
+            durationLabel: duration == null ? null : '$duration min',
+            priceLabel: price,
+            isUsable: isUsable,
           ),
-          if (duration != null)
-            _DetailRow(icon: Icons.timer_outlined, label: '$duration minutes'),
-          _DetailRow(icon: Icons.payments_outlined, label: price),
-          const SizedBox(height: 18),
-          if (description.isNotEmpty)
-            Text(
-              description,
-              style: const TextStyle(
-                color: AppColors.charcoal,
-                fontSize: 16,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
+          if (description.isNotEmpty) ...[
+            const SizedBox(height: LocalLinkSpacing.md),
+            LocalLinkSurfaceCard(
+              elevated: false,
+              padding: const EdgeInsets.all(LocalLinkSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('About this service', style: LocalLinkTextStyles.label),
+                  const SizedBox(height: LocalLinkSpacing.xs),
+                  Text(description, style: LocalLinkTextStyles.body),
+                ],
               ),
             ),
-          const SizedBox(height: 24),
-          if (rating is num)
-            _DetailRow(
-              icon: Icons.star_rounded,
-              label:
-                  '${rating.toStringAsFixed(1)} stars from ${reviewCount ?? 0} reviews',
-            )
-          else
-            const Text(
-              'Reviews and trust signals are shown on the business profile.',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          const SizedBox(height: 28),
-          ElevatedButton(
-            onPressed: businessId.isEmpty || serviceId.isEmpty
+          ],
+          const SizedBox(height: LocalLinkSpacing.xl),
+          LocalLinkButton(
+            label: isUsable ? _buttonLabel() : 'No longer available',
+            icon: _isFlexible
+                ? Icons.chat_bubble_outline_rounded
+                : Icons.event_available_outlined,
+            expand: true,
+            onPressed: businessId.isEmpty || serviceId.isEmpty || !isUsable
                 ? null
                 : () {
                     if (_isFlexible) {
@@ -270,15 +325,13 @@ class AvailabilityDetailScreen extends StatelessWidget {
                       ),
                     );
                   },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.serviceGreen,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 15),
-            ),
-            child: Text(_buttonLabel()),
           ),
-          const SizedBox(height: 10),
-          OutlinedButton(
+          const SizedBox(height: LocalLinkSpacing.xs),
+          LocalLinkButton(
+            label: 'View business',
+            icon: Icons.storefront_outlined,
+            variant: LocalLinkButtonVariant.secondary,
+            expand: true,
             onPressed: businessId.isEmpty
                 ? null
                 : () {
@@ -290,7 +343,6 @@ class AvailabilityDetailScreen extends StatelessWidget {
                       ),
                     );
                   },
-            child: const Text('View Business'),
           ),
         ],
       ),
@@ -316,12 +368,10 @@ class AskToBookDialog extends StatefulWidget {
 
 class _AskToBookDialogState extends State<AskToBookDialog> {
   final TextEditingController _controller = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
   bool _hasSubmitted = false;
 
   @override
   void dispose() {
-    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -336,17 +386,11 @@ class _AskToBookDialogState extends State<AskToBookDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Ask to book'),
-      content: TextField(
+      content: LocalLinkFormField(
         controller: _controller,
-        focusNode: _focusNode,
-        autofocus: true,
-        minLines: 3,
         maxLines: 5,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          hintText: 'Tell the business what time would suit you.',
-        ),
-        onSubmitted: (_) => _send(),
+        label: 'Message',
+        hintText: 'Tell the business what time would suit you.',
       ),
       actions: [
         TextButton(
@@ -359,27 +403,274 @@ class _AskToBookDialogState extends State<AskToBookDialog> {
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
+class _AvailabilityHeroCard extends StatelessWidget {
+  const _AvailabilityHeroCard({
+    required this.dateLabel,
+    required this.timeLabel,
+    required this.priceLabel,
+    required this.isUsable,
+    this.durationLabel,
+  });
 
-  const _DetailRow({required this.icon, required this.label});
+  final String dateLabel;
+  final String timeLabel;
+  final String priceLabel;
+  final String? durationLabel;
+  final bool isUsable;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
+    return LocalLinkSurfaceCard(
+      elevated: true,
+      color: AppColors.elevatedSurface,
+      padding: const EdgeInsets.all(LocalLinkSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.serviceGreen),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.charcoal,
-                fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              const LocalLinkIconBadge(
+                icon: Icons.event_available_outlined,
+                color: AppColors.serviceGreen,
               ),
+              const SizedBox(width: LocalLinkSpacing.sm),
+              Expanded(
+                child: Text(
+                  isUsable ? 'Available appointment' : 'No longer available',
+                  style: LocalLinkTextStyles.label.copyWith(
+                    color: isUsable ? AppColors.serviceGreen : AppColors.error,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: LocalLinkSpacing.lg),
+          Text(
+            dateLabel,
+            style: LocalLinkTextStyles.sectionTitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: LocalLinkSpacing.xs),
+          Text(
+            timeLabel,
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 28,
+              height: 1.08,
+              fontWeight: FontWeight.w900,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: LocalLinkSpacing.md),
+          Wrap(
+            spacing: LocalLinkSpacing.sm,
+            runSpacing: LocalLinkSpacing.sm,
+            children: [
+              if (durationLabel != null)
+                _InfoPill(icon: Icons.timer_outlined, label: durationLabel!),
+              _InfoPill(
+                icon: Icons.payments_outlined,
+                label: priceLabel,
+                strong: true,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BusinessSummaryCard extends StatelessWidget {
+  const _BusinessSummaryCard({
+    required this.businessName,
+    required this.businessData,
+    this.onTap,
+  });
+
+  final String businessName;
+  final Map<String, dynamic> businessData;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = _businessImageUrl(businessData);
+    final location = safeText(
+      businessData['publicLocation'] ??
+          businessData['serviceArea'] ??
+          businessData['location'] ??
+          businessData['address'],
+      '',
+    );
+    final rating = businessData['rating'] ?? businessData['averageRating'];
+    final reviewCount = businessData['reviewCount'];
+    final verified =
+        businessData['verified'] == true ||
+        businessData['stripeChargesEnabled'] == true ||
+        businessData['chargesEnabled'] == true;
+    final claimed =
+        businessData['isClaimed'] == true ||
+        businessData['listingOwnershipStatus'] == 'claimed';
+    final trustItems = <Widget>[
+      if (rating is num)
+        _InfoPill(
+          icon: Icons.star_rounded,
+          label: reviewCount is num && reviewCount > 0
+              ? '${rating.toStringAsFixed(1)} (${reviewCount.toInt()})'
+              : rating.toStringAsFixed(1),
+        ),
+      if (verified)
+        const _InfoPill(icon: Icons.verified_rounded, label: 'Verified')
+      else if (claimed)
+        const _InfoPill(icon: Icons.storefront_outlined, label: 'Claimed'),
+    ];
+
+    return LocalLinkSurfaceCard(
+      elevated: false,
+      onTap: onTap,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _BusinessAvatar(imageUrl: imageUrl, fallbackName: businessName),
+          const SizedBox(width: LocalLinkSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  businessName,
+                  style: LocalLinkTextStyles.cardTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (location.isNotEmpty) ...[
+                  const SizedBox(height: LocalLinkSpacing.xxs),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        color: AppColors.textMuted,
+                        size: 16,
+                      ),
+                      const SizedBox(width: LocalLinkSpacing.xxs),
+                      Expanded(
+                        child: Text(
+                          location,
+                          style: LocalLinkTextStyles.metadata,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                if (trustItems.isNotEmpty) ...[
+                  const SizedBox(height: LocalLinkSpacing.xs),
+                  Wrap(
+                    spacing: LocalLinkSpacing.xs,
+                    runSpacing: LocalLinkSpacing.xs,
+                    children: trustItems,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: LocalLinkSpacing.xs),
+          const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
+        ],
+      ),
+    );
+  }
+
+  static String _businessImageUrl(Map<String, dynamic> data) {
+    final coverUrl = businessCoverImageUrl(data);
+    if (coverUrl.isNotEmpty) return coverUrl;
+    return safeText(data['logoUrl'], '');
+  }
+}
+
+class _BusinessAvatar extends StatelessWidget {
+  const _BusinessAvatar({required this.imageUrl, required this.fallbackName});
+
+  final String imageUrl;
+  final String fallbackName;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = fallbackName.trim().isEmpty
+        ? 'L'
+        : fallbackName.trim().characters.first.toUpperCase();
+
+    return Container(
+      width: 58,
+      height: 58,
+      decoration: BoxDecoration(
+        color: AppColors.serviceSoft,
+        borderRadius: BorderRadius.circular(LocalLinkRadius.md),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+      ),
+      alignment: Alignment.center,
+      child: imageUrl.isEmpty
+          ? Text(
+              initial,
+              style: const TextStyle(
+                color: AppColors.serviceGreen,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            )
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(LocalLinkRadius.md),
+              child: LocalLinkImage(
+                imageUrl: imageUrl,
+                aspectRatio: 1,
+                fallbackIcon: Icons.storefront_outlined,
+                accentColor: AppColors.serviceGreen,
+                semanticLabel: fallbackName,
+              ),
+            ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({
+    required this.icon,
+    required this.label,
+    this.strong = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LocalLinkSpacing.sm,
+        vertical: LocalLinkSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: strong ? AppColors.serviceGreen : AppColors.serviceSoft,
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: strong ? AppColors.inverseText : AppColors.serviceGreen,
+          ),
+          const SizedBox(width: LocalLinkSpacing.xxs),
+          Text(
+            label,
+            style: LocalLinkTextStyles.status.copyWith(
+              color: strong ? AppColors.inverseText : AppColors.serviceGreen,
             ),
           ),
         ],

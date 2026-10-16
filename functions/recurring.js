@@ -6,63 +6,12 @@ const {
 
 const db = admin.firestore();
 
-function addRepeatInterval(
-  date,
-  repeatType,
-) {
-
-  const nextDate =
-    new Date(date);
-
-  switch (repeatType) {
-
-    case "daily":
-      nextDate.setDate(
-        nextDate.getDate() + 1
-      );
-      return nextDate;
-
-    case "weekly":
-      nextDate.setDate(
-        nextDate.getDate() + 7
-      );
-      return nextDate;
-
-    case "fortnightly":
-      nextDate.setDate(
-        nextDate.getDate() + 14
-      );
-      return nextDate;
-
-    case "monthly":
-      nextDate.setMonth(
-        nextDate.getMonth() + 1
-      );
-      return nextDate;
-
-    default:
-      return null;
-  }
-}
-
-function isSameDay(
-  firstDate,
-  secondDate,
-) {
-
-  return (
-    firstDate.getFullYear() ===
-      secondDate.getFullYear() &&
-    firstDate.getMonth() ===
-      secondDate.getMonth() &&
-    firstDate.getDate() ===
-      secondDate.getDate()
-  );
-}
+const { addRepeatInterval, sameLocalDay, afterLocalDay, occurrenceScheduleFields } = require("./recurrence_calendar");
 
 function isCancelledDate(
   date,
   cancelledDates,
+  data = {},
 ) {
 
   return cancelledDates.some(
@@ -72,9 +21,10 @@ function isCancelledDate(
         return false;
       }
 
-      return isSameDay(
+      return sameLocalDay(
         date,
         cancelled.toDate(),
+        data,
       );
     },
   );
@@ -84,6 +34,7 @@ function calculateNextOccurrenceDate(
   currentDate,
   repeatType,
   cancelledDates,
+  data = {},
 ) {
 
   let nextDate =
@@ -99,6 +50,7 @@ function calculateNextOccurrenceDate(
       addRepeatInterval(
         nextDate,
         repeatType,
+        data,
       );
 
     if (!nextDate) {
@@ -109,6 +61,7 @@ function calculateNextOccurrenceDate(
       !isCancelledDate(
         nextDate,
         cancelledDates,
+        data,
       )
     ) {
       return nextDate;
@@ -159,6 +112,7 @@ async function createNextOccurrence(
       const nextOpportunity = {
 
         ...latestData,
+        ...occurrenceScheduleFields(latestData, nextDate),
 
         eventDate:
           admin.firestore.Timestamp.fromDate(
@@ -250,6 +204,7 @@ async function skipNextOccurrence(
       transaction.update(
         currentRef,
         {
+          ...occurrenceScheduleFields(latestData, nextDate),
           eventDate:
             admin.firestore.Timestamp.fromDate(
               nextDate,
@@ -274,6 +229,7 @@ exports.processRecurringOpportunities =
     {
       schedule: "every 15 minutes",
       region: "us-central1",
+      preserveExternalChanges: true,
     },
     async () => {
 
@@ -307,6 +263,12 @@ exports.processRecurringOpportunities =
 
         const data =
           doc.data();
+        try {
+          new Intl.DateTimeFormat("en-GB", { timeZone: data.recurrenceTimeZone || "Europe/London" });
+        } catch (error) {
+          console.error(`Invalid recurrence timezone ${doc.id}: ${error.message}`);
+          continue;
+        }
 
         if (
           data.seriesStatus === "ended"
@@ -316,7 +278,7 @@ exports.processRecurringOpportunities =
 
         if (
           data.repeatEndDate &&
-          data.repeatEndDate.toDate() < now
+          afterLocalDay(now, data.repeatEndDate.toDate(), data)
         ) {
           continue;
         }
@@ -361,12 +323,18 @@ exports.processRecurringOpportunities =
         const cancelledDates =
           data.cancelledDates ?? [];
 
-        const nextDate =
-          calculateNextOccurrenceDate(
+        let nextDate;
+        try {
+          nextDate = calculateNextOccurrenceDate(
             currentDate,
             data.repeatType,
             cancelledDates,
+            data,
           );
+        } catch (error) {
+          console.error(`Invalid recurring schedule ${doc.id}: ${error.message}`);
+          continue;
+        }
 
         if (!nextDate) {
           continue;
@@ -374,7 +342,7 @@ exports.processRecurringOpportunities =
 
         if (
           data.repeatEndDate &&
-          nextDate > data.repeatEndDate.toDate()
+          afterLocalDay(nextDate, data.repeatEndDate.toDate(), data)
         ) {
           continue;
         }

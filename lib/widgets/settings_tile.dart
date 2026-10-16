@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import 'local_link_surface_card.dart';
 
 class SettingsTile extends StatelessWidget {
@@ -20,31 +21,22 @@ class SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: LocalLinkSpacing.sm),
       child: LocalLinkSurfaceCard(
         onTap: onTap,
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(LocalLinkSpacing.md),
+        radius: LocalLinkRadius.lg,
         child: Row(
           children: [
             LocalLinkIconBadge(icon: icon, size: 42),
-            const SizedBox(width: 13),
+            const SizedBox(width: LocalLinkSpacing.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.charcoal,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: Colors.black54, fontSize: 13),
-                  ),
+                  Text(title, style: LocalLinkTextStyles.bodyStrong),
+                  const SizedBox(height: LocalLinkSpacing.xxs),
+                  Text(subtitle, style: LocalLinkTextStyles.metadata),
                 ],
               ),
             ),

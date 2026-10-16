@@ -148,6 +148,11 @@ class BookingMessagingService {
     await callable.call({'postId': postId});
   }
 
+  Future<void> refreshNearbyMissingPetAlerts() async {
+    final callable = _functions.httpsCallable('refreshNearbyMissingPetAlerts');
+    await callable.call<Map<String, dynamic>>();
+  }
+
   Future<void> publishCommunityHelpUpdate({
     required String postId,
     required String text,
@@ -160,10 +165,15 @@ class BookingMessagingService {
   Future<void> sendMessage({
     required String conversationId,
     required String text,
+    List<Map<String, dynamic>> attachments = const [],
   }) async {
     final callable = _functions.httpsCallable('sendBookingMessage');
 
-    await callable.call({'conversationId': conversationId, 'text': text});
+    await callable.call({
+      'conversationId': conversationId,
+      'text': text,
+      if (attachments.isNotEmpty) 'attachments': attachments,
+    });
   }
 
   Future<void> markRead(String conversationId) async {

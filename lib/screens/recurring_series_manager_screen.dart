@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/recurring_series_service.dart';
 import 'package:locallink_flutter/models/occurrence_status.dart';
 
 class RecurringSeriesManagerScreen extends StatefulWidget {
@@ -21,6 +23,15 @@ class _RecurringSeriesManagerScreenState
     extends State<RecurringSeriesManagerScreen> {
   CollectionReference<Map<String, dynamic>> get _opportunities =>
       FirebaseFirestore.instance.collection('opportunities');
+
+  late final Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _series =
+      RecurringSeriesService().watch(
+        opportunityId: widget.opportunityId,
+        seriesId: widget.seriesId,
+        userId: FirebaseAuth.instance.currentUser?.uid,
+        email: FirebaseAuth.instance.currentUser?.email,
+        sessionUserIds: FirebaseAuth.instance.authStateChanges().map((u) => u?.uid),
+      );
 
   Future<void> _moveOccurrence({
     required String docId,
@@ -305,11 +316,8 @@ class _RecurringSeriesManagerScreenState
       appBar: AppBar(
         title: const Text('Recurring Series'),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _opportunities
-            .where('seriesId', isEqualTo: widget.seriesId)
-            .orderBy('eventDate')
-            .snapshots(),
+      body: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+        stream: _series,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return const Center(
@@ -325,7 +333,7 @@ class _RecurringSeriesManagerScreenState
             );
           }
 
-          final docs = snapshot.data!.docs;
+          final docs = snapshot.data!;
 
           if (docs.isEmpty) {
             return const Center(

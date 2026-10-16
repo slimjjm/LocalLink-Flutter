@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
@@ -13,10 +14,35 @@ class EmailVerificationScreen extends StatefulWidget {
       _EmailVerificationScreenState();
 }
 
-class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
+class _EmailVerificationScreenState extends State<EmailVerificationScreen>
+    with WidgetsBindingObserver {
   bool _checking = false;
   bool _resending = false;
   String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkAgain(showWaitingMessage: false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkAgain(showWaitingMessage: false);
+    }
+  }
 
   Future<void> _resend() async {
     setState(() {
@@ -49,7 +75,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     }
   }
 
-  Future<void> _checkAgain() async {
+  Future<void> _checkAgain({bool showWaitingMessage = true}) async {
+    if (_checking) return;
+
     setState(() {
       _checking = true;
       _message = null;
@@ -66,18 +94,23 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
         return;
       }
 
-      setState(() {
-        _message = 'Still waiting for verification. Tap the email link first.';
-      });
+      if (showWaitingMessage) {
+        setState(() {
+          _message =
+              'Still waiting for verification. Tap the email link first.';
+        });
+      }
     } catch (error) {
       assert(() {
         debugPrint('Email verification refresh failed: $error');
         return true;
       }());
       if (!mounted) return;
-      setState(() {
-        _message = 'We could not check that just now. Please try again.';
-      });
+      if (showWaitingMessage) {
+        setState(() {
+          _message = 'We could not check that just now. Please try again.';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -88,6 +121,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 
   Future<void> _signOut() async {
+    await NotificationService.shared.unregisterCurrentDevice();
     await FirebaseAuth.instance.signOut();
   }
 
@@ -161,7 +195,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: _checking ? null : _checkAgain,
+                  onPressed: _checking ? null : () => _checkAgain(),
                   child: Text(_checking ? 'Checking...' : 'I have verified'),
                 ),
               ),

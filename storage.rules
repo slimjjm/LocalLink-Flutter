@@ -6,6 +6,65 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return signedIn()
+        && (
+          hasAdminProfileFlag()
+          || hasEnabledAdminEmail()
+        );
+    }
+
+    function hasAdminProfileFlag() {
+      return firestore.exists(
+          /databases/(default)/documents/users/$(request.auth.uid)
+        )
+        && firestore.get(
+          /databases/(default)/documents/users/$(request.auth.uid)
+        ).data.isAdmin == true;
+    }
+
+    function hasEnabledAdminEmail() {
+      let email = request.auth.token.email;
+
+      return 'email' in request.auth.token
+        && firestore.exists(
+          /databases/(default)/documents/adminEmails/$(email)
+        )
+        && firestore.get(
+          /databases/(default)/documents/adminEmails/$(email)
+        ).data.enabled != false;
+    }
+
+    // Match Firestore's authoritative admin source for seeded business creation.
+    // A private account overrides legacy public flags, including revocation.
+    function canSeedBusinessPhoto() {
+      let accountPath = /databases/(default)/documents/users/$(request.auth.uid)/private/account;
+      let publicPath = /databases/(default)/documents/users/$(request.auth.uid);
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && (
+          (
+            firestore.exists(accountPath)
+            && 'isAdmin' in firestore.get(accountPath).data
+            && firestore.get(accountPath).data.isAdmin == true
+          )
+          || (
+            !firestore.exists(accountPath)
+            && firestore.exists(publicPath)
+            && 'isAdmin' in firestore.get(publicPath).data
+            && firestore.get(publicPath).data.isAdmin == true
+          )
+          || (
+            'email' in request.auth.token
+            && request.auth.token.email in [
+              'jae19882011@hotmail.co.uk',
+              'founder@locallinkapp.co.uk'
+            ]
+            && hasEnabledAdminEmail()
+          )
+        );
+    }
+
     function isImage() {
       return request.resource != null
         && request.resource.size < 8 * 1024 * 1024
@@ -16,6 +75,12 @@ service firebase.storage {
       return firestore.get(
         /databases/(default)/documents/businesses/$(businessId)
       ).data;
+    }
+
+    function businessExists(businessId) {
+      return firestore.exists(
+        /databases/(default)/documents/businesses/$(businessId)
+      );
     }
 
     function isBusinessOwnerOrCreator(businessId) {
@@ -52,6 +117,99 @@ service firebase.storage {
         || isActiveBusinessTeam(businessId);
     }
 
+    function conversationData(conversationId) {
+      return firestore.get(
+        /databases/(default)/documents/conversations/$(conversationId)
+      ).data;
+    }
+
+    function canAccessConversation(conversationId) {
+      let data = conversationData(conversationId);
+
+      return signedIn()
+        && (
+          data.customerId == request.auth.uid
+          || data.businessOwnerId == request.auth.uid
+          || (
+            data.participants is list
+            && request.auth.uid in data.participants
+          )
+          || (
+            data.communityHelpParticipantIds is list
+            && request.auth.uid in data.communityHelpParticipantIds
+          )
+          || canManageBusiness(data.businessId)
+        );
+    }
+
+    function serviceRequestExists(requestId) {
+      return firestore.exists(
+        /databases/(default)/documents/serviceRequests/$(requestId)
+      );
+    }
+
+    function serviceRequestData(requestId) {
+      return firestore.get(
+        /databases/(default)/documents/serviceRequests/$(requestId)
+      ).data;
+    }
+
+    function canManageServiceRequestImages(requestId) {
+      return signedIn()
+        && serviceRequestExists(requestId)
+        && serviceRequestData(requestId).customerId == request.auth.uid;
+    }
+
+    function isServiceRequestImage() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function organisationData(organisationId) {
+      return firestore.get(
+        /databases/(default)/documents/organisations/$(organisationId)
+      ).data;
+    }
+
+    function isOrganisationManager(organisationId) {
+      let data = organisationData(organisationId);
+
+      return signedIn()
+        && data.listingOwnershipStatus == 'claimed'
+        && (
+          data.ownerId == request.auth.uid
+          || (
+            data.adminUserIds is list
+            && request.auth.uid in data.adminUserIds
+          )
+          || (
+            firestore.exists(
+              /databases/(default)/documents/organisations/$(organisationId)/members/$(request.auth.uid)
+            )
+            && firestore.get(
+              /databases/(default)/documents/organisations/$(organisationId)/members/$(request.auth.uid)
+            ).data.status == 'active'
+            && firestore.get(
+              /databases/(default)/documents/organisations/$(organisationId)/members/$(request.auth.uid)
+            ).data.role in ['owner', 'organisation_admin', 'secretary']
+          )
+        );
+    }
+
+    function isGroupLeader(organisationId, groupId) {
+      return signedIn()
+        && firestore.exists(
+          /databases/(default)/documents/organisations/$(organisationId)/groups/$(groupId)
+        )
+        && firestore.get(
+          /databases/(default)/documents/organisations/$(organisationId)/groups/$(groupId)
+        ).data.leaderUserIds is list
+        && request.auth.uid in firestore.get(
+          /databases/(default)/documents/organisations/$(organisationId)/groups/$(groupId)
+        ).data.leaderUserIds;
+    }
+
     match /profile_photos/{fileName} {
       allow read: if signedIn();
       allow write: if signedIn()
@@ -61,7 +219,20 @@ service firebase.storage {
 
     match /businessPhotos/{businessId}/{fileName} {
       allow read: if signedIn();
-      allow write: if canManageBusiness(businessId) && isImage();
+      allow create: if (
+          (
+            canSeedBusinessPhoto()
+            && request.resource.metadata.moderatorSeeded == 'true'
+            && request.resource.metadata.ownerId == request.auth.uid
+            && request.resource.metadata.listingId == businessId
+          )
+          || (
+            businessExists(businessId)
+            && canManageBusiness(businessId)
+          )
+        )
+        && isImage();
+      allow update, delete: if canManageBusiness(businessId) && isImage();
     }
 
     match /servicePhotos/{businessId}/{fileName} {
@@ -83,6 +254,30 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    match /opportunityCommentPhotos/{opportunityId}/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && userId == request.auth.uid
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid
+        && request.resource.metadata.opportunityId == opportunityId
+        && request.resource.metadata.commentId is string
+        && fileName == request.resource.metadata.commentId + '.jpg';
+      allow update: if signedIn()
+        && userId == request.auth.uid
+        && resource.metadata.ownerId == request.auth.uid
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid
+        && request.resource.metadata.opportunityId == opportunityId
+        && request.resource.metadata.commentId is string
+        && fileName == request.resource.metadata.commentId + '.jpg';
+      allow delete: if signedIn()
+        && (
+          userId == request.auth.uid
+          || isAdmin()
+        );
+    }
+
     match /communityHelpPhotos/{userId}/{fileName} {
       allow read: if signedIn();
       allow create: if signedIn()
@@ -90,6 +285,42 @@ service firebase.storage {
         && isImage()
         && request.resource.metadata.ownerId == request.auth.uid;
       allow update, delete: if false;
+    }
+
+    match /organisationGroupPhotos/{organisationId}/{groupId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if (isOrganisationManager(organisationId)
+          || isGroupLeader(organisationId, groupId))
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid
+        && request.resource.metadata.organisationId == organisationId;
+      allow update, delete: if false;
+    }
+
+    match /organisationPhotos/{organisationId}/{fileName} {
+      allow read: if signedIn();
+      allow create: if isOrganisationManager(organisationId)
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid
+        && request.resource.metadata.organisationId == organisationId;
+      allow update, delete: if false;
+    }
+
+    match /conversationImages/{conversationId}/{userId}/{fileName} {
+      allow read: if canAccessConversation(conversationId);
+      allow create: if userId == request.auth.uid
+        && canAccessConversation(conversationId)
+        && isImage()
+        && request.resource.metadata.ownerId == request.auth.uid
+        && request.resource.metadata.conversationId == conversationId;
+      allow update, delete: if false;
+    }
+
+    match /serviceRequests/{requestId}/images/{fileName} {
+      allow read: if canManageServiceRequestImages(requestId);
+      allow create, update: if canManageServiceRequestImages(requestId)
+        && isServiceRequestImage();
+      allow delete: if canManageServiceRequestImages(requestId);
     }
 
     match /{allPaths=**} {

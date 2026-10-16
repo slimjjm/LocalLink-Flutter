@@ -7,8 +7,10 @@ import '../screens/admin_reports_screen.dart';
 import '../screens/community_alert_settings_screen.dart';
 import '../screens/notification_settings_screen.dart';
 import '../screens/notifications_screen.dart';
+import '../screens/profile_screen.dart';
 import '../services/account_deletion_service.dart';
 import '../services/admin_access_service.dart';
+import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
 import 'settings_tile.dart';
 
@@ -18,6 +20,7 @@ class SettingsSheet extends StatelessWidget {
   const SettingsSheet({super.key});
 
   Future<void> _logout(BuildContext context) async {
+    await NotificationService.shared.unregisterCurrentDevice();
     await FirebaseAuth.instance.signOut();
 
     if (context.mounted) {
@@ -125,6 +128,25 @@ class SettingsSheet extends StatelessWidget {
                 style: TextStyle(color: Colors.black54, fontSize: 14),
               ),
               const SizedBox(height: 18),
+              if (FirebaseAuth.instance.currentUser case final user?)
+                SettingsTile(
+                  icon: Icons.person_outline_rounded,
+                  title: 'Profile',
+                  subtitle: 'Update your LocalLink identity',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ProfileScreen(
+                          userId: user.uid,
+                          userName: user.displayName ?? 'User',
+                          photoUrl: user.photoURL,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               SettingsTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notification settings',

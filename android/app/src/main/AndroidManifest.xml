@@ -69,7 +69,7 @@
             <!-- CLAIM BUSINESS DEEP LINKS -->
             <!-- ================================================= -->
 
-            <intent-filter android:autoVerify="true">
+            <intent-filter>
 
                 <action android:name="android.intent.action.VIEW"/>
 
@@ -120,6 +120,26 @@
                     android:host="locallinkapp.co.uk"
                     android:pathPrefix="/services" />
 
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/service-requests" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/invitations/organisation" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/stripe-return" />
+
+                <data
+                    android:scheme="https"
+                    android:host="locallinkapp.co.uk"
+                    android:pathPrefix="/stripe-refresh" />
+
             </intent-filter>
 
             <intent-filter>
@@ -134,6 +154,8 @@
                 <data android:scheme="locallink" android:host="opportunity" />
                 <data android:scheme="locallink" android:host="availability" />
                 <data android:scheme="locallink" android:host="business" />
+                <data android:scheme="locallink" android:host="service-request" />
+                <data android:scheme="locallink" android:host="organisation-invitation" />
 
             </intent-filter>
 

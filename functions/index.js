@@ -6,8 +6,9 @@
 const admin = require("firebase-admin");
 admin.initializeApp();
 const db = admin.firestore();
+const crypto = require("crypto");
 
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -19,14 +20,61 @@ const SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES = Number(
   process.env.SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES || 10
 );
 const PENDING_PAYMENT_TIMEOUT_MINUTES = 15;
+const STRIPE_PAYMENT_ACCOUNT_CONTEXT_PLATFORM = "platform";
+const STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED = "connected";
+const STRIPE_CHARGE_TYPE_DIRECT = "direct";
+const STRIPE_CHARGE_TYPE_DESTINATION = "destination";
 const {
   cleanupDecisionForPaymentIntentStatus,
 } = require("./stripe_cleanup_policy");
+const {
+  verifyStripeWebhookEvent,
+} = require("./stripe_webhook_verification");
+const {
+  reusableBookingAddressPreferenceData,
+} = require("./booking_preferences");
+const {
+  autoCompleteCutoffDate,
+  mergeAvailabilityIntervals,
+  restorableCancelledIntervals,
+  subtractBookedInterval,
+} = require("./booking_lifecycle");
+const {
+  sendBookingConfirmationEmailsSafe,
+  sendBookingCancellationEmailsSafe,
+} = require("./booking_emails");
+const {
+  ORGANISATION_ROLES,
+  buildOrganisationInvitationEmail,
+  canAssignRole,
+  canManageOrganisationRole,
+  invitationLink,
+  invitationToken,
+  isValidEmail,
+  normaliseEmail,
+  normaliseRole,
+  roleLabel,
+  tokenHash,
+} = require("./organisation_management");
+const {
+  buildAskLocalLinkExports,
+} = require("./ask_locallink");
+const {
+  requestHasAdminAccess,
+} = require("./admin_authorization");
+const {
+  buildNearbyNotification,
+  cooldownAllows,
+  eligibleMissingPets,
+} = require("./community_help_nearby_alerts");
 
 const notifications =
   require("./notifications");
 const sendPushToUser =
   notifications.sendPushToUser;
+const {
+  notifyOpportunityParticipationCreated,
+} = require("./opportunity_participation_notifications");
 
   const reminders =
   require("./reminders");
@@ -34,13 +82,93 @@ const sendPushToUser =
   const recurring =
   require("./recurring");
 
+const { buildBusinessActivationExports } = require("./business_activation");
+const businessActivation = buildBusinessActivationExports({
+  admin, db, onCall, onSchedule, onDocumentCreated, onDocumentWritten,
+  HttpsError, notifications,
+});
+for (const [name, handler] of Object.entries(businessActivation)) {
+  if (!name.startsWith("_")) exports[name] = handler;
+}
+
+const { buildActivityStabilisationExports } = require("./activity_stabilisation");
+Object.assign(exports, buildActivityStabilisationExports({
+  admin, db, onCall, onDocumentCreated, HttpsError, sendPushToUser,
+}));
+
+const { buildDiscoveryPrivacyExports } = require("./discovery_privacy");
+Object.assign(exports, buildDiscoveryPrivacyExports({ db, onDocumentWritten, admin }));
+
 let stripeClient = null;
+
+Object.assign(exports, buildAskLocalLinkExports({
+  admin,
+  onCall,
+  HttpsError,
+  logger,
+}));
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new HttpsError("failed-precondition", "Stripe secret not configured.");
   if (!stripeClient) stripeClient = require("stripe")(key, { apiVersion: STRIPE_API_VERSION });
   return stripeClient;
+}
+
+function stripeSecretFingerprint() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return "missing";
+  return crypto.createHash("sha256").update(key).digest("hex").slice(0, 12);
+}
+
+function stripeBookingLog(flow, step, fields = {}) {
+  logger.info(`[StripeBooking] ${flow} STEP ${step}`, fields);
+}
+
+function safeStripeDiagnosticFields(error, extra = {}) {
+  const rawMessage = safeTrim(error?.message);
+  const message = rawMessage
+    .replace(/(sk|pk)_(live|test)_[A-Za-z0-9_]+/g, "$1_$2_....")
+    .replace(/pi_[A-Za-z0-9_]+_secret_[A-Za-z0-9_]+/g, "pi_...._secret_....");
+  return {
+    type: safeTrim(error?.type) || undefined,
+    code: safeTrim(error?.code) || undefined,
+    decline_code: safeTrim(error?.decline_code) || undefined,
+    message: message || undefined,
+    param: safeTrim(error?.param) || undefined,
+    statusCode: error?.statusCode || error?.status || undefined,
+    requestId: safeTrim(error?.requestId) || undefined,
+    ...extra,
+  };
+}
+
+function stripeBookingError(flow, step, error, fields = {}) {
+  logger.error(
+    `[StripeBooking] ${flow} STEP ${step} failed`,
+    safeStripeDiagnosticFields(error, fields)
+  );
+}
+
+async function stripePlatformIdentity(stripe, flow, step, fields = {}) {
+  try {
+    const account = await stripe.accounts.retrieve();
+    stripeBookingLog(flow, step, {
+      platformAccountId: account.id,
+      livemode: account.livemode,
+      country: account.country,
+      charges_enabled: account.charges_enabled,
+      payouts_enabled: account.payouts_enabled,
+      secretFingerprint: stripeSecretFingerprint(),
+      ...fields,
+    });
+    return account;
+  } catch (error) {
+    stripeBookingError(flow, step, error, {
+      secretFingerprint: stripeSecretFingerprint(),
+      ...fields,
+    });
+    return null;
+  }
 }
 
 async function assertAdminRequest(request) {
@@ -66,9 +194,170 @@ function assert(cond, code, msg) {
   if (!cond) throw new HttpsError(code, msg);
 }
 
+function isAnonymousAuth(auth) {
+  return auth?.token?.firebase?.sign_in_provider === "anonymous";
+}
+
+function assertRegisteredAuth(request, message = "Login required.") {
+  assert(request.auth, "unauthenticated", message);
+  if (isAnonymousAuth(request.auth)) {
+    throw new HttpsError("failed-precondition", "Please log in to continue.");
+  }
+  return request.auth.uid;
+}
+
 function safeTrim(s) {
   return String(s ?? "").trim();
 }
+
+function normaliseClaimCode(value) {
+  return safeTrim(value).toUpperCase();
+}
+
+function publicBusinessClaimPreview(businessId, data) {
+  return {
+    businessId,
+    businessName: safeTrim(data.businessName || data.name),
+    address: safeTrim(data.address),
+    category: safeTrim(data.category),
+    photoURLs: Array.isArray(data.photoURLs) ? data.photoURLs.slice(0, 5) : [],
+  };
+}
+
+async function findBusinessClaimRecord(code) {
+  const privateSnap = await db.collection("businessClaimSecrets")
+    .where("claimCodeNormalized", "==", code)
+    .limit(1)
+    .get();
+  if (!privateSnap.empty) {
+    return {
+      businessId: privateSnap.docs[0].id,
+      secretRef: privateSnap.docs[0].ref,
+      secretData: privateSnap.docs[0].data(),
+      legacy: false,
+    };
+  }
+
+  // Phase A compatibility only. Remove after the private-claim migration has
+  // been verified and public legacy fields have been cleaned up.
+  const legacySnap = await db.collection("businesses")
+    .where("claimCode", "==", code)
+    .limit(1)
+    .get();
+  if (legacySnap.empty) return null;
+  return {
+    businessId: legacySnap.docs[0].id,
+    secretRef: null,
+    secretData: legacySnap.docs[0].data(),
+    legacy: true,
+  };
+}
+
+exports.findBusinessClaim = onCall({ region: "us-central1" }, async (request) => {
+  assertRegisteredAuth(request);
+  const code = normaliseClaimCode(request.data?.claimCode);
+  assert(code.length >= 4 && code.length <= 64, "invalid-argument", "Enter a valid claim code.");
+
+  const record = await findBusinessClaimRecord(code);
+  if (!record) throw new HttpsError("not-found", "No business found for that code.");
+  const businessSnap = await db.collection("businesses").doc(record.businessId).get();
+  if (!businessSnap.exists || safeTrim(businessSnap.data()?.ownerId)) {
+    throw new HttpsError("failed-precondition", "This business is no longer available to claim.");
+  }
+  return publicBusinessClaimPreview(businessSnap.id, businessSnap.data());
+});
+
+exports.claimBusinessByCode = onCall({ region: "us-central1" }, async (request) => {
+  const uid = assertRegisteredAuth(request);
+  const code = normaliseClaimCode(request.data?.claimCode);
+  const userEmail = safeTrim(request.auth.token?.email).toLowerCase();
+  assert(request.auth.token?.email_verified === true && userEmail, "permission-denied", "Verify your email before claiming a business.");
+  assert(code.length >= 4 && code.length <= 64, "invalid-argument", "Enter a valid claim code.");
+
+  const record = await findBusinessClaimRecord(code);
+  if (!record) throw new HttpsError("not-found", "No business found for that code.");
+
+  const businessRef = db.collection("businesses").doc(record.businessId);
+  const staffRef = businessRef.collection("staff").doc(uid);
+  await db.runTransaction(async (transaction) => {
+    const [businessSnap, secretSnap] = await Promise.all([
+      transaction.get(businessRef),
+      record.secretRef ? transaction.get(record.secretRef) : Promise.resolve(null),
+    ]);
+    if (!businessSnap.exists) throw new HttpsError("not-found", "Business not found.");
+    const business = businessSnap.data();
+    if (safeTrim(business.ownerId) || business.isClaimed === true) {
+      throw new HttpsError("failed-precondition", "This business has already been claimed.");
+    }
+
+    const secret = secretSnap?.exists ? secretSnap.data() : record.secretData;
+    const assignedEmail = safeTrim(secret?.claimEmail).toLowerCase();
+    if (!assignedEmail || assignedEmail !== userEmail) {
+      throw new HttpsError("permission-denied", "This business was assigned to a different email.");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    transaction.update(businessRef, {
+      ownerId: uid,
+      isClaimed: true,
+      claimedBy: uid,
+      claimedAt: now,
+      updatedAt: now,
+    });
+    transaction.set(staffRef, {
+      name: "Owner",
+      email: userEmail,
+      isActive: true,
+      seatRank: 0,
+      createdAt: now,
+    }, { merge: true });
+    if (record.secretRef) {
+      transaction.set(record.secretRef, {
+        claimedAt: now,
+        claimedBy: uid,
+        status: "claimed",
+        updatedAt: now,
+      }, { merge: true });
+    }
+  });
+
+  return { ok: true, businessId: record.businessId };
+});
+
+exports.registerBusinessClaim = onCall({ region: "us-central1" }, async (request) => {
+  const uid = assertRegisteredAuth(request);
+  const businessId = safeTrim(request.data?.businessId);
+  const claimEmail = safeTrim(request.data?.claimEmail).toLowerCase();
+  assert(businessId && claimEmail.includes("@"), "invalid-argument", "Business and claim email are required.");
+
+  const businessRef = db.collection("businesses").doc(businessId);
+  const secretRef = db.collection("businessClaimSecrets").doc(businessId);
+  const claimCode = crypto.randomBytes(8).toString("hex").toUpperCase();
+  await db.runTransaction(async (transaction) => {
+    const [businessSnap, secretSnap] = await Promise.all([
+      transaction.get(businessRef),
+      transaction.get(secretRef),
+    ]);
+    if (!businessSnap.exists) throw new HttpsError("not-found", "Business not found.");
+    const business = businessSnap.data();
+    if (business.createdBy !== uid || safeTrim(business.ownerId) || business.isClaimed === true) {
+      throw new HttpsError("permission-denied", "This claim cannot be registered.");
+    }
+    if (secretSnap.exists) throw new HttpsError("already-exists", "A claim is already registered.");
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    transaction.create(secretRef, {
+      businessId,
+      claimCode,
+      claimCodeNormalized: claimCode,
+      claimEmail,
+      status: "pending",
+      createdBy: uid,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+  return { ok: true, claimCode };
+});
 
 function publicText(value, fallback = "") {
   const text = safeTrim(value);
@@ -153,9 +442,38 @@ function communityHelpPublicStatus(post) {
 function isPubliclyPreviewable(data) {
   if (!data) return false;
   if (data.isDeleted === true || data.deleted === true) return false;
+  if (data.archived === true || data.isArchived === true) return false;
   if (data.hidden === true || data.isHidden === true) return false;
   if (data.private === true || data.isPrivate === true) return false;
+  if (data.isPubliclyDiscoverable === false) return false;
+  const visibility = safeTrim(data.visibility).toLowerCase();
+  if (["private", "restricted", "members", "members_only"].includes(visibility)) return false;
+  const status = safeTrim(data.status).toLowerCase();
+  if ([
+    "inactive",
+    "archived",
+    "deleted",
+    "expired",
+    "cancelled",
+    "closed",
+    "booked",
+    "removed",
+    "rejected",
+  ].includes(status)) return false;
   return data.isActive !== false;
+}
+
+function isPublicAvailabilityPreviewable(data, now = new Date()) {
+  if (!isPubliclyPreviewable(data)) return false;
+
+  const endMillis = timestampMillis(
+    data.endDateTime ||
+    data.endTime ||
+    data.availableUntil ||
+    data.availabilityAt ||
+    data.startDateTime
+  );
+  return !endMillis || endMillis > now.getTime();
 }
 
 function publicPreviewPayload({ type, id, parentId = "", label, title, subtitle = "", location = "", imageUrl = "" }) {
@@ -172,7 +490,7 @@ function publicPreviewPayload({ type, id, parentId = "", label, title, subtitle 
 }
 
 exports.getPublicSharePreview = onCall(
-  { region: "us-central1" },
+  { region: "us-central1", preserveExternalChanges: true },
   async (request) => {
     const type = safeTrim(request.data?.type);
     const id = safeTrim(request.data?.id);
@@ -210,12 +528,12 @@ exports.getPublicSharePreview = onCall(
       });
     }
 
-    if (type === "activity") {
+    if (type === "activity" || type === "opportunity") {
       const snap = await db.collection("opportunities").doc(id).get();
       assert(snap.exists, "not-found", "This activity is no longer available.");
 
       const post = snap.data() || {};
-      assert(isPubliclyPreviewable(post), "not-found", "This activity is no longer available.");
+      assert(isPubliclyPreviewable(post) && require("./discovery_privacy").activityDiscoveryVisibility(post) === "public", "not-found", "This activity is no longer available.");
 
       const when = firstPublicText(post.dateText, post.timeText, dateToPublicLabel(post.date), dateToPublicLabel(post.startTime));
       const location = firstPublicText(post.publicLocation, post.locationLabel, post.location, post.areaLabel);
@@ -236,7 +554,7 @@ exports.getPublicSharePreview = onCall(
       assert(snap.exists, "not-found", "This available time is no longer live.");
 
       const post = snap.data() || {};
-      assert(isPubliclyPreviewable(post), "not-found", "This available time is no longer live.");
+      assert(isPublicAvailabilityPreviewable(post), "not-found", "This available time is no longer live.");
 
       const when = firstPublicText(
         post.availabilityText,
@@ -306,6 +624,1160 @@ exports.getPublicSharePreview = onCall(
     }
 
     throw new HttpsError("invalid-argument", "Unsupported shared item type.");
+  }
+);
+
+function publicAreaText(data) {
+  return firstPublicText(
+    data.publicLocation,
+    data.serviceArea,
+    data.locationLabel,
+    data.areaLabel,
+    data.area,
+    data.town,
+    data.city
+  );
+}
+
+function matchesPublicArea(data, area) {
+  const target = safeTrim(area).toLowerCase();
+  if (!target) return true;
+
+  const location = publicAreaText(data).toLowerCase();
+  return location.includes(target);
+}
+
+function matchesPublicCommunityHelpArea(data, area) {
+  const target = safeTrim(area).toLowerCase();
+  if (target.length < 3) return false;
+  return matchesPublicArea(data, target);
+}
+
+function withCardType(payload, cardType) {
+  return { ...payload, cardType };
+}
+
+exports.getPublicExplorePreviews = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const area = truncatePublicText(request.data?.area, 80);
+    const items = [];
+
+    const opportunitySnap = await db
+      .collection("opportunities")
+      .orderBy("createdAt", "desc")
+      .limit(24)
+      .get();
+
+    opportunitySnap.docs.forEach((doc) => {
+      const post = doc.data() || {};
+      if (!isPubliclyPreviewable(post) || !matchesPublicArea(post, area)) return;
+
+      const when = firstPublicText(
+        post.dateText,
+        post.timeText,
+        dateToPublicLabel(post.date),
+        dateToPublicLabel(post.startTime)
+      );
+
+      items.push(withCardType(publicPreviewPayload({
+        type: "opportunity",
+        id: doc.id,
+        label: firstPublicText(post.category, "Activity"),
+        title: firstPublicText(post.title, post.name, "Local activity"),
+        subtitle: firstPublicText(when, post.description),
+        location: publicAreaText(post),
+        imageUrl: publicImageUrl(post),
+      }), "activity"));
+    });
+
+    const communityHelpSnap = await db
+      .collection("communityHelpPosts")
+      .orderBy("createdAt", "desc")
+      .limit(24)
+      .get();
+
+    communityHelpSnap.docs.forEach((doc) => {
+      const post = doc.data() || {};
+      if (!isPubliclyPreviewable(post) || !matchesPublicCommunityHelpArea(post, area)) return;
+
+      const lastSeen = firstPublicText(
+        post.lastSeenText,
+        dateToPublicLabel(post.lastSeenAt),
+        dateToPublicLabel(post.createdAt)
+      );
+      const subtitle = [
+        lastSeen ? `Last seen: ${lastSeen}` : "",
+        post.description,
+        post.markings,
+      ].filter((part) => safeTrim(part)).join(" · ");
+
+      items.push(withCardType(publicPreviewPayload({
+        type: "communityHelp",
+        id: doc.id,
+        label: communityHelpPublicStatus(post),
+        title: firstPublicText(post.petName, post.itemName, post.title, "Community Help post"),
+        subtitle,
+        location: publicAreaText(post),
+        imageUrl: publicImageUrl(post),
+      }), "communityHelp"));
+    });
+
+    const availabilitySnap = await db
+      .collection("availabilityPosts")
+      .orderBy("createdAt", "desc")
+      .limit(18)
+      .get();
+
+    availabilitySnap.docs.forEach((doc) => {
+      const post = doc.data() || {};
+      if (!isPubliclyPreviewable(post) || !matchesPublicArea(post, area)) return;
+
+      const when = firstPublicText(
+        post.availabilityText,
+        dateToPublicLabel(post.availabilityAt),
+        dateToPublicLabel(post.startDateTime)
+      );
+      const subtitle = [when, publicPriceLabel(post.price), post.description]
+        .filter((part) => safeTrim(part))
+        .join(" · ");
+
+      items.push(withCardType(publicPreviewPayload({
+        type: "availability",
+        id: doc.id,
+        label: "Available time",
+        title: firstPublicText(post.serviceName, post.title, "Available service"),
+        subtitle,
+        location: publicAreaText(post),
+        imageUrl: publicImageUrl(post),
+      }), "service"));
+    });
+
+    const businessSnap = await db
+      .collection("businesses")
+      .orderBy("createdAt", "desc")
+      .limit(28)
+      .get();
+
+    businessSnap.docs.forEach((doc) => {
+      const business = doc.data() || {};
+      if (!isPubliclyPreviewable(business) || !matchesPublicArea(business, area)) return;
+
+      items.push(withCardType(publicPreviewPayload({
+        type: "business",
+        id: doc.id,
+        label: firstPublicText(business.category, "Business"),
+        title: firstPublicText(business.businessName, business.name, "Local business"),
+        subtitle: firstPublicText(business.shortDescription, business.description),
+        location: publicAreaText(business),
+        imageUrl: publicImageUrl(business),
+      }), "service"));
+    });
+
+    return {
+      area,
+      items: items.slice(0, 36),
+    };
+  }
+);
+
+function opportunityManagerIds(data) {
+  return [
+    safeTrim(data.organiserId),
+    safeTrim(data.ownerId),
+    ...(Array.isArray(data.ownerIds) ? data.ownerIds.map(safeTrim) : []),
+    ...(Array.isArray(data.adminUserIds) ? data.adminUserIds.map(safeTrim) : []),
+  ].filter(Boolean);
+}
+
+function canManageOpportunityData(uid, data) {
+  if (!uid || !data) return false;
+  if (opportunityManagerIds(data).includes(uid)) return true;
+
+  const moderatorSeeded = data.createdByModerator === true;
+  const claimed = data.listingOwnershipStatus === "claimed";
+  return safeTrim(data.createdBy) === uid && !(moderatorSeeded && claimed);
+}
+
+function isYouthOpportunity(data) {
+  const values = [
+    data.category,
+    data.audience,
+    ...(Array.isArray(data.tags) ? data.tags : []),
+  ].map((value) => safeTrim(value).toLowerCase());
+
+  return values.some((value) =>
+    value.includes("youth") ||
+    value.includes("child") ||
+    value.includes("children") ||
+    value.includes("teen") ||
+    value.includes("family") ||
+    value.includes("scout")
+  );
+}
+
+function opportunityFollowRequiresApproval(data) {
+  const setting = safeTrim(data.followerAccess);
+  if (setting === "approval_required") return true;
+  if (setting === "open") return false;
+  return isYouthOpportunity(data);
+}
+
+async function notifyOpportunityManagers(opportunityId, opportunity, payload) {
+  const managerIds = [...new Set(opportunityManagerIds(opportunity))];
+
+  await Promise.all(managerIds.map(async (managerId) => {
+    if (!managerId || managerId === payload.skipUserId) return;
+
+    await db
+      .collection("users")
+      .doc(managerId)
+      .collection("notifications")
+      .add({
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        opportunityId,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(payload.extra || {}),
+      });
+
+    await sendPushToUser(managerId, {
+      title: payload.title,
+      body: payload.body,
+      preferenceKey: "activityUpdates",
+      data: {
+        type: payload.type,
+        opportunityId,
+        ...(payload.extra || {}),
+      },
+    });
+  }));
+}
+
+exports.followOpportunityGroup = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const opportunityId = safeTrim(request.data?.opportunityId);
+    const reason = truncatePublicText(request.data?.reason, 80);
+    const explanation = truncatePublicText(request.data?.explanation, 220);
+    assert(opportunityId, "invalid-argument", "Missing group id.");
+
+    const userSnap = await db.collection("users").doc(uid).get();
+    const user = userSnap.data() || {};
+    const displayName = firstPublicText(
+      user.displayName,
+      user.userName,
+      user.name,
+      request.auth.token?.name,
+      "LocalLink member"
+    );
+
+    const opportunityRef = db.collection("opportunities").doc(opportunityId);
+    const followerRef = opportunityRef.collection("followers").doc(uid);
+    const requestRef = opportunityRef.collection("followRequests").doc(uid);
+
+    const result = await db.runTransaction(async (tx) => {
+      const opportunitySnap = await tx.get(opportunityRef);
+      assert(opportunitySnap.exists, "not-found", "This group is no longer available.");
+
+      const opportunity = opportunitySnap.data() || {};
+      assert(isPubliclyPreviewable(opportunity), "failed-precondition", "This group is not available to follow.");
+
+      const requiresApproval = opportunityFollowRequiresApproval(opportunity);
+      if (requiresApproval) {
+        assert(reason, "invalid-argument", "Please add why you would like to follow this group.");
+
+        const requestSnap = await tx.get(requestRef);
+        const existing = requestSnap.data() || {};
+        if (requestSnap.exists && existing.status === "pending") {
+          return { status: "pending", notify: false, opportunity };
+        }
+
+        tx.set(requestRef, {
+          userId: uid,
+          userName: displayName,
+          reason,
+          explanation,
+          status: "pending",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        return { status: "pending", notify: true, opportunity };
+      }
+
+      const followerSnap = await tx.get(followerRef);
+      if (!followerSnap.exists || followerSnap.data()?.status !== "approved") {
+        tx.set(followerRef, {
+          userId: uid,
+          userName: displayName,
+          status: "approved",
+          approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        tx.update(opportunityRef, {
+          followerCount: admin.firestore.FieldValue.increment(1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      return { status: "approved", notify: false, opportunity };
+    });
+
+    if (result.notify) {
+      await notifyOpportunityManagers(opportunityId, result.opportunity, {
+        type: "opportunity_follow_request",
+        title: "New follow request",
+        body: `${displayName} wants to follow ${firstPublicText(result.opportunity.title, "your group")}.`,
+        skipUserId: uid,
+        extra: { followerId: uid },
+      });
+    }
+
+    return { status: result.status };
+  }
+);
+
+exports.unfollowOpportunityGroup = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const opportunityId = safeTrim(request.data?.opportunityId);
+    assert(opportunityId, "invalid-argument", "Missing group id.");
+
+    const opportunityRef = db.collection("opportunities").doc(opportunityId);
+    const followerRef = opportunityRef.collection("followers").doc(uid);
+
+    const result = await db.runTransaction(async (tx) => {
+      const followerSnap = await tx.get(followerRef);
+      if (!followerSnap.exists) return;
+
+      tx.delete(followerRef);
+      tx.update(opportunityRef, {
+        followerCount: admin.firestore.FieldValue.increment(-1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { following: false };
+  }
+);
+
+exports.reviewOpportunityFollowRequest = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const opportunityId = safeTrim(request.data?.opportunityId);
+    const followerId = safeTrim(request.data?.followerId);
+    const approve = request.data?.approve === true;
+    assert(opportunityId && followerId, "invalid-argument", "Missing follow request.");
+
+    const opportunityRef = db.collection("opportunities").doc(opportunityId);
+    const requestRef = opportunityRef.collection("followRequests").doc(followerId);
+    const followerRef = opportunityRef.collection("followers").doc(followerId);
+
+    const result = await db.runTransaction(async (tx) => {
+      const opportunitySnap = await tx.get(opportunityRef);
+      assert(opportunitySnap.exists, "not-found", "This group is no longer available.");
+      const opportunity = opportunitySnap.data() || {};
+      assert(canManageOpportunityData(uid, opportunity), "permission-denied", "Only group admins can review follow requests.");
+
+      const requestSnap = await tx.get(requestRef);
+      assert(requestSnap.exists, "not-found", "This follow request is no longer pending.");
+      const followRequest = requestSnap.data() || {};
+      assert(followRequest.status === "pending", "failed-precondition", "This follow request has already been reviewed.");
+
+      tx.update(requestRef, {
+        status: approve ? "approved" : "declined",
+        reviewedBy: uid,
+        reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      if (approve) {
+        const followerSnap = await tx.get(followerRef);
+        if (!followerSnap.exists || followerSnap.data()?.status !== "approved") {
+          tx.set(followerRef, {
+            userId: followerId,
+            userName: firstPublicText(followRequest.userName, "LocalLink member"),
+            status: "approved",
+            approvedBy: uid,
+            approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: followRequest.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          tx.update(opportunityRef, {
+            followerCount: admin.firestore.FieldValue.increment(1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      return { opportunity, followRequest };
+    });
+
+    const title = approve ? "Follow request approved" : "Follow request declined";
+    const groupTitle = firstPublicText(result.opportunity.title, "this group");
+    const body = approve
+      ? `You are now following ${groupTitle}.`
+      : `Your request to follow ${groupTitle} was not approved.`;
+
+    await db.collection("users").doc(followerId).collection("notifications").add({
+      type: "opportunity_follow_review",
+      title,
+      body,
+      opportunityId,
+      isRead: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await sendPushToUser(followerId, {
+      title,
+      body,
+      preferenceKey: "activityUpdates",
+      data: {
+        type: "opportunity_follow_review",
+        opportunityId,
+      },
+    });
+
+    return { status: approve ? "approved" : "declined" };
+  }
+);
+
+exports.publishOpportunityAnnouncement = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const opportunityId = safeTrim(request.data?.opportunityId);
+    const title = truncatePublicText(request.data?.title, 80);
+    const body = truncatePublicText(request.data?.body, 500);
+    const importance = safeTrim(request.data?.importance) === "important"
+      ? "important"
+      : "normal";
+
+    assert(opportunityId, "invalid-argument", "Missing group id.");
+    assert(body, "invalid-argument", "Announcement text is required.");
+
+    const opportunityRef = db.collection("opportunities").doc(opportunityId);
+    const opportunitySnap = await opportunityRef.get();
+    assert(opportunitySnap.exists, "not-found", "This group is no longer available.");
+    const opportunity = opportunitySnap.data() || {};
+    assert(canManageOpportunityData(uid, opportunity), "permission-denied", "Only group admins can publish updates.");
+
+    const announcementRef = await opportunityRef.collection("announcements").add({
+      title: title || (importance === "important" ? "Important update" : "Update"),
+      body,
+      importance,
+      createdBy: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const followersSnap = await opportunityRef
+      .collection("followers")
+      .where("status", "==", "approved")
+      .limit(300)
+      .get();
+
+    const groupTitle = firstPublicText(opportunity.title, "LocalLink group");
+    await Promise.all(followersSnap.docs.map(async (doc) => {
+      const followerId = safeTrim(doc.data()?.userId) || doc.id;
+      if (!followerId || followerId === uid) return;
+
+      await db.collection("users").doc(followerId).collection("notifications").add({
+        type: "opportunity_announcement",
+        title: groupTitle,
+        body,
+        opportunityId,
+        announcementId: announcementRef.id,
+        importance,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await sendPushToUser(followerId, {
+        title: groupTitle,
+        body,
+        preferenceKey: "activityUpdates",
+        data: {
+          type: "opportunity_announcement",
+          opportunityId,
+          announcementId: announcementRef.id,
+          importance,
+        },
+      });
+    }));
+
+    return { announcementId: announcementRef.id };
+  }
+);
+
+async function sendResendOrganisationEmail(email) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    logger.warn("Organisation invitation email skipped: RESEND_API_KEY missing.");
+    return { sent: false, reason: "missing_api_key" };
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "LocalLink <hello@mail.locallinkapp.co.uk>",
+      to: [email.to],
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Resend returned ${response.status}`);
+  }
+  return { sent: true };
+}
+
+async function organisationActorContext(uid, organisationRef) {
+  const [organisationSnap, memberSnap] = await Promise.all([
+    organisationRef.get(),
+    organisationRef.collection("members").doc(uid).get(),
+  ]);
+  assert(organisationSnap.exists, "not-found", "This organisation is no longer available.");
+  const organisation = organisationSnap.data() || {};
+  const member = memberSnap.data() || {};
+  const role = safeTrim(organisation.ownerId) === uid
+    ? ORGANISATION_ROLES.OWNER
+    : Array.isArray(organisation.adminUserIds) && organisation.adminUserIds.includes(uid)
+      ? ORGANISATION_ROLES.ADMIN
+      : normaliseRole(member.role);
+  return {
+    organisation,
+    member,
+    role,
+    canManage: canManageOrganisationRole({ uid, organisation, member }),
+  };
+}
+
+async function isGroupLeaderFor(uid, organisationRef, groupId) {
+  if (!uid || !groupId) return false;
+  const groupSnap = await organisationRef.collection("groups").doc(groupId).get();
+  const leaders = groupSnap.data()?.leaderUserIds;
+  return Array.isArray(leaders) && leaders.includes(uid);
+}
+
+function normaliseGroupIds(value, fallback = "") {
+  const ids = Array.isArray(value) ? [...value] : [];
+  if (fallback) ids.push(fallback);
+  return [...new Set(ids.map((id) => safeTrim(id)).filter(Boolean))].slice(0, 50);
+}
+
+function userOrganisationRoleRef(userId, organisationId) {
+  return db
+    .collection("users")
+    .doc(userId)
+    .collection("organisationRoles")
+    .doc(organisationId);
+}
+
+function organisationRoleIndexData({
+  organisationId,
+  organisation,
+  role,
+  roleLabel: label,
+  groupIds = [],
+  status = "active",
+  updatedAt,
+}) {
+  return {
+    organisationId,
+    organisationName: firstPublicText(organisation?.name, ""),
+    role,
+    roleLabel: safeTrim(label) || roleLabel(role),
+    groupIds,
+    status,
+    updatedAt,
+  };
+}
+
+exports.sendOrganisationInvitation = onCall(
+  { region: "us-central1", secrets: ["RESEND_API_KEY"] },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    const email = normaliseEmail(request.data?.email);
+    const role = normaliseRole(request.data?.role);
+    const groupId = safeTrim(request.data?.groupId);
+    const groupIds = normaliseGroupIds(request.data?.groupIds, groupId);
+    const displayRole = truncatePublicText(request.data?.displayRole, 80);
+
+    assert(organisationId, "invalid-argument", "Missing organisation.");
+    assert(isValidEmail(email), "invalid-argument", "Enter a valid email address.");
+    if (role === ORGANISATION_ROLES.GROUP_LEADER) {
+      assert(groupIds.length > 0, "invalid-argument", "Choose the groups they will lead.");
+    }
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const actor = await organisationActorContext(uid, organisationRef);
+    assert(actor.canManage, "permission-denied", "Only organisation managers can invite people.");
+    assert(
+      canAssignRole({ actorRole: actor.role, targetRole: role }),
+      "permission-denied",
+      "You cannot assign that role."
+    );
+
+    const token = invitationToken();
+    const invitationRef = organisationRef.collection("invitations").doc();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 1000 * 60 * 60 * 24 * 14);
+    const link = invitationLink(token);
+
+    await invitationRef.set({
+      email,
+      emailLower: email,
+      role,
+      roleLabel: displayRole || roleLabel(role),
+      groupId: groupIds[0] || "",
+      groupIds,
+      status: "pending",
+      tokenHash: tokenHash(token),
+      invitedBy: uid,
+      invitedByName: firstPublicText(request.auth.token?.name, request.auth.token?.email, "LocalLink organiser"),
+      createdAt: now,
+      updatedAt: now,
+      expiresAt,
+    });
+
+    try {
+      const emailPayload = buildOrganisationInvitationEmail({
+        email,
+        organisationName: firstPublicText(actor.organisation.name, "this organisation"),
+        inviterName: firstPublicText(request.auth.token?.name, request.auth.token?.email, "Someone"),
+        role,
+        link,
+      });
+      const delivery = await sendResendOrganisationEmail(emailPayload);
+      await invitationRef.set({
+        emailDeliveryStatus: delivery.sent ? "sent" : "skipped",
+        emailDeliveryReason: delivery.reason || "",
+        updatedAt: now,
+      }, { merge: true });
+    } catch (error) {
+      logger.error("Organisation invitation email failed", {
+        organisationId,
+        invitationId: invitationRef.id,
+        message: error?.message || String(error),
+      });
+      await invitationRef.set({
+        emailDeliveryStatus: "failed",
+        updatedAt: now,
+      }, { merge: true });
+    }
+
+    return { invitationId: invitationRef.id };
+  }
+);
+
+exports.acceptOrganisationInvitation = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const email = normaliseEmail(request.auth.token?.email);
+    const token = safeTrim(request.data?.token);
+    assert(email, "failed-precondition", "Your LocalLink account needs an email address.");
+    assert(token.length >= 32, "invalid-argument", "This invitation link is invalid.");
+
+    const invitationSnap = await db
+      .collectionGroup("invitations")
+      .where("tokenHash", "==", tokenHash(token))
+      .where("status", "==", "pending")
+      .limit(1)
+      .get();
+    assert(!invitationSnap.empty, "not-found", "This invitation is no longer available.");
+
+    const invitationRef = invitationSnap.docs[0].ref;
+    const organisationRef = invitationRef.parent.parent;
+    assert(organisationRef, "not-found", "This invitation is no longer available.");
+
+    const result = await db.runTransaction(async (tx) => {
+      const invitationDoc = await tx.get(invitationRef);
+      assert(invitationDoc.exists, "not-found", "This invitation is no longer available.");
+      const invitation = invitationDoc.data() || {};
+      assert(invitation.status === "pending", "failed-precondition", "This invitation has already been used.");
+      assert(normaliseEmail(invitation.emailLower || invitation.email) === email, "permission-denied", "This invitation is for a different email address.");
+      const expiresAtMillis = invitation.expiresAt?.toMillis?.() || 0;
+      assert(!expiresAtMillis || expiresAtMillis > Date.now(), "failed-precondition", "This invitation has expired.");
+
+      const organisationSnap = await tx.get(organisationRef);
+      assert(organisationSnap.exists, "not-found", "This organisation is no longer available.");
+      const organisation = organisationSnap.data() || {};
+      const role = normaliseRole(invitation.role);
+      const groupIds = normaliseGroupIds(invitation.groupIds, safeTrim(invitation.groupId));
+      const userName = firstPublicText(request.auth.token?.name, email, "LocalLink member");
+      const now = admin.firestore.FieldValue.serverTimestamp();
+
+      if (role === ORGANISATION_ROLES.ADMIN) {
+        tx.update(organisationRef, {
+          adminUserIds: admin.firestore.FieldValue.arrayUnion(uid),
+          updatedAt: now,
+        });
+      }
+
+      const memberData = {
+        userId: uid,
+        userName,
+        email,
+        role,
+        roleLabel: safeTrim(invitation.roleLabel) || roleLabel(role),
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (groupIds.length > 0) {
+        memberData.groupIds = admin.firestore.FieldValue.arrayUnion(...groupIds);
+      }
+
+      tx.set(organisationRef.collection("members").doc(uid), memberData, { merge: true });
+      tx.set(userOrganisationRoleRef(uid, organisationRef.id), organisationRoleIndexData({
+        organisationId: organisationRef.id,
+        organisation,
+        role,
+        roleLabel: memberData.roleLabel,
+        groupIds,
+        status: "active",
+        updatedAt: now,
+      }), { merge: true });
+
+      if (role === ORGANISATION_ROLES.GROUP_LEADER && groupIds.length > 0) {
+        for (const groupId of groupIds) {
+          const groupRef = organisationRef.collection("groups").doc(groupId);
+          tx.update(groupRef, {
+            leaderUserIds: admin.firestore.FieldValue.arrayUnion(uid),
+            updatedAt: now,
+          });
+          tx.set(groupRef.collection("members").doc(uid), {
+            userId: uid,
+            userName,
+            role: ORGANISATION_ROLES.GROUP_LEADER,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          }, { merge: true });
+        }
+      }
+
+      if (role !== ORGANISATION_ROLES.GROUP_LEADER && groupIds.length > 0) {
+        for (const groupId of groupIds) {
+          const groupRef = organisationRef.collection("groups").doc(groupId);
+          tx.set(groupRef.collection("members").doc(uid), {
+            userId: uid,
+            userName,
+            role: ORGANISATION_ROLES.MEMBER,
+            status: "active",
+            createdAt: now,
+            updatedAt: now,
+          }, { merge: true });
+        }
+      }
+
+      tx.update(invitationRef, {
+        status: "accepted",
+        acceptedBy: uid,
+        acceptedAt: now,
+        tokenHash: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      });
+
+      return {
+        organisation,
+        organisationId: organisationRef.id,
+        invitedBy: safeTrim(invitation.invitedBy),
+        acceptedName: userName,
+        role,
+        roleLabel: safeTrim(invitation.roleLabel) || roleLabel(role),
+        groupIds,
+      };
+    });
+
+    const recipients = new Set();
+    if (result.invitedBy && result.invitedBy !== uid) recipients.add(result.invitedBy);
+    if (safeTrim(result.organisation.ownerId) && safeTrim(result.organisation.ownerId) !== uid) {
+      recipients.add(safeTrim(result.organisation.ownerId));
+    }
+    if (Array.isArray(result.organisation.adminUserIds)) {
+      result.organisation.adminUserIds
+        .filter((id) => safeTrim(id) && safeTrim(id) !== uid)
+        .forEach((id) => recipients.add(safeTrim(id)));
+    }
+
+    const groupNames = [];
+    for (const groupId of result.groupIds) {
+      const groupSnap = await organisationRef.collection("groups").doc(groupId).get();
+      const name = firstPublicText(groupSnap.data()?.name, "");
+      if (name) groupNames.push(name);
+    }
+    const targetText = groupNames.length > 0
+      ? `${result.roleLabel} for ${groupNames.join(", ")}`
+      : result.roleLabel;
+    const title = "Invitation accepted";
+    const body = `${result.acceptedName} accepted your invitation to become ${targetText}.`;
+    await Promise.all([...recipients].map(async (recipientId) => {
+      await db.collection("users").doc(recipientId).collection("notifications").add({
+        type: "organisation_invitation_accepted",
+        title,
+        body,
+        organisationId: result.organisationId,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await sendPushToUser(recipientId, {
+        title,
+        body,
+        preferenceKey: "activityUpdates",
+        data: {
+          type: "organisation_invitation_accepted",
+          organisationId: result.organisationId,
+        },
+      });
+    }));
+
+    return { status: "accepted" };
+  }
+);
+
+exports.updateOrganisationPersonRole = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    const userId = safeTrim(request.data?.userId);
+    const role = normaliseRole(request.data?.role);
+    const requestedGroupIds = normaliseGroupIds(request.data?.groupIds, safeTrim(request.data?.groupId));
+    const displayRole = truncatePublicText(request.data?.displayRole, 80);
+    assert(organisationId && userId, "invalid-argument", "Missing person.");
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const actor = await organisationActorContext(uid, organisationRef);
+    assert(actor.canManage, "permission-denied", "Only organisation managers can update roles.");
+    assert(userId !== safeTrim(actor.organisation.ownerId), "permission-denied", "The owner role cannot be changed here.");
+    const targetMemberSnap = await organisationRef.collection("members").doc(userId).get();
+    const targetMember = targetMemberSnap.data() || {};
+    const targetRole = Array.isArray(actor.organisation.adminUserIds) && actor.organisation.adminUserIds.includes(userId)
+      ? ORGANISATION_ROLES.ADMIN
+      : normaliseRole(targetMember.role);
+    assert(
+      canAssignRole({ actorRole: actor.role, targetRole }),
+      "permission-denied",
+      "You cannot update someone with that role."
+    );
+    assert(canAssignRole({ actorRole: actor.role, targetRole: role }), "permission-denied", "You cannot assign that role.");
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await db.runTransaction(async (tx) => {
+      const groupsSnap = await tx.get(organisationRef.collection("groups"));
+      const currentLeaderGroupIds = [];
+      groupsSnap.docs.forEach((groupDoc) => {
+        const leaders = groupDoc.data()?.leaderUserIds;
+        if (Array.isArray(leaders) && leaders.includes(userId)) {
+          currentLeaderGroupIds.push(groupDoc.id);
+        }
+      });
+      const assignedGroupIds = role === ORGANISATION_ROLES.GROUP_LEADER
+        ? requestedGroupIds
+        : [];
+
+      tx.set(organisationRef.collection("members").doc(userId), {
+        role,
+        roleLabel: displayRole || roleLabel(role),
+        status: "active",
+        groupIds: assignedGroupIds,
+        updatedAt: now,
+      }, { merge: true });
+      tx.set(userOrganisationRoleRef(userId, organisationId), organisationRoleIndexData({
+        organisationId,
+        organisation: actor.organisation,
+        role,
+        roleLabel: displayRole || roleLabel(role),
+        groupIds: assignedGroupIds,
+        status: "active",
+        updatedAt: now,
+      }), { merge: true });
+      tx.update(organisationRef, {
+        adminUserIds: role === ORGANISATION_ROLES.ADMIN
+          ? admin.firestore.FieldValue.arrayUnion(userId)
+          : admin.firestore.FieldValue.arrayRemove(userId),
+        updatedAt: now,
+      });
+      for (const groupDoc of groupsSnap.docs) {
+        const groupRef = groupDoc.ref;
+        const shouldLead = assignedGroupIds.includes(groupDoc.id);
+        const didLead = currentLeaderGroupIds.includes(groupDoc.id);
+        if (shouldLead) {
+          tx.update(groupRef, {
+            leaderUserIds: admin.firestore.FieldValue.arrayUnion(userId),
+            updatedAt: now,
+          });
+          tx.set(groupRef.collection("members").doc(userId), {
+            userId,
+            role: ORGANISATION_ROLES.GROUP_LEADER,
+            status: "active",
+            updatedAt: now,
+          }, { merge: true });
+        } else if (didLead) {
+          tx.update(groupRef, {
+            leaderUserIds: admin.firestore.FieldValue.arrayRemove(userId),
+            updatedAt: now,
+          });
+          tx.set(groupRef.collection("members").doc(userId), {
+            userId,
+            role: ORGANISATION_ROLES.MEMBER,
+            status: "active",
+            updatedAt: now,
+          }, { merge: true });
+        }
+      }
+    });
+
+    return { status: "updated" };
+  }
+);
+
+exports.removeOrganisationPerson = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    const userId = safeTrim(request.data?.userId);
+    assert(organisationId && userId, "invalid-argument", "Missing person.");
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const actor = await organisationActorContext(uid, organisationRef);
+    assert(actor.canManage, "permission-denied", "Only organisation managers can remove people.");
+    assert(userId !== safeTrim(actor.organisation.ownerId), "permission-denied", "The owner cannot be removed.");
+    const targetMemberSnap = await organisationRef.collection("members").doc(userId).get();
+    const targetMember = targetMemberSnap.data() || {};
+    const targetRole = Array.isArray(actor.organisation.adminUserIds) && actor.organisation.adminUserIds.includes(userId)
+      ? ORGANISATION_ROLES.ADMIN
+      : normaliseRole(targetMember.role);
+    assert(
+      canAssignRole({ actorRole: actor.role, targetRole }),
+      "permission-denied",
+      "You cannot remove someone with that role."
+    );
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await organisationRef.collection("members").doc(userId).set({
+      status: "removed",
+      updatedAt: now,
+    }, { merge: true });
+    await userOrganisationRoleRef(userId, organisationId).set({
+      status: "removed",
+      updatedAt: now,
+    }, { merge: true });
+    await organisationRef.update({
+      adminUserIds: admin.firestore.FieldValue.arrayRemove(userId),
+      updatedAt: now,
+    });
+
+    const groupsSnap = await organisationRef.collection("groups").where("leaderUserIds", "array-contains", userId).get();
+    await Promise.all(groupsSnap.docs.map((doc) => doc.ref.update({
+      leaderUserIds: admin.firestore.FieldValue.arrayRemove(userId),
+      updatedAt: now,
+    })));
+
+    return { status: "removed" };
+  }
+);
+
+async function updateOrganisationActivityArchiveState({
+  organisationId,
+  archived,
+  now,
+}) {
+  const query = archived
+    ? db.collection("opportunities")
+        .where("organisationId", "==", organisationId)
+        .where("isActive", "==", true)
+    : db.collection("opportunities")
+        .where("organisationId", "==", organisationId)
+        .where("archivedWithOrganisation", "==", true);
+  const snap = await query.get();
+  const batches = [];
+  let batch = db.batch();
+  let count = 0;
+  snap.docs.forEach((doc) => {
+    batch.update(doc.ref, archived ? {
+      isActive: false,
+      archivedWithOrganisation: true,
+      archivedAt: now,
+      archivedReason: "organisation_archived",
+      updatedAt: now,
+    } : {
+      isActive: true,
+      archivedWithOrganisation: admin.firestore.FieldValue.delete(),
+      archivedReason: admin.firestore.FieldValue.delete(),
+      restoredAt: now,
+      updatedAt: now,
+    });
+    count += 1;
+    if (count === 450) {
+      batches.push(batch.commit());
+      batch = db.batch();
+      count = 0;
+    }
+  });
+  if (count > 0) batches.push(batch.commit());
+  await Promise.all(batches);
+}
+
+exports.archiveOrganisation = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    assert(organisationId, "invalid-argument", "Missing organisation.");
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const organisationSnap = await organisationRef.get();
+    assert(organisationSnap.exists, "not-found", "This organisation is no longer available.");
+    const organisation = organisationSnap.data() || {};
+    assert(safeTrim(organisation.ownerId) === uid, "permission-denied", "Only the owner can archive this organisation.");
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await organisationRef.update({
+      isActive: false,
+      archivedAt: now,
+      archivedBy: uid,
+      updatedAt: now,
+    });
+    await updateOrganisationActivityArchiveState({
+      organisationId,
+      archived: true,
+      now,
+    });
+
+    return { status: "archived" };
+  }
+);
+
+exports.restoreOrganisation = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    assert(organisationId, "invalid-argument", "Missing organisation.");
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const organisationSnap = await organisationRef.get();
+    assert(organisationSnap.exists, "not-found", "This organisation is no longer available.");
+    const organisation = organisationSnap.data() || {};
+    assert(safeTrim(organisation.ownerId) === uid, "permission-denied", "Only the owner can restore this organisation.");
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await organisationRef.update({
+      isActive: true,
+      restoredAt: now,
+      updatedAt: now,
+    });
+    await updateOrganisationActivityArchiveState({
+      organisationId,
+      archived: false,
+      now,
+    });
+
+    return { status: "restored" };
+  }
+);
+
+exports.publishOrganisationAnnouncement = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    const organisationId = safeTrim(request.data?.organisationId);
+    const groupId = safeTrim(request.data?.groupId);
+    const groupName = truncatePublicText(request.data?.groupName, 80);
+    const message = truncatePublicText(request.data?.message, 500);
+    assert(organisationId, "invalid-argument", "Missing organisation.");
+    assert(message, "invalid-argument", "Announcement text is required.");
+
+    const organisationRef = db.collection("organisations").doc(organisationId);
+    const actor = await organisationActorContext(uid, organisationRef);
+    const leader = groupId ? await isGroupLeaderFor(uid, organisationRef, groupId) : false;
+    assert(
+      actor.canManage || leader,
+      "permission-denied",
+      "Only organisation managers or group leaders can send announcements."
+    );
+    if (groupId && !actor.canManage) {
+      assert(leader, "permission-denied", "You can only message groups you manage.");
+    }
+    if (!groupId) {
+      assert(actor.canManage, "permission-denied", "Only organisation managers can message everyone.");
+    }
+
+    const targetType = groupId ? "group" : "organisation";
+    const targetName = groupId ? groupName : firstPublicText(actor.organisation.name, "Organisation");
+    const announcementRef = await organisationRef.collection("announcements").add({
+      message,
+      targetType,
+      targetGroupId: groupId,
+      targetName,
+      createdBy: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const recipients = new Set();
+    if (groupId) {
+      const groupMembers = await organisationRef.collection("groups").doc(groupId).collection("members").where("status", "==", "active").limit(500).get();
+      groupMembers.forEach((doc) => recipients.add(doc.id));
+      const groupSnap = await organisationRef.collection("groups").doc(groupId).get();
+      const leaders = groupSnap.data()?.leaderUserIds;
+      if (Array.isArray(leaders)) leaders.forEach((id) => recipients.add(id));
+    } else {
+      const members = await organisationRef.collection("members").where("status", "==", "active").limit(500).get();
+      members.forEach((doc) => recipients.add(doc.id));
+      if (safeTrim(actor.organisation.ownerId)) recipients.add(safeTrim(actor.organisation.ownerId));
+      if (Array.isArray(actor.organisation.adminUserIds)) {
+        actor.organisation.adminUserIds.forEach((id) => recipients.add(id));
+      }
+    }
+    recipients.delete(uid);
+
+    const title = targetType === "group"
+      ? targetName
+      : firstPublicText(actor.organisation.name, "LocalLink organisation");
+    await Promise.all([...recipients].map(async (recipientId) => {
+      await db.collection("users").doc(recipientId).collection("notifications").add({
+        type: "organisation_announcement",
+        title,
+        body: message,
+        organisationId,
+        groupId,
+        announcementId: announcementRef.id,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await sendPushToUser(recipientId, {
+        title,
+        body: message,
+        preferenceKey: "activityUpdates",
+        data: {
+          type: "organisation_announcement",
+          organisationId,
+          groupId,
+          announcementId: announcementRef.id,
+        },
+      });
+    }));
+
+    return { announcementId: announcementRef.id, recipientCount: recipients.size };
   }
 );
 
@@ -559,7 +2031,9 @@ async function updateRepeatCustomerSnapshot({
 }) {
   if (!customerId || !businessId) return;
 
-  await db
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const writes = [
+    db
     .collection("users")
     .doc(customerId)
     .collection("businessPreferences")
@@ -571,10 +2045,29 @@ async function updateRepeatCustomerSnapshot({
         lastServiceName: serviceName || "",
         lastAddress: customerAddress || "",
         lastNotes: customerNotes || "",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: timestamp,
       },
       { merge: true }
+    ),
+  ];
+
+  const reusableAddressData = reusableBookingAddressPreferenceData(
+    customerAddress,
+    timestamp
+  );
+
+  if (reusableAddressData) {
+    writes.push(
+      db
+        .collection("users")
+        .doc(customerId)
+        .collection("preferences")
+        .doc("booking")
+        .set(reusableAddressData, { merge: true })
     );
+  }
+
+  await Promise.all(writes);
 }
 
 async function addSystemBookingMessage(bookingId, text) {
@@ -636,8 +2129,83 @@ function postRemainingCapacity(post) {
   return Number(post.remainingCapacity ?? post.capacity ?? 1);
 }
 
+function directAvailabilityType(post) {
+  return safeTrim(post.type || post.availabilityType || "exact");
+}
+
+function directAvailabilityIsSingleCustomerWindow(post) {
+  return directAvailabilityType(post) === "window" &&
+    Math.max(1, Number(post.capacity ?? 1)) <= 1;
+}
+
+function directAvailabilityRootId(post, fallbackId) {
+  return safeTrim(
+    post.availabilityRootId ||
+    post.rootAvailabilityPostId ||
+    post.parentAvailabilityPostId ||
+    fallbackId
+  );
+}
+
+function directAvailabilityInterval(post) {
+  const start = timestampToMillis(
+    post.startDateTime || post.startTime || post.availabilityAt
+  );
+  const end = timestampToMillis(
+    post.endDateTime || post.endTime || post.availableUntil
+  );
+  if (!start || !end || end <= start) return null;
+  return { start, end };
+}
+
+function isActiveBookingStatus(status) {
+  return [
+    "pending_payment",
+    "pending_business_confirmation",
+    "confirmed",
+  ].includes(safeTrim(status));
+}
+
+function directAvailabilityFragmentData({
+  sourcePost,
+  startMillis,
+  endMillis,
+  rootId,
+  parentId,
+  bookingId,
+}) {
+  const start = admin.firestore.Timestamp.fromMillis(startMillis);
+  const end = admin.firestore.Timestamp.fromMillis(endMillis);
+  return {
+    ...sourcePost,
+    availabilityId: "",
+    availabilityRootId: rootId,
+    rootAvailabilityPostId: rootId,
+    parentAvailabilityPostId: parentId,
+    splitFromBookingId: bookingId || "",
+    bookingId: "",
+    availabilityAt: start,
+    startTime: start,
+    startDateTime: start,
+    availableFrom: start,
+    endTime: end,
+    endDateTime: end,
+    availableUntil: end,
+    expiresAt: end,
+    capacity: 1,
+    remainingCapacity: 1,
+    status: "live",
+    isActive: true,
+    archived: false,
+    archivedReason: null,
+    archivedAt: null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 function assertDirectAvailabilitySelectable(post, selectedStart, durationMinutes) {
-  const type = safeTrim(post.type || post.availabilityType || "exact");
+  const type = directAvailabilityType(post);
   const remaining = postRemainingCapacity(post);
   assert(post.isActive === true, "failed-precondition", "Availability is no longer live.");
   assert(post.archived !== true, "failed-precondition", "Availability is no longer live.");
@@ -685,17 +2253,84 @@ function directAvailabilityPostUpdate(post, bookingId) {
   };
 }
 
+function directAvailabilityArchiveUpdate({ bookingId, rootId }) {
+  return {
+    remainingCapacity: 0,
+    status: "booked",
+    isActive: false,
+    archived: true,
+    archivedReason: "booked",
+    bookingId,
+    availabilityRootId: rootId,
+    rootAvailabilityPostId: rootId,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+function applyDirectWindowBookingMutation({
+  tx,
+  availabilityRef,
+  post,
+  availabilityPostId,
+  bookingId,
+  selectedStart,
+  selectedEnd,
+  serviceDurationMinutes,
+}) {
+  const rootId = directAvailabilityRootId(post, availabilityPostId);
+  const sourceInterval = directAvailabilityInterval(post);
+  assert(sourceInterval, "failed-precondition", "Invalid availability window.");
+
+  const fragments = subtractBookedInterval({
+    availability: sourceInterval,
+    booking: {
+      start: selectedStart.getTime(),
+      end: selectedEnd.getTime(),
+    },
+    minimumDurationMinutes: serviceDurationMinutes,
+  });
+
+  tx.update(availabilityRef, directAvailabilityArchiveUpdate({
+    bookingId,
+    rootId,
+  }));
+
+  for (const fragment of fragments) {
+    const fragmentRef = db.collection("availabilityPosts").doc();
+    tx.set(fragmentRef, directAvailabilityFragmentData({
+      sourcePost: post,
+      startMillis: fragment.start,
+      endMillis: fragment.end,
+      rootId,
+      parentId: availabilityPostId,
+      bookingId,
+    }));
+  }
+
+  return {
+    rootId,
+    fragments,
+  };
+}
+
 function directAvailabilityRestoreUpdate(post, bookingId) {
   const capacity = Math.max(1, Number(post.capacity ?? 1));
   const remaining = Math.max(0, postRemainingCapacity(post));
   const restored = Math.min(capacity, remaining + 1);
+  const usableEnd = availabilityUsableEndDate(post);
+  const stillUsable = usableEnd ? usableEnd > new Date() : true;
   const update = {
     remainingCapacity: restored,
-    status: "live",
-    isActive: true,
-    archived: false,
-    archivedReason: admin.firestore.FieldValue.delete(),
-    archivedAt: admin.firestore.FieldValue.delete(),
+    status: stillUsable ? "live" : "expired",
+    isActive: stillUsable,
+    archived: !stillUsable,
+    archivedReason: stillUsable
+      ? admin.firestore.FieldValue.delete()
+      : "expired",
+    archivedAt: stillUsable
+      ? admin.firestore.FieldValue.delete()
+      : admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
 
@@ -704,6 +2339,20 @@ function directAvailabilityRestoreUpdate(post, bookingId) {
   }
 
   return update;
+}
+
+function availabilityUsableEndDate(post) {
+  const candidate =
+    post?.endDateTime ||
+    post?.endTime ||
+    post?.availableUntil ||
+    post?.startDateTime ||
+    post?.startTime ||
+    post?.availabilityAt;
+
+  if (candidate?.toDate) return candidate.toDate();
+  if (candidate instanceof Date) return candidate;
+  return null;
 }
 
 function directAvailabilityNeedsRestore(booking) {
@@ -720,14 +2369,162 @@ async function restoreDirectAvailabilityInTransaction(tx, bookingRef, booking, b
     .doc(safeTrim(booking.availabilityPostId));
   const postSnap = await tx.get(postRef);
 
+  const post = postSnap.exists ? postSnap.data() || {} : {};
+  const shouldRestoreWindow =
+    booking.directAvailabilityWindow === true ||
+    (directAvailabilityIsSingleCustomerWindow(post) &&
+      safeTrim(booking.availabilityRootId));
+
+  if (shouldRestoreWindow) {
+    await restoreDirectWindowAvailabilityInTransaction({
+      tx,
+      booking,
+      bookingId,
+      sourcePost: post,
+      sourcePostRef: postRef,
+    });
+
+    tx.update(bookingRef, {
+      availabilityRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    return true;
+  }
+
   if (postSnap.exists) {
-    tx.update(postRef, directAvailabilityRestoreUpdate(postSnap.data() || {}, bookingId));
+    tx.update(postRef, directAvailabilityRestoreUpdate(post, bookingId));
   }
 
   tx.update(bookingRef, {
     availabilityRestoredAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+
+  return true;
+}
+
+async function restoreDirectWindowAvailabilityInTransaction({
+  tx,
+  booking,
+  bookingId,
+  sourcePost,
+  sourcePostRef,
+}) {
+  const bookingStart = timestampToMillis(booking.startDate || booking.startTime);
+  const bookingEnd = timestampToMillis(booking.endDate);
+  const now = Date.now();
+  if (!bookingStart || !bookingEnd || bookingEnd <= bookingStart) return false;
+
+  const rootId = safeTrim(booking.availabilityRootId) ||
+    directAvailabilityRootId(sourcePost, safeTrim(booking.availabilityPostId));
+  if (!rootId) return false;
+
+  const businessId = safeTrim(booking.businessId);
+  const serviceId = safeTrim(booking.serviceId);
+  const durationMinutes = Math.max(1, Number(booking.serviceDurationMinutes || 30));
+
+  const availabilityQuery = db.collection("availabilityPosts")
+    .where("availabilityRootId", "==", rootId)
+    .where("isActive", "==", true);
+  const availabilitySnap = await tx.get(availabilityQuery);
+
+  const activeBookingQuery = db.collection("bookings")
+    .where("availabilityRootId", "==", rootId)
+    .where("status", "in", [
+      "pending_payment",
+      "pending_business_confirmation",
+      "confirmed",
+    ]);
+  const activeBookingSnap = await tx.get(activeBookingQuery);
+
+  const busyIntervals = [];
+  for (const doc of activeBookingSnap.docs) {
+    if (doc.id === bookingId) continue;
+    const data = doc.data() || {};
+    if (!isActiveBookingStatus(data.status)) continue;
+    const start = timestampToMillis(data.startDate || data.startTime);
+    const end = timestampToMillis(data.endDate);
+    if (start && end && end > start) {
+      busyIntervals.push({ start, end });
+    }
+  }
+
+  const restorableIntervals = restorableCancelledIntervals({
+    booking: { start: bookingStart, end: bookingEnd },
+    busyIntervals,
+    now,
+  });
+
+  if (restorableIntervals.length === 0) return false;
+
+  const freeIntervals = [];
+  const activeFragmentRefs = [];
+  for (const doc of availabilitySnap.docs) {
+    const data = doc.data() || {};
+    if (safeTrim(data.businessId) !== businessId ||
+      safeTrim(data.serviceId) !== serviceId ||
+      data.archived === true ||
+      safeTrim(data.status || "live") !== "live") {
+      continue;
+    }
+
+    const interval = directAvailabilityInterval(data);
+    if (!interval || interval.end <= now) continue;
+    freeIntervals.push(interval);
+    activeFragmentRefs.push(doc.ref);
+  }
+
+  const merged = mergeAvailabilityIntervals([
+    ...freeIntervals,
+    ...restorableIntervals,
+  ]).filter(interval =>
+    interval.end > now &&
+    (interval.end - interval.start) / 60000 >= durationMinutes
+  );
+
+  for (const ref of activeFragmentRefs) {
+    tx.update(ref, {
+      isActive: false,
+      archived: true,
+      status: "replaced",
+      archivedReason: "merged_after_cancellation",
+      archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  const basePost = Object.keys(sourcePost || {}).length
+    ? sourcePost
+    : {
+      businessId,
+      serviceId,
+      serviceName: booking.serviceName,
+      durationMinutes,
+      type: "window",
+      availabilityType: "window",
+      capacity: 1,
+      remainingCapacity: 1,
+    };
+
+  for (const interval of merged) {
+    const fragmentRef = db.collection("availabilityPosts").doc();
+    tx.set(fragmentRef, directAvailabilityFragmentData({
+      sourcePost: basePost,
+      startMillis: interval.start,
+      endMillis: interval.end,
+      rootId,
+      parentId: safeTrim(booking.availabilityPostId),
+      bookingId,
+    }));
+  }
+
+  if (sourcePostRef && sourcePost.bookingId === bookingId) {
+    tx.update(sourcePostRef, {
+      bookingId: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
 
   return true;
 }
@@ -785,6 +2582,21 @@ async function finalizePaidBookingInTransaction({
   const data = bookingSnap.data() || {};
   const currentStatus = safeTrim(data.status);
   const currentPaymentStatus = safeTrim(data.paymentStatus);
+  const eventStripeAccountId = safeTrim(paymentMetadata.stripeAccountId);
+  const expectedStripeAccountId = safeTrim(data.paymentStripeAccountId);
+
+  if (
+    eventStripeAccountId &&
+    expectedStripeAccountId &&
+    eventStripeAccountId !== expectedStripeAccountId
+  ) {
+    logger.warn("Paid booking reconciliation skipped; Stripe account mismatch", {
+      bookingId,
+      eventStripeAccountId,
+      expectedStripeAccountId,
+    });
+    return { changed: false, reason: "stripe_account_mismatch" };
+  }
 
   if (
     currentPaymentStatus === "paid" &&
@@ -871,6 +2683,64 @@ async function finalizePaidBookingInTransaction({
   return { changed: true, status: nextStatus };
 }
 
+function stripeOptionsForBookingPayment(booking) {
+  const accountId = safeTrim(booking.paymentStripeAccountId || booking.stripeAccountId);
+  const chargeType = safeTrim(booking.stripeChargeType).toLowerCase();
+  const accountContext = safeTrim(booking.stripeAccountContext).toLowerCase();
+
+  if (
+    accountId &&
+    (chargeType === STRIPE_CHARGE_TYPE_DIRECT ||
+      accountContext === STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED)
+  ) {
+    return { stripeAccount: accountId };
+  }
+
+  return undefined;
+}
+
+function stripeBookingPaymentFields(stripeAccountId) {
+  return {
+    stripeChargeType: STRIPE_CHARGE_TYPE_DIRECT,
+    stripeAccountContext: STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED,
+    paymentStripeAccountId: stripeAccountId,
+  };
+}
+
+async function retrievePaymentIntentForBooking(stripe, booking) {
+  const paymentIntentId = safeTrim(booking.paymentIntentId);
+  assert(paymentIntentId, "failed-precondition", "Missing payment intent.");
+  return stripe.paymentIntents.retrieve(
+    paymentIntentId,
+    stripeOptionsForBookingPayment(booking)
+  );
+}
+
+async function existingRefundForBooking(stripe, booking) {
+  return stripe.refunds.list(
+    {
+      payment_intent: safeTrim(booking.paymentIntentId),
+      limit: 1,
+    },
+    stripeOptionsForBookingPayment(booking)
+  );
+}
+
+async function createRefundForBooking(stripe, booking) {
+  const existing = await existingRefundForBooking(stripe, booking);
+
+  if (existing.data.length > 0) {
+    return existing.data[0];
+  }
+
+  return stripe.refunds.create(
+    {
+      payment_intent: safeTrim(booking.paymentIntentId),
+    },
+    stripeOptionsForBookingPayment(booking)
+  );
+}
+
 async function retrievePendingPaymentIntentForCleanup(stripe, booking) {
   const paymentIntentId = safeTrim(booking.paymentIntentId);
 
@@ -883,7 +2753,10 @@ async function retrievePendingPaymentIntentForCleanup(stripe, booking) {
   }
 
   try {
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      stripeOptionsForBookingPayment(booking)
+    );
     return {
       decision: cleanupDecisionForPaymentIntentStatus(paymentIntent.status),
       paymentIntent,
@@ -917,8 +2790,9 @@ async function retrievePendingPaymentIntentForCleanup(stripe, booking) {
   }
 }
 
-async function cancelAbandonedPaymentIntentIfNeeded(stripe, paymentIntent, bookingId) {
+async function cancelAbandonedPaymentIntentIfNeeded(stripe, paymentIntent, booking) {
   if (!paymentIntent) return;
+  const bookingId = safeTrim(booking.bookingId);
 
   const cancellable = [
     "requires_payment_method",
@@ -930,7 +2804,11 @@ async function cancelAbandonedPaymentIntentIfNeeded(stripe, paymentIntent, booki
   if (!cancellable.includes(paymentIntent.status)) return;
 
   try {
-    await stripe.paymentIntents.cancel(paymentIntent.id);
+    await stripe.paymentIntents.cancel(
+      paymentIntent.id,
+      {},
+      stripeOptionsForBookingPayment(booking)
+    );
   } catch (error) {
     logger.warn("Stripe PaymentIntent cancel failed during scheduled cleanup", {
       bookingId,
@@ -942,13 +2820,33 @@ async function cancelAbandonedPaymentIntentIfNeeded(stripe, paymentIntent, booki
   }
 }
 
+const DIRECT_BOOKING_PAYMENT_METHODS = new Set(["cash", "bank_transfer"]);
+
+function directBookingPaymentMethodFromRequest(data) {
+  const method = safeTrim(data?.paymentMethod || "cash").toLowerCase();
+  assert(
+    DIRECT_BOOKING_PAYMENT_METHODS.has(method),
+    "invalid-argument",
+    "Choose cash or bank transfer for direct payment."
+  );
+  return method;
+}
+
+function directBookingPaymentStatus() {
+  return "pay_on_arrival";
+}
+
+function normalisedPaymentMethods(methods) {
+  if (!Array.isArray(methods)) return [];
+  return methods.map((method) => safeTrim(method).toLowerCase()).filter(Boolean);
+}
+
 async function buildDirectAvailabilityBooking({
   request,
   paymentMethod,
   paymentStatus,
 }) {
-  const uid = request.auth?.uid;
-  assert(uid, "unauthenticated", "Login required.");
+  const uid = assertRegisteredAuth(request);
 
   const businessId = safeTrim(request.data?.businessId);
   const serviceId = safeTrim(request.data?.serviceId);
@@ -965,9 +2863,7 @@ async function buildDirectAvailabilityBooking({
   assert(businessSnap.exists, "not-found", "Business not found.");
 
   const business = businessSnap.data() || {};
-  const paymentMethods = Array.isArray(business.paymentMethods)
-    ? business.paymentMethods
-    : ["cash"];
+  const paymentMethods = normalisedPaymentMethods(business.paymentMethods);
   assert(paymentMethods.includes(paymentMethod), "failed-precondition", "This payment method is not available.");
 
   const serviceSnap = await businessRef.collection("services").doc(serviceId).get();
@@ -1009,13 +2905,15 @@ async function buildDirectAvailabilityBooking({
     assert(safeTrim(post.businessId) === businessId, "permission-denied", "Availability does not belong to this business.");
     assert(safeTrim(post.serviceId) === serviceId, "failed-precondition", "Availability no longer matches this service.");
     assertDirectAvailabilitySelectable(post, selectedStart, serviceDurationMinutes);
+    const isSingleCustomerWindow = directAvailabilityIsSingleCustomerWindow(post);
+    const availabilityRootId = directAvailabilityRootId(post, availabilityPostId);
 
     const price = Number(post.priceOverride ?? post.price ?? service.price ?? 0);
     assert(price > 0, "failed-precondition", "Invalid service price.");
     const selectedEnd = new Date(selectedStart.getTime() + serviceDurationMinutes * 60 * 1000);
-    const status = paymentMethod === "cash"
-      ? (requiresBusinessApproval ? "pending_business_confirmation" : "confirmed")
-      : "pending_payment";
+    const status = paymentMethod === "stripe"
+      ? "pending_payment"
+      : (requiresBusinessApproval ? "pending_business_confirmation" : "confirmed");
 
     booking = {
       bookingId,
@@ -1041,7 +2939,9 @@ async function buildDirectAvailabilityBooking({
       paymentStatus,
       paymentIntentId: "",
       directAvailability: true,
+      directAvailabilityWindow: isSingleCustomerWindow,
       availabilityPostId,
+      availabilityRootId,
       lockExpiresAt,
       slotId: "",
       slotIds: [],
@@ -1050,7 +2950,7 @@ async function buildDirectAvailabilityBooking({
       startDate: admin.firestore.Timestamp.fromDate(selectedStart),
       endDate: admin.firestore.Timestamp.fromDate(selectedEnd),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      confirmedAt: paymentMethod === "cash" && !requiresBusinessApproval
+      confirmedAt: paymentMethod !== "stripe" && !requiresBusinessApproval
         ? admin.firestore.FieldValue.serverTimestamp()
         : null,
       unreadForCustomer: 0,
@@ -1058,7 +2958,20 @@ async function buildDirectAvailabilityBooking({
     };
 
     tx.set(bookingRef, booking);
-    tx.update(availabilityRef, directAvailabilityPostUpdate(post, bookingId));
+    if (isSingleCustomerWindow) {
+      applyDirectWindowBookingMutation({
+        tx,
+        availabilityRef,
+        post,
+        availabilityPostId,
+        bookingId,
+        selectedStart,
+        selectedEnd,
+        serviceDurationMinutes,
+      });
+    } else {
+      tx.update(availabilityRef, directAvailabilityPostUpdate(post, bookingId));
+    }
   });
 
   return {
@@ -1071,12 +2984,16 @@ async function buildDirectAvailabilityBooking({
 }
 
 exports.createDirectAvailabilityCashBooking = onCall(
-  { region: "us-central1" },
+  {
+    region: "us-central1",
+    secrets: ["RESEND_API_KEY"],
+  },
   async (request) => {
+    const paymentMethod = directBookingPaymentMethodFromRequest(request.data);
     const result = await buildDirectAvailabilityBooking({
       request,
-      paymentMethod: "cash",
-      paymentStatus: "pay_on_arrival",
+      paymentMethod,
+      paymentStatus: directBookingPaymentStatus(),
     });
 
     const booking = result.booking || {};
@@ -1086,11 +3003,12 @@ exports.createDirectAvailabilityCashBooking = onCall(
       await sendPushToUser(ownerId, {
         title: result.requiresBusinessApproval ? "New Last-Minute Request" : "New Booking",
         body: `${booking.customerName || "A customer"} booked ${booking.serviceName || "a service"}.`,
-        data: {
-          bookingId: result.bookingId,
-          businessId: booking.businessId,
-          type: result.requiresBusinessApproval ? "last_minute_request" : "new_booking",
-        },
+	        data: {
+	          bookingId: result.bookingId,
+	          businessId: booking.businessId,
+	          viewerType: "business",
+	          type: result.requiresBusinessApproval ? "last_minute_request" : "new_booking",
+	        },
         preferenceKey: "serviceBookingUpdates",
       });
     }
@@ -1100,15 +3018,36 @@ exports.createDirectAvailabilityCashBooking = onCall(
       body: result.requiresBusinessApproval
         ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
         : `Your booking for ${booking.serviceName || "your service"} is confirmed.`,
-      data: {
-        bookingId: result.bookingId,
-        businessId: booking.businessId,
-        type: result.requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
-      },
+	      data: {
+	        bookingId: result.bookingId,
+	        businessId: booking.businessId,
+	        viewerType: "customer",
+	        type: result.requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
+	      },
       preferenceKey: "serviceBookingUpdates",
     });
 
     await ensureBookingConversationDoc(result.bookingId, booking);
+
+    await updateRepeatCustomerSnapshot({
+      customerId: booking.customerId,
+      businessId: booking.businessId,
+      serviceId: booking.serviceId,
+      serviceName: booking.serviceName,
+      customerAddress: booking.customerAddress,
+      customerNotes: booking.customerNotes,
+    });
+
+    if (booking.status === "confirmed") {
+      await sendBookingConfirmationEmailsSafe({
+        db,
+        admin,
+        logger,
+        bookingId: result.bookingId,
+        booking,
+        business: result.business,
+      });
+    }
 
     return {
       ok: true,
@@ -1125,84 +3064,232 @@ exports.createDirectAvailabilityPaymentIntent = onCall(
     secrets: ["STRIPE_SECRET_KEY"],
   },
   async (request) => {
-    const stripe = getStripe();
-    const businessId = safeTrim(request.data?.businessId);
-    assert(businessId, "invalid-argument", "Missing booking data.");
-
-    const preflightBusinessSnap = await db.collection("businesses").doc(businessId).get();
-    assert(preflightBusinessSnap.exists, "not-found", "Business not found.");
-
-    const preflightBusiness = preflightBusinessSnap.data() || {};
-    const stripeAccountId = preflightBusiness.stripeAccountId;
-    assert(stripeAccountId, "failed-precondition", "Stripe not connected.");
-
-    const account = await stripe.accounts.retrieve(stripeAccountId);
-    assert(account.charges_enabled, "failed-precondition", "Business cannot accept payments yet.");
-
+    const flow = "createDirectAvailabilityPaymentIntent";
     let result = null;
 
     try {
+      stripeBookingLog(flow, 1, { event: "callable_entered" });
+      const uid = assertRegisteredAuth(request);
+      stripeBookingLog(flow, 2, {
+        event: "auth_validated",
+        uidPresent: true,
+      });
+
+      const businessId = safeTrim(request.data?.businessId);
+      const serviceId = safeTrim(request.data?.serviceId);
+      const availabilityPostId = safeTrim(request.data?.availabilityPostId);
+      const selectedStartMillis = Number(request.data?.selectedStartMillis || 0);
+      assert(businessId, "invalid-argument", "Missing booking data.");
+      stripeBookingLog(flow, 3, {
+        event: "request_payload_validated",
+        businessId,
+        serviceId,
+        availabilityPostId,
+        selectedStartMillisPresent: Number.isFinite(selectedStartMillis) && selectedStartMillis > 0,
+      });
+
+      const stripe = getStripe();
+      stripeBookingLog(flow, 4, {
+        event: "stripe_client_initialised",
+        secretFingerprint: stripeSecretFingerprint(),
+      });
+
+      await stripePlatformIdentity(stripe, flow, 5);
+
+      const preflightBusinessSnap = await db.collection("businesses").doc(businessId).get();
+      assert(preflightBusinessSnap.exists, "not-found", "Business not found.");
+      stripeBookingLog(flow, 6, {
+        event: "business_document_loaded",
+        businessId,
+      });
+
+      const preflightAvailabilitySnap = await db
+        .collection("availabilityPosts")
+        .doc(availabilityPostId)
+        .get();
+      stripeBookingLog(flow, "6A", {
+        event: "availability_document_loaded",
+        availabilityPostId,
+        exists: preflightAvailabilitySnap.exists,
+      });
+
+      const preflightServiceSnap = await db
+        .collection("businesses")
+        .doc(businessId)
+        .collection("services")
+        .doc(serviceId)
+        .get();
+      stripeBookingLog(flow, "6B", {
+        event: "service_document_loaded",
+        businessId,
+        serviceId,
+        exists: preflightServiceSnap.exists,
+      });
+
+      const preflightBusiness = preflightBusinessSnap.data() || {};
+      const stripeAccountId = preflightBusiness.stripeAccountId;
+      assert(stripeAccountId, "failed-precondition", "Stripe not connected.");
+      stripeBookingLog(flow, 7, {
+        event: "destination_account_found",
+        businessId,
+        destinationAccountId: stripeAccountId,
+      });
+
+      let account;
+      try {
+        account = await stripe.accounts.retrieve(stripeAccountId);
+        stripeBookingLog(flow, 8, {
+          event: "destination_account_loaded",
+          destinationAccountId: stripeAccountId,
+          charges_enabled: account.charges_enabled,
+          payouts_enabled: account.payouts_enabled,
+          details_submitted: account.details_submitted,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 8, error, {
+          destinationAccountId: stripeAccountId,
+        });
+        throw error;
+      }
+      assert(account.charges_enabled, "failed-precondition", "Business cannot accept payments yet.");
+
       result = await buildDirectAvailabilityBooking({
         request,
         paymentMethod: "stripe",
         paymentStatus: "pending",
       });
       const booking = result.booking || {};
+      stripeBookingLog(flow, 9, {
+        event: "pending_booking_written",
+        bookingId: result.bookingId,
+        businessId: booking.businessId,
+        serviceId: booking.serviceId,
+        amount: booking.price,
+        requiresBusinessApproval: result.requiresBusinessApproval,
+      });
 
-      const paymentIntent = await stripe.paymentIntents.create(
-        {
-          amount: booking.price,
-          currency: "gbp",
-          automatic_payment_methods: { enabled: true },
-          metadata: {
-            bookingId: result.bookingId,
-            businessId: booking.businessId,
-            customerId: booking.customerId,
-            directAvailability: "true",
-            availabilityPostId: booking.availabilityPostId,
+      stripeBookingLog(flow, 10, {
+        event: "payment_intent_create_starting",
+        bookingId: result.bookingId,
+        destinationAccountId: stripeAccountId,
+        amount: booking.price,
+      });
+      let paymentIntent;
+      try {
+        paymentIntent = await stripe.paymentIntents.create(
+          {
+            amount: booking.price,
+            currency: "gbp",
+            payment_method_types: ["card"],
+            metadata: {
+              bookingId: result.bookingId,
+              businessId: booking.businessId,
+              customerId: booking.customerId,
+              directAvailability: "true",
+              availabilityPostId: booking.availabilityPostId,
+            },
           },
-          transfer_data: {
-            destination: stripeAccountId,
-          },
-        },
-        {
-          idempotencyKey: `direct_availability_booking_${result.bookingId}`,
-        }
-      );
+          {
+            stripeAccount: stripeAccountId,
+            idempotencyKey: `direct_availability_booking_${result.bookingId}`,
+          }
+        );
+        stripeBookingLog(flow, 11, {
+          event: "payment_intent_created",
+          bookingId: result.bookingId,
+          paymentIntentId: paymentIntent.id,
+          destinationAccountId: stripeAccountId,
+          livemode: paymentIntent.livemode,
+          status: paymentIntent.status,
+          clientSecretPresent: !!paymentIntent.client_secret,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 11, error, {
+          bookingId: result.bookingId,
+          destinationAccountId: stripeAccountId,
+        });
+        throw error;
+      }
 
-      await result.bookingRef.update({
+      try {
+        await result.bookingRef.update({
+          paymentIntentId: paymentIntent.id,
+          paymentStatus: "payment_intent_created",
+          ...stripeBookingPaymentFields(stripeAccountId),
+        });
+        stripeBookingLog(flow, 12, {
+          event: "booking_payment_intent_write_succeeded",
+          bookingId: result.bookingId,
+          paymentIntentId: paymentIntent.id,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 12, error, {
+          bookingId: result.bookingId,
+          paymentIntentId: paymentIntent.id,
+        });
+        throw error;
+      }
+
+      await updateRepeatCustomerSnapshot({
+        customerId: booking.customerId,
+        businessId: booking.businessId,
+        serviceId: booking.serviceId,
+        serviceName: booking.serviceName,
+        customerAddress: booking.customerAddress,
+        customerNotes: booking.customerNotes,
+      });
+      stripeBookingLog(flow, 13, {
+        event: "repeat_customer_snapshot_updated",
+        bookingId: result.bookingId,
+      });
+
+      stripeBookingLog(flow, 14, {
+        event: "response_returning_to_flutter",
+        bookingId: result.bookingId,
         paymentIntentId: paymentIntent.id,
-        paymentStatus: "payment_intent_created",
+        clientSecretPresent: !!paymentIntent.client_secret,
+        stripeAccountContext: STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED,
+        stripeAccountId,
+        requiresBusinessApproval: result.requiresBusinessApproval,
       });
 
       return {
         ok: true,
         bookingId: result.bookingId,
         clientSecret: paymentIntent.client_secret,
+        stripeAccountContext: STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED,
+        stripeAccountId,
         requiresBusinessApproval: result.requiresBusinessApproval,
       };
     } catch (error) {
       if (result?.bookingId) {
-        logger.warn("Restoring direct availability after payment setup failure", {
+        logger.warn("[StripeBooking] createDirectAvailabilityPaymentIntent STEP 15 restoring direct availability after failure", {
           bookingId: result.bookingId,
-          error: error.message,
+          error: safeStripeDiagnosticFields(error).message,
         });
         await restoreDirectAvailabilityBooking(result.bookingId);
       }
 
-      throw error;
+      stripeBookingError(flow, 16, error, {
+        bookingId: result?.bookingId || undefined,
+      });
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError(
+        "internal",
+        error?.message || "Failed to create direct availability payment."
+      );
     }
   }
 );
-
 exports.cancelPendingCardBooking = onCall(
   {
     region: "us-central1",
     secrets: ["STRIPE_SECRET_KEY"],
   },
   async (request) => {
-    const uid = request.auth?.uid;
-    assert(uid, "unauthenticated", "Login required.");
+    const uid = assertRegisteredAuth(request);
 
     const bookingId = safeTrim(request.data?.bookingId);
     assert(bookingId, "invalid-argument", "Missing bookingId.");
@@ -1229,7 +3316,7 @@ exports.cancelPendingCardBooking = onCall(
     const paymentIntentId = safeTrim(booking.paymentIntentId);
 
     if (paymentIntentId) {
-      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const paymentIntent = await retrievePaymentIntentForBooking(stripe, booking);
 
       if (paymentIntent.status === "succeeded") {
         return { ok: false, status: "payment_succeeded" };
@@ -1248,7 +3335,11 @@ exports.cancelPendingCardBooking = onCall(
 
       if (cancellable.includes(paymentIntent.status)) {
         try {
-          await stripe.paymentIntents.cancel(paymentIntentId);
+          await stripe.paymentIntents.cancel(
+            paymentIntentId,
+            {},
+            stripeOptionsForBookingPayment(booking)
+          );
         } catch (error) {
           logger.warn("Stripe PaymentIntent cancel failed during booking release", {
             bookingId,
@@ -1478,9 +3569,7 @@ async function applySeatEnforcement(businessId) {
 exports.previewSeatReductionImpact = onCall(
   { region: "us-central1" },
   async (request) => {
-    assert(request.auth, "unauthenticated", "Login required.");
-
-    const uid = request.auth.uid;
+    const uid = assertRegisteredAuth(request);
     const businessId = request.data?.businessId;
 
     assert(businessId, "invalid-argument", "Missing businessId.");
@@ -1520,13 +3609,13 @@ exports.previewSeatReductionImpact = onCall(
 exports.cancelBooking = onCall(
   {
     region: "us-central1",
-    secrets: ["STRIPE_SECRET_KEY"], // 🔥 THIS IS THE FIX
+    secrets: ["STRIPE_SECRET_KEY", "RESEND_API_KEY"], // 🔥 THIS IS THE FIX
   },
   async (request) => {
   console.log("🚀 CANCEL FUNCTION HIT");
 
   try {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     if (!uid) {
       throw new HttpsError("unauthenticated", "You must be signed in.");
     }
@@ -1612,22 +3701,9 @@ exports.cancelBooking = onCall(
 
     if (shouldRefund && paymentIntentId) {
       const stripe = getStripe();
-
-      const existing = await stripe.refunds.list({
-        payment_intent: paymentIntentId,
-        limit: 1
-      });
-
-      if (existing.data.length > 0) {
-        refundId = existing.data[0].id;
-        console.log("⚠️ Refund already exists:", refundId);
-      } else {
-        const refund = await stripe.refunds.create({
-          payment_intent: paymentIntentId
-        });
-        refundId = refund.id;
-        console.log("💸 Refund created:", refundId);
-      }
+      const refund = await createRefundForBooking(stripe, booking);
+      refundId = refund.id;
+      console.log("💸 Refund resolved:", refundId);
     }
 
     const bookingStatus =
@@ -1682,6 +3758,10 @@ exports.cancelBooking = onCall(
         : "Booking cancelled by customer"
     );
 
+    const cancellationBusinessSnap =
+      await db.collection("businesses").doc(businessId).get();
+    const cancellationBusiness = cancellationBusinessSnap.data() || {};
+
     // 🔔 PUSH + UNREAD
   if (isBusiness) {
 
@@ -1690,7 +3770,7 @@ exports.cancelBooking = onCall(
     body: shouldRefund
       ? "Your booking was cancelled by the business. A refund has been issued."
       : "Your booking was cancelled by the business.",
-    data: { bookingId, type: "booking_cancelled" },
+	    data: { bookingId, businessId, viewerType: "customer", type: "booking_cancelled" },
     preferenceKey: "serviceBookingUpdates",
   });
 
@@ -1700,8 +3780,7 @@ exports.cancelBooking = onCall(
 
 } else {
 
-  const businessSnap = await db.collection("businesses").doc(businessId).get();
-  const ownerId = businessSnap.data()?.ownerId;
+  const ownerId = cancellationBusiness.ownerId;
 
   if (ownerId) {
     await sendPushToUser(ownerId, {
@@ -1709,7 +3788,7 @@ exports.cancelBooking = onCall(
       body: shouldRefund
         ? "A customer cancelled their booking (refund issued)."
         : "A customer cancelled their booking (no refund).",
-      data: { bookingId, type: "booking_cancelled" },
+	      data: { bookingId, businessId, viewerType: "business", type: "booking_cancelled" },
       preferenceKey: "serviceBookingUpdates",
     });
   }
@@ -1717,7 +3796,22 @@ exports.cancelBooking = onCall(
   await bookingRef.update({
     unreadForBusiness: admin.firestore.FieldValue.increment(1),
   });
-}
+  }
+
+    await sendBookingCancellationEmailsSafe({
+      db,
+      admin,
+      logger,
+      bookingId,
+      booking: {
+        ...booking,
+        status: bookingStatus,
+        cancelledBy,
+        refundStatus,
+        refundId: refundId || null,
+      },
+      business: cancellationBusiness,
+    });
 
     return {
       ok: true,
@@ -1736,10 +3830,12 @@ exports.cancelBooking = onCall(
 });
 
 exports.acceptShortNoticeBooking = onCall(
-  { region: "us-central1" },
+  {
+    region: "us-central1",
+    secrets: ["RESEND_API_KEY"],
+  },
   async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "You must be signed in.");
+    const uid = assertRegisteredAuth(request, "You must be signed in.");
 
     const bookingId = safeTrim(request.data?.bookingId);
     assert(bookingId, "invalid-argument", "Missing bookingId.");
@@ -1774,12 +3870,57 @@ exports.acceptShortNoticeBooking = onCall(
       await sendPushToUser(booking.customerId, {
         title: "Booking Confirmed",
         body: `${booking.businessName || "The business"} confirmed ${booking.serviceName || "your service"}.`,
-        data: { bookingId, businessId, type: "booking_confirmed" },
-        preferenceKey: "serviceBookingUpdates",
+	        data: { bookingId, businessId, viewerType: "customer", type: "booking_confirmed" },
+	        preferenceKey: "serviceBookingUpdates",
       });
     }
 
+    const businessSnap = businessId
+      ? await db.collection("businesses").doc(businessId).get()
+      : null;
+    await sendBookingConfirmationEmailsSafe({
+      db,
+      admin,
+      logger,
+      bookingId,
+      booking: {
+        ...booking,
+        status: "confirmed",
+        confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      business: businessSnap?.data() || {},
+    });
+
     return { ok: true, bookingId, status: "confirmed" };
+  }
+);
+
+exports.completeBooking = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const uid = assertRegisteredAuth(request, "You must be signed in.");
+
+    const bookingId = safeTrim(request.data?.bookingId);
+    assert(bookingId, "invalid-argument", "Missing bookingId.");
+
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    assert(bookingSnap.exists, "not-found", "Booking not found.");
+
+    const booking = bookingSnap.data() || {};
+    const businessId = safeTrim(booking.businessId);
+    assert(businessId, "failed-precondition", "Missing businessId.");
+    assert(await isBusinessOwner(uid, businessId), "permission-denied", "Not allowed.");
+    assert(booking.status === "confirmed", "failed-precondition", "Only confirmed bookings can be completed.");
+
+    await bookingRef.update({
+      status: "completed",
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await addSystemBookingMessage(bookingId, "Booking marked complete by business");
+    return { ok: true, bookingId, status: "completed" };
   }
 );
 
@@ -1789,8 +3930,7 @@ exports.declineShortNoticeBooking = onCall(
     secrets: ["STRIPE_SECRET_KEY"],
   },
   async (request) => {
-    const uid = request.auth?.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "You must be signed in.");
+    const uid = assertRegisteredAuth(request, "You must be signed in.");
 
     const bookingId = safeTrim(request.data?.bookingId);
     assert(bookingId, "invalid-argument", "Missing bookingId.");
@@ -1812,19 +3952,8 @@ exports.declineShortNoticeBooking = onCall(
     let refundId = null;
     if (booking.paymentIntentId) {
       const stripe = getStripe();
-      const existing = await stripe.refunds.list({
-        payment_intent: booking.paymentIntentId,
-        limit: 1,
-      });
-
-      if (existing.data.length > 0) {
-        refundId = existing.data[0].id;
-      } else {
-        const refund = await stripe.refunds.create({
-          payment_intent: booking.paymentIntentId,
-        });
-        refundId = refund.id;
-      }
+      const refund = await createRefundForBooking(stripe, booking);
+      refundId = refund.id;
     }
 
     const batch = db.batch();
@@ -1872,7 +4001,7 @@ exports.declineShortNoticeBooking = onCall(
         title: "Booking Declined",
         body:
           "Unfortunately this appointment could not be accepted because it was requested at very short notice.",
-        data: { bookingId, businessId, type: "booking_declined" },
+	        data: { bookingId, businessId, viewerType: "customer", type: "booking_declined" },
         preferenceKey: "serviceBookingUpdates",
       });
     }
@@ -1888,6 +4017,7 @@ exports.cleanupExpiredAvailabilityPosts = onSchedule(
   },
   async () => {
     const now = admin.firestore.Timestamp.now();
+    const nowDate = now.toDate();
     const snap = await db
       .collection("availabilityPosts")
       .where("isActive", "==", true)
@@ -1900,17 +4030,26 @@ exports.cleanupExpiredAvailabilityPosts = onSchedule(
     }
 
     const batch = db.batch();
+    let expiredCount = 0;
     snap.docs.forEach((doc) => {
+      const usableEnd = availabilityUsableEndDate(doc.data() || {});
+      if (usableEnd && usableEnd > nowDate) return;
+
       batch.update(doc.ref, {
         isActive: false,
         archived: true,
         archivedReason: "expired",
         archivedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      expiredCount += 1;
     });
 
+    if (expiredCount === 0) {
+      return null;
+    }
+
     await batch.commit();
-    logger.info("Expired availability posts archived", { count: snap.size });
+    logger.info("Expired availability posts archived", { count: expiredCount });
     return null;
   }
 );
@@ -1955,6 +4094,298 @@ exports.expireServiceRequests = onSchedule(
   }
 );
 
+function normaliseSearchText(value) {
+  if (Array.isArray(value)) {
+    return value.map(normaliseSearchText).filter(Boolean).join(" ");
+  }
+  return safeTrim(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function serviceMatchesCustomerRequest(requestData, serviceData) {
+  if (
+    serviceData.isActive === false ||
+    serviceData.isPublished === false ||
+    serviceData.isEnabled === false
+  ) {
+    return false;
+  }
+
+  const category = normaliseSearchText(requestData.category);
+  if (!category) return true;
+
+  const serviceText = [
+    serviceData.category,
+    serviceData.name,
+    serviceData.serviceName,
+    serviceData.details,
+    serviceData.description,
+    serviceData.searchKeywords,
+  ].map(normaliseSearchText).filter(Boolean).join(" ");
+
+  if (serviceText.includes(category) || category.includes(serviceText)) {
+    return true;
+  }
+
+  const serviceTokens = new Set(normalisedSearchTokens([
+    serviceData.category,
+    serviceData.name,
+    serviceData.serviceName,
+    serviceData.details,
+    serviceData.description,
+    serviceData.searchKeywords,
+  ]));
+  const categoryTokens = normalisedSearchTokens(requestData.category);
+  return categoryTokens.length > 0 &&
+    categoryTokens.every((token) => serviceTokens.has(token));
+}
+
+function normalisedSearchTokens(value) {
+  const text = normaliseSearchText(value);
+  if (!text) return [];
+  return text
+    .split(/\s+/)
+    .map(stemSearchToken)
+    .filter((token) => token.length > 1);
+}
+
+function stemSearchToken(token) {
+  if (token.endsWith("ing") && token.length > 5) {
+    return token.slice(0, -3);
+  }
+  if (token.endsWith("er") && token.length > 4) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith("s") && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function distanceMilesBetweenRequestAndBusiness(requestData, businessData) {
+  return distanceMilesBetweenPosts(
+    {
+      approxLatitude: requestData.approxLatitude,
+      approxLongitude: requestData.approxLongitude,
+    },
+    {
+      approxLatitude: businessData.latitude,
+      approxLongitude: businessData.longitude,
+    }
+  );
+}
+
+function businessCanReceiveServiceRequest(requestData, businessId, businessData) {
+  if (businessData.isActive === false) return false;
+  if (businessData.isClaimed !== true) return false;
+  if (businessData.acceptingLeads === false) return false;
+  if (safeTrim(requestData.customerBusinessId) === businessId) return false;
+
+  const distance = distanceMilesBetweenRequestAndBusiness(requestData, businessData);
+  if (distance === null) return false;
+
+  const radius =
+    numberFrom(businessData.leadRadiusMiles) ??
+    numberFrom(businessData.serviceRadiusMiles) ??
+    5;
+
+  return distance <= Math.max(radius, 5);
+}
+
+function serviceRequestRecipientIds(businessData) {
+  return [
+    safeTrim(businessData.ownerId),
+    ...(Array.isArray(businessData.ownerIds) ? businessData.ownerIds.map(safeTrim) : []),
+    ...(Array.isArray(businessData.adminUserIds) ? businessData.adminUserIds.map(safeTrim) : []),
+  ].filter(Boolean);
+}
+
+function serviceRequestNotificationCopy(requestData) {
+  const category = safeTrim(requestData.category) || "service";
+  const location = safeTrim(requestData.publicLocation || requestData.location);
+  const schedule = safeTrim(requestData.scheduleText || requestData.neededBy);
+  const title = `New nearby ${category} request`;
+  const details = [location, schedule].filter(Boolean).join(" · ");
+  return {
+    title,
+    body: details || "A customer nearby is looking for help.",
+  };
+}
+
+async function matchingServiceForRequest(businessRef, requestData) {
+  const servicesSnap = await businessRef
+    .collection("services")
+    .where("isActive", "==", true)
+    .limit(30)
+    .get();
+
+  for (const serviceDoc of servicesSnap.docs) {
+    const serviceData = serviceDoc.data() || {};
+    if (serviceMatchesCustomerRequest(requestData, serviceData)) {
+      return { id: serviceDoc.id, data: serviceData };
+    }
+  }
+  return null;
+}
+
+exports.notifyMatchedProvidersForServiceRequest = onDocumentCreated(
+  {
+    document: "serviceRequests/{requestId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const requestData = event.data?.data() || {};
+    if (safeTrim(requestData.status) !== "open" || requestData.isActive !== true) {
+      return;
+    }
+    if (
+      numberFrom(requestData.approxLatitude) === null ||
+      numberFrom(requestData.approxLongitude) === null
+    ) {
+      return;
+    }
+
+    const requestId = event.params.requestId;
+    const copy = serviceRequestNotificationCopy(requestData);
+    const businessesSnap = await db
+      .collection("businesses")
+      .where("isClaimed", "==", true)
+      .limit(300)
+      .get();
+
+    let matchedBusinessCount = 0;
+    let notifiedUserCount = 0;
+
+    for (const businessDoc of businessesSnap.docs) {
+      const businessData = businessDoc.data() || {};
+      if (!businessCanReceiveServiceRequest(requestData, businessDoc.id, businessData)) {
+        continue;
+      }
+
+      const matchedService = await matchingServiceForRequest(businessDoc.ref, requestData);
+      if (!matchedService) continue;
+
+      matchedBusinessCount += 1;
+      const recipients = new Set(serviceRequestRecipientIds(businessData));
+      for (const userId of recipients) {
+        const notificationId = `service_request_match_${requestId}_${businessDoc.id}`;
+        await db
+          .collection("users")
+          .doc(userId)
+          .collection("notifications")
+          .doc(notificationId)
+          .set({
+            type: "service_request_match",
+            title: copy.title,
+            body: copy.body,
+            serviceRequestId: requestId,
+            businessId: businessDoc.id,
+            serviceId: matchedService.id,
+            isRead: false,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+        await sendPushToUser(userId, {
+          title: copy.title,
+          body: copy.body,
+          preferenceKey: "serviceBookingUpdates",
+          data: {
+            type: "service_request_match",
+            serviceRequestId: requestId,
+            businessId: businessDoc.id,
+            serviceId: matchedService.id,
+            notificationId,
+          },
+        });
+        notifiedUserCount += 1;
+      }
+    }
+
+    logger.info("Service request provider notifications processed", {
+      requestId,
+      matchedBusinessCount,
+      notifiedUserCount,
+    });
+  }
+);
+
+async function notifyCustomerAboutServiceRequestOffer(event, previousData = null) {
+  const offer = event.data?.after?.data?.() || event.data?.data?.() || {};
+  const before = previousData || {};
+  if (safeTrim(offer.status) !== "active") return;
+  if (
+    previousData &&
+    safeTrim(before.status) === "active" &&
+    safeTrim(before.priceText) === safeTrim(offer.priceText) &&
+    safeTrim(before.proposedScheduleText) === safeTrim(offer.proposedScheduleText) &&
+    safeTrim(before.message) === safeTrim(offer.message)
+  ) {
+    return;
+  }
+
+  const requestId = event.params.requestId;
+  const businessId = safeTrim(offer.businessId) || event.params.businessId;
+  const requestSnap = await db.collection("serviceRequests").doc(requestId).get();
+  if (!requestSnap.exists) return;
+
+  const requestData = requestSnap.data() || {};
+  const customerId = safeTrim(requestData.customerId);
+  if (!customerId) return;
+
+  const businessName = safeTrim(offer.businessName) || "A local provider";
+  const serviceName = safeTrim(offer.serviceName);
+  const title = "New response to your request";
+  const body = serviceName
+    ? `${businessName} responded about ${serviceName}.`
+    : `${businessName} responded to your request.`;
+  const notificationId = `service_request_offer_${requestId}_${businessId}`;
+
+  await db
+    .collection("users")
+    .doc(customerId)
+    .collection("notifications")
+    .doc(notificationId)
+    .set({
+      type: "service_request_offer",
+      title,
+      body,
+      serviceRequestId: requestId,
+      businessId,
+      isRead: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+  await sendPushToUser(customerId, {
+    title,
+    body,
+    preferenceKey: "serviceBookingUpdates",
+    data: {
+      type: "service_request_offer",
+      serviceRequestId: requestId,
+      businessId,
+      notificationId,
+    },
+  });
+}
+
+exports.notifyCustomerForServiceRequestOffer = onDocumentCreated(
+  {
+    document: "serviceRequests/{requestId}/offers/{businessId}",
+    region: "us-central1",
+  },
+  async (event) => notifyCustomerAboutServiceRequestOffer(event)
+);
+
+exports.notifyCustomerForUpdatedServiceRequestOffer = onDocumentUpdated(
+  {
+    document: "serviceRequests/{requestId}/offers/{businessId}",
+    region: "us-central1",
+  },
+  async (event) => notifyCustomerAboutServiceRequestOffer(
+    event,
+    event.data?.before?.data?.() || {}
+  )
+);
+
 exports.cleanupExpiredShortNoticeBookings = onSchedule(
   {
     schedule: "every 5 minutes",
@@ -1980,19 +4411,8 @@ exports.cleanupExpiredShortNoticeBookings = onSchedule(
       let refundId = null;
       if (booking.paymentIntentId) {
         const stripe = getStripe();
-        const existing = await stripe.refunds.list({
-          payment_intent: booking.paymentIntentId,
-          limit: 1,
-        });
-
-        if (existing.data.length > 0) {
-          refundId = existing.data[0].id;
-        } else {
-          const refund = await stripe.refunds.create({
-            payment_intent: booking.paymentIntentId,
-          });
-          refundId = refund.id;
-        }
+        const refund = await createRefundForBooking(stripe, booking);
+        refundId = refund.id;
       }
 
       await doc.ref.update({
@@ -2015,11 +4435,12 @@ exports.cleanupExpiredShortNoticeBookings = onSchedule(
         await sendPushToUser(booking.customerId, {
           title: "Booking Request Expired",
           body: "Unfortunately we didn't receive confirmation in time.",
-          data: {
-            bookingId: doc.id,
-            businessId: booking.businessId || "",
-            type: "booking_expired",
-          },
+	          data: {
+	            bookingId: doc.id,
+	            businessId: booking.businessId || "",
+	            viewerType: "customer",
+	            type: "booking_expired",
+	          },
           preferenceKey: "serviceBookingUpdates",
         });
       }
@@ -2032,11 +4453,12 @@ exports.cleanupExpiredShortNoticeBookings = onSchedule(
         await sendPushToUser(ownerId, {
           title: "Booking Request Expired",
           body: "This booking request expired before it was accepted.",
-          data: {
-            bookingId: doc.id,
-            businessId: booking.businessId || "",
-            type: "booking_expired",
-          },
+	          data: {
+	            bookingId: doc.id,
+	            businessId: booking.businessId || "",
+	            viewerType: "business",
+	            type: "booking_expired",
+	          },
           preferenceKey: "serviceBookingUpdates",
         });
       }
@@ -2148,9 +4570,7 @@ exports.regenerateAvailability = onCall(
 
     try {
 
-      assert(request.auth,
-        "unauthenticated",
-        "Login required.");
+      assertRegisteredAuth(request);
 
       const businessId =
         safeTrim(request.data?.businessId);
@@ -2534,7 +4954,10 @@ async function getRequiredSlots({
   return slots;
 }
 exports.createCashBooking = onCall(
-  { region: "us-central1" },
+  {
+    region: "us-central1",
+    secrets: ["RESEND_API_KEY"],
+  },
   async (request) => {
     try {
       assert(request.auth, "unauthenticated", "Login required.");
@@ -2558,6 +4981,7 @@ const availabilityPostId = safeTrim(request.data?.availabilityPostId);
 const customerName = safeTrim(request.data?.customerName);
       const customerAddress = safeTrim(request.data?.customerAddress);
       const customerNotes = safeTrim(request.data?.customerNotes);
+      const paymentMethod = directBookingPaymentMethodFromRequest(request.data);
 
       const addOnIds = Array.isArray(request.data?.addOnIds)
         ? request.data.addOnIds.map(id => safeTrim(id)).filter(Boolean)
@@ -2575,14 +4999,12 @@ const customerName = safeTrim(request.data?.customerName);
       assert(businessSnap.exists, "not-found", "Business not found.");
 
       const business = businessSnap.data() || {};
-      const paymentMethods = Array.isArray(business.paymentMethods)
-        ? business.paymentMethods
-        : ["cash"];
+      const paymentMethods = normalisedPaymentMethods(business.paymentMethods);
 
       assert(
-        paymentMethods.includes("cash"),
+        paymentMethods.includes(paymentMethod),
         "failed-precondition",
-        "This business does not accept cash bookings."
+        "This payment method is not available."
       );
 
       const slotDocRef = businessRef
@@ -2777,9 +5199,9 @@ if (!requiredSlots) {
     requiresBusinessApproval,
     approvalExpiresAt,
 
-    paymentMethod: "cash",
+    paymentMethod,
 
-    paymentStatus: "pay_on_arrival",
+    paymentStatus: directBookingPaymentStatus(),
 
     paymentIntentId: "",
 
@@ -2863,11 +5285,12 @@ if (ownerId) {
       ? `${customerName || "A customer"} requested ${serviceName} soon. Please accept or decline within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
       : `${customerName || "A customer"} booked ${serviceName}.`,
 
-    data: {
-      bookingId,
-      businessId,
-      type: requiresBusinessApproval ? "last_minute_request" : "new_booking",
-    },
+	    data: {
+	      bookingId,
+	      businessId,
+	      viewerType: "business",
+	      type: requiresBusinessApproval ? "last_minute_request" : "new_booking",
+	    },
     preferenceKey: "serviceBookingUpdates",
   });
 }
@@ -2883,11 +5306,12 @@ await sendPushToUser(customerId, {
       ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
       : `Your booking for ${serviceName} is confirmed.`,
 
-	  data: {
-	    bookingId,
-	    businessId,
-	    type: requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
-	  },
+		  data: {
+		    bookingId,
+		    businessId,
+		    viewerType: "customer",
+		    type: requiresBusinessApproval ? "last_minute_request" : "booking_confirmed",
+		  },
 	  preferenceKey: "serviceBookingUpdates",
 	});
 
@@ -2912,6 +5336,35 @@ await updateRepeatCustomerSnapshot({
   customerAddress,
   customerNotes,
 });
+
+if (bookingStatus === "confirmed") {
+  await sendBookingConfirmationEmailsSafe({
+    db,
+    admin,
+    logger,
+    bookingId,
+    booking: {
+      bookingId,
+      businessId,
+      customerId,
+      serviceId,
+      serviceName,
+      serviceDurationMinutes,
+      customerName,
+      customerAddress,
+      customerNotes,
+      price: totalPrice,
+      status: bookingStatus,
+      paymentMethod,
+      paymentStatus: directBookingPaymentStatus(),
+      startDate: admin.firestore.Timestamp.fromDate(slotStart),
+      endDate: admin.firestore.Timestamp.fromDate(
+        new Date(slotStart.getTime() + slotsRequired * 30 * 60000)
+      ),
+    },
+    business,
+  });
+}
 
 return {
   ok: true,
@@ -2949,8 +5402,14 @@ exports.createBookingPaymentIntent = onCall(
     secrets: ["STRIPE_SECRET_KEY"],
   },
   async (request) => {
+    const flow = "createBookingPaymentIntent";
     try {
+      stripeBookingLog(flow, 1, { event: "callable_entered" });
       assert(request.auth, "unauthenticated", "Login required.");
+      stripeBookingLog(flow, 2, {
+        event: "auth_validated",
+        uidPresent: true,
+      });
 
       const provider = request.auth.token?.firebase?.sign_in_provider;
       if (provider === "anonymous") {
@@ -2961,6 +5420,11 @@ exports.createBookingPaymentIntent = onCall(
       }
 
       const stripe = getStripe();
+      stripeBookingLog(flow, 3, {
+        event: "stripe_client_initialised",
+        secretFingerprint: stripeSecretFingerprint(),
+      });
+      await stripePlatformIdentity(stripe, flow, 4);
       const customerId = request.auth.uid;
 
 
@@ -2987,6 +5451,15 @@ const customerName = safeTrim(request.data?.customerName);
         "invalid-argument",
         "Missing booking data."
       );
+      stripeBookingLog(flow, 5, {
+        event: "request_payload_validated",
+        businessId,
+        serviceId,
+        staffId,
+        slotId,
+        availabilityPostId,
+        addOnCount: addOnIds.length,
+      });
 
       // =================================================
       // REFERENCES
@@ -3010,6 +5483,12 @@ const customerName = safeTrim(request.data?.customerName);
         logger.warn("Booking slot does not exist");
         throw new HttpsError("failed-precondition", "Slot does not exist");
       }
+      stripeBookingLog(flow, 6, {
+        event: "slot_document_loaded",
+        businessId,
+        staffId,
+        slotId,
+      });
 
       const slot = slotSnap.data();
 
@@ -3051,13 +5530,37 @@ const customerName = safeTrim(request.data?.customerName);
 
       const businessSnap = await businessRef.get();
       assert(businessSnap.exists, "not-found", "Business not found.");
+      stripeBookingLog(flow, 7, {
+        event: "business_document_loaded",
+        businessId,
+      });
 
       const business = businessSnap.data() || {};
       const stripeAccountId = business.stripeAccountId;
 
       assert(stripeAccountId, "failed-precondition", "Stripe not connected.");
+      stripeBookingLog(flow, 8, {
+        event: "destination_account_found",
+        businessId,
+        destinationAccountId: stripeAccountId,
+      });
 
-      const account = await stripe.accounts.retrieve(stripeAccountId);
+      let account;
+      try {
+        account = await stripe.accounts.retrieve(stripeAccountId);
+        stripeBookingLog(flow, 9, {
+          event: "destination_account_loaded",
+          destinationAccountId: stripeAccountId,
+          charges_enabled: account.charges_enabled,
+          payouts_enabled: account.payouts_enabled,
+          details_submitted: account.details_submitted,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 9, error, {
+          destinationAccountId: stripeAccountId,
+        });
+        throw error;
+      }
 
       if (!account.charges_enabled) {
         throw new HttpsError(
@@ -3075,6 +5578,11 @@ const customerName = safeTrim(request.data?.customerName);
 
       const staffSnap = await businessRef.collection("staff").doc(staffId).get();
       assert(staffSnap.exists, "not-found", "Staff not found.");
+      stripeBookingLog(flow, 10, {
+        event: "staff_document_loaded",
+        businessId,
+        staffId,
+      });
 
       const staff = staffSnap.data() || {};
       const staffName = safeTrim(staff.name) || "Staff";
@@ -3085,6 +5593,11 @@ const customerName = safeTrim(request.data?.customerName);
 
       const serviceSnap = await businessRef.collection("services").doc(serviceId).get();
       assert(serviceSnap.exists, "not-found", "Service not found.");
+      stripeBookingLog(flow, 11, {
+        event: "service_document_loaded",
+        businessId,
+        serviceId,
+      });
 
       const service = serviceSnap.data() || {};
       const price = Number(service.price || 0);
@@ -3094,7 +5607,7 @@ const customerName = safeTrim(request.data?.customerName);
 
 const slotsRequired =
   Math.ceil(serviceDurationMinutes / 30);
- 
+
 const requiredSlots =
   await getRequiredSlots({
     businessId,
@@ -3271,36 +5784,82 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
           });
         }
       });
+      stripeBookingLog(flow, 12, {
+        event: "pending_booking_written",
+        bookingId,
+        businessId,
+        serviceId,
+        staffId,
+        slotId,
+        amount: totalPrice,
+        requiresBusinessApproval,
+      });
 
       // =================================================
       // CREATE PAYMENT INTENT
       // =================================================
 
-      const paymentIntent = await stripe.paymentIntents.create(
-        {
-          amount: totalPrice,
-          currency: "gbp",
-          automatic_payment_methods: { enabled: true },
-          metadata: {
-            bookingId,
-            businessId,
-            staffId,
-            slotId,
-            customerId,
+      stripeBookingLog(flow, 13, {
+        event: "payment_intent_create_starting",
+        bookingId,
+        destinationAccountId: stripeAccountId,
+        amount: totalPrice,
+      });
+      let paymentIntent;
+      try {
+        paymentIntent = await stripe.paymentIntents.create(
+          {
+            amount: totalPrice,
+            currency: "gbp",
+            payment_method_types: ["card"],
+            metadata: {
+              bookingId,
+              businessId,
+              staffId,
+              slotId,
+              customerId,
+            },
           },
-          transfer_data: {
-            destination: stripeAccountId,
-          },
-        },
-        {
-          idempotencyKey: `booking_${bookingId}`,
-        }
-      );
+          {
+            stripeAccount: stripeAccountId,
+            idempotencyKey: `booking_${bookingId}`,
+          }
+        );
+        stripeBookingLog(flow, 14, {
+          event: "payment_intent_created",
+          bookingId,
+          paymentIntentId: paymentIntent.id,
+          destinationAccountId: stripeAccountId,
+          livemode: paymentIntent.livemode,
+          status: paymentIntent.status,
+          clientSecretPresent: !!paymentIntent.client_secret,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 14, error, {
+          bookingId,
+          destinationAccountId: stripeAccountId,
+        });
+        throw error;
+      }
 
-     await bookingRef.update({
-  paymentIntentId: paymentIntent.id,
-  paymentStatus: "payment_intent_created",
-});
+      try {
+        await bookingRef.update({
+          paymentIntentId: paymentIntent.id,
+          paymentStatus: "payment_intent_created",
+          ...stripeBookingPaymentFields(stripeAccountId),
+        });
+        stripeBookingLog(flow, 15, {
+          event: "booking_payment_intent_write_succeeded",
+          bookingId,
+          paymentIntentId: paymentIntent.id,
+        });
+      } catch (error) {
+        stripeBookingError(flow, 15, error, {
+          bookingId,
+          paymentIntentId: paymentIntent.id,
+        });
+        throw error;
+      }
 
       await updateRepeatCustomerSnapshot({
         customerId,
@@ -3310,14 +5869,29 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
         customerAddress,
         customerNotes,
       });
+      stripeBookingLog(flow, 16, {
+        event: "repeat_customer_snapshot_updated",
+        bookingId,
+      });
+
+      stripeBookingLog(flow, 17, {
+        event: "response_returning_to_flutter",
+        bookingId,
+        paymentIntentId: paymentIntent.id,
+        clientSecretPresent: !!paymentIntent.client_secret,
+        stripeAccountContext: STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED,
+        stripeAccountId,
+      });
 
       return {
         clientSecret: paymentIntent.client_secret,
         bookingId,
+        stripeAccountContext: STRIPE_PAYMENT_ACCOUNT_CONTEXT_CONNECTED,
+        stripeAccountId,
       };
 
     } catch (error) {
-      logger.error("createBookingPaymentIntent failed", error);
+      stripeBookingError(flow, 18, error);
 
       if (error instanceof HttpsError) throw error;
 
@@ -3328,8 +5902,6 @@ bookingDay: admin.firestore.Timestamp.fromDate(bookingDay),
     }
   }
 );
-
-
 exports.onBookingConversationSync = onDocumentUpdated(
   {
     document: "bookings/{bookingId}",
@@ -3376,7 +5948,7 @@ exports.ensureConversationAccess = onCall(
 exports.createServiceEnquiry = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const businessId = safeTrim(request.data?.businessId);
     const serviceId = safeTrim(request.data?.serviceId);
     const text = safeTrim(request.data?.text);
@@ -3388,7 +5960,6 @@ exports.createServiceEnquiry = onCall(
       hasText: Boolean(text),
     });
 
-    assert(uid, "unauthenticated", "Login required.");
     assert(businessId && serviceId, "invalid-argument", "Missing service data.");
     assert(text, "invalid-argument", "Please enter a message.");
     assert(text.length <= 2000, "invalid-argument", "Message is too long.");
@@ -3536,6 +6107,731 @@ exports.createServiceEnquiry = onCall(
     return {
       conversationId,
     };
+  }
+);
+
+exports.onListingClaimReviewed = onDocumentUpdated(
+  "listingClaims/{claimId}",
+  async (event) => {
+    const before = event.data?.before?.data() || {};
+    const after = event.data?.after?.data() || {};
+
+    if (before.status === after.status || before.status !== "pending") {
+      return;
+    }
+
+    if (!["approved", "rejected"].includes(after.status)) {
+      return;
+    }
+
+    const claimantUserId = safeTrim(after.claimantUserId);
+    const listingTitle = safeTrim(after.listingTitle) || "this listing";
+    const listingType = safeTrim(after.listingType);
+    const listingId = safeTrim(after.listingId);
+
+    if (!claimantUserId || !listingType || !listingId) {
+      logger.warn("Listing claim notification skipped: missing routing data", {
+        claimId: event.params.claimId,
+        status: after.status,
+      });
+      return;
+    }
+
+    const approved = after.status === "approved";
+    const isMissingPetClaim = listingType === "community_help_missing_pet";
+    const title = approved
+      ? isMissingPetClaim
+        ? "Your missing pet claim has been approved"
+        : "Claim approved"
+      : isMissingPetClaim
+        ? "We couldn't approve your missing pet claim"
+        : "Claim not approved";
+    const body = approved
+      ? isMissingPetClaim
+        ? `You can now manage ${listingTitle} on LocalLink.`
+        : `Your claim for ${listingTitle} has been approved. You can now manage this listing.`
+      : isMissingPetClaim
+        ? `We couldn't approve your claim for ${listingTitle}.`
+        : `Your claim for ${listingTitle} was not approved.`;
+    const notificationId = `listing_claim_${event.params.claimId}_${after.status}`;
+
+    await db
+      .collection("users")
+      .doc(claimantUserId)
+      .collection("notifications")
+      .doc(notificationId)
+      .set({
+        type: "listing_claim",
+        title,
+        body,
+        listingClaimId: event.params.claimId,
+        listingType,
+        listingId,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+    try {
+      await sendPushToUser(claimantUserId, {
+        title,
+        body,
+        preferenceKey: "serviceBookingUpdates",
+        data: {
+          type: "listing_claim",
+          listingClaimId: event.params.claimId,
+          listingType,
+          listingId,
+          notificationId,
+        },
+      });
+    } catch (error) {
+      logger.error("Listing claim push failed", {
+        claimId: event.params.claimId,
+        status: after.status,
+        error: error?.message || String(error),
+        code: error?.code || "unknown",
+      });
+    }
+  }
+);
+
+const MODERATION_REASON_LABELS = {
+  duplicate_content: "Duplicate content",
+  incorrect_or_misleading: "Incorrect or misleading information",
+  inappropriate_content: "Inappropriate content",
+  spam_or_advertising: "Spam or advertising",
+  safety_concern: "Safety concern",
+  not_suitable: "Not suitable for LocalLink",
+  other: "Other",
+};
+
+function validateModerationReason(data) {
+  const reasonCode = safeTrim(data?.reasonCode);
+  const publicText = safeTrim(data?.publicText);
+  assert(
+    Object.prototype.hasOwnProperty.call(MODERATION_REASON_LABELS, reasonCode),
+    "invalid-argument",
+    "Choose a valid moderation reason."
+  );
+  assert(
+    reasonCode !== "other" || publicText,
+    "invalid-argument",
+    "Add a public explanation for Other."
+  );
+  assert(
+    publicText.length <= 180,
+    "invalid-argument",
+    "Keep the public reason under 180 characters."
+  );
+
+  return {
+    reasonCode,
+    publicText: publicText || MODERATION_REASON_LABELS[reasonCode],
+  };
+}
+
+function contentRemovedNotificationCopy({ contentType, title, reasonText }) {
+  const safeTitle = safeTrim(title);
+  const contentLabel = contentType === "comment"
+    ? "comment"
+    : contentType === "challenge_entry"
+      ? "Community Challenge entry"
+      : contentType === "account"
+        ? "account"
+        : "event";
+
+  if (contentType === "account") {
+    return {
+      title: "Your account has been restricted",
+      body: reasonText
+        ? `Your LocalLink account has been restricted. Reason: ${reasonText}`
+        : "Your LocalLink account has been restricted.",
+    };
+  }
+
+  const heading = contentType === "comment" || contentType === "challenge_entry"
+    ? `Your ${contentLabel} has been removed`
+    : "Your event has been removed";
+  const base = safeTitle
+    ? `We've removed ${safeTitle} from LocalLink.`
+    : `We've removed your ${contentLabel} from LocalLink.`;
+
+  return {
+    title: heading,
+    body: reasonText ? `${base} Reason: ${reasonText}` : base,
+  };
+}
+
+async function notifyContentRemoved({
+  userId,
+  notificationId,
+  contentType,
+  contentId = "",
+  contentTitle = "",
+  reasonCode,
+  reasonText,
+}) {
+  if (!userId) return;
+
+  const copy = contentRemovedNotificationCopy({
+    contentType,
+    title: contentTitle,
+    reasonText,
+  });
+  const notificationRef = db
+    .collection("users")
+    .doc(userId)
+    .collection("notifications")
+    .doc(notificationId);
+  const existing = await notificationRef.get();
+  if (existing.exists) return;
+
+  await notificationRef.set({
+    type: contentType === "account" ? "account_moderation" : "content_removed",
+    title: copy.title,
+    body: copy.body,
+    contentType,
+    contentId,
+    contentTitle: safeTrim(contentTitle),
+    removalReasonCode: reasonCode,
+    removalReasonPublicText: reasonText,
+    isRead: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  try {
+    await sendPushToUser(userId, {
+      title: copy.title,
+      body: copy.body,
+      data: {
+        type: contentType === "account" ? "account_moderation" : "content_removed",
+        notificationId,
+        contentType,
+        contentId,
+      },
+    });
+  } catch (error) {
+    logger.error("Moderation push failed", {
+      userId,
+      notificationId,
+      error: error?.message || String(error),
+      code: error?.code || "unknown",
+    });
+  }
+}
+
+function notificationSafeId(value) {
+  return safeTrim(value).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 180);
+}
+
+function resolveCommunityHelpOwnerId(post) {
+  if (post?.communityAdded === true) {
+    const ownerId = safeTrim(post.ownerId);
+    return post.claimStatus === "approved" && ownerId ? ownerId : "";
+  }
+  return safeTrim(post?.createdBy);
+}
+
+function isCommunityAddedMissingPet(post) {
+  return post?.communityAdded === true &&
+    safeTrim(post.type) === "lost_found" &&
+    safeTrim(post.mode) === "lost" &&
+    safeTrim(post.itemCategory).toLowerCase() === "pet";
+}
+
+exports.moderateReportedContent = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    await assertAdminRequest(request);
+
+    const reportId = safeTrim(request.data?.reportId);
+    const action = safeTrim(request.data?.action);
+    const targetId = safeTrim(request.data?.targetId);
+    const targetPath = safeTrim(request.data?.targetPath);
+    const { reasonCode, publicText } = validateModerationReason(request.data);
+    const moderatorUid = request.auth.uid;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    assert(reportId, "invalid-argument", "Missing report.");
+    assert(
+      ["remove_opportunity", "remove_comment"].includes(action),
+      "invalid-argument",
+      "Unsupported moderation action."
+    );
+
+    let notificationPayload = null;
+    let storagePathToDelete = "";
+
+    if (action === "remove_opportunity") {
+      assert(targetId, "invalid-argument", "Missing opportunity.");
+      const opportunityRef = db.collection("opportunities").doc(targetId);
+      const reportRef = db.collection("reports").doc(reportId);
+
+      await db.runTransaction(async (tx) => {
+        const opportunitySnap = await tx.get(opportunityRef);
+        assert(opportunitySnap.exists, "not-found", "Opportunity not found.");
+        const opportunity = opportunitySnap.data() || {};
+        const alreadyRemoved =
+          opportunity.moderationStatus === "removed" ||
+          opportunity.status === "removed";
+        const creatorId =
+          safeTrim(opportunity.createdBy) ||
+          safeTrim(opportunity.organiserId);
+        const title = firstPublicText(
+          opportunity.title,
+          opportunity.name,
+          "this event"
+        );
+
+        if (!alreadyRemoved) {
+          tx.set(opportunityRef, {
+            isActive: false,
+            moderationStatus: "removed",
+            removedAt: now,
+            removedBy: moderatorUid,
+            removalReasonCode: reasonCode,
+            removalReasonPublicText: publicText,
+            updatedAt: now,
+          }, { merge: true });
+        }
+
+        tx.set(reportRef, {
+          status: "resolved",
+          actionTaken: "opportunity_removed",
+          removalReasonCode: reasonCode,
+          removalReasonPublicText: publicText,
+          resolvedAt: now,
+          resolvedBy: moderatorUid,
+        }, { merge: true });
+
+        if (!alreadyRemoved && creatorId) {
+          notificationPayload = {
+            userId: creatorId,
+            notificationId: `content_removed_opportunity_${targetId}`,
+            contentType: "opportunity",
+            contentId: targetId,
+            contentTitle: title,
+          };
+        }
+      });
+    }
+
+    if (action === "remove_comment") {
+      assert(targetPath, "invalid-argument", "Missing comment.");
+      const parts = targetPath.split("/");
+      assert(
+        parts.length === 4 &&
+          parts[0] === "opportunities" &&
+          parts[2] === "comments",
+        "invalid-argument",
+        "Unsupported comment path."
+      );
+
+      const opportunityId = parts[1];
+      const commentId = parts[3];
+      const opportunityRef = db.collection("opportunities").doc(opportunityId);
+      const commentRef = opportunityRef.collection("comments").doc(commentId);
+      const reportRef = db.collection("reports").doc(reportId);
+
+      await db.runTransaction(async (tx) => {
+        const [opportunitySnap, commentSnap] = await Promise.all([
+          tx.get(opportunityRef),
+          tx.get(commentRef),
+        ]);
+        assert(opportunitySnap.exists, "not-found", "Opportunity not found.");
+        assert(commentSnap.exists, "not-found", "Comment not found.");
+
+        const opportunity = opportunitySnap.data() || {};
+        const comment = commentSnap.data() || {};
+        const alreadyRemoved =
+          comment.deleted === true ||
+          comment.moderationStatus === "removed";
+        const creatorId = safeTrim(comment.userId);
+        const isChallengeEntry = comment.isChallengeEntry === true;
+        const imagePath = safeTrim(comment.imagePath);
+        const imageUrl = safeTrim(comment.imageUrl);
+        const title = isChallengeEntry
+          ? firstPublicText(opportunity.title, "your Community Challenge entry")
+          : firstPublicText(opportunity.title, "your comment");
+
+        if (!alreadyRemoved) {
+          tx.set(commentRef, {
+            moderationStatus: "removed",
+            deleted: true,
+            removedAt: now,
+            removedBy: moderatorUid,
+            removalReasonCode: reasonCode,
+            removalReasonPublicText: publicText,
+            ...(isChallengeEntry && imageUrl ? { removedImageUrl: imageUrl } : {}),
+            ...(isChallengeEntry && imagePath ? { removedImagePath: imagePath } : {}),
+            ...(isChallengeEntry ? {
+              imageUrl: admin.firestore.FieldValue.delete(),
+              imagePath: admin.firestore.FieldValue.delete(),
+            } : {}),
+            updatedAt: now,
+          }, { merge: true });
+          tx.update(opportunityRef, {
+            commentCount: admin.firestore.FieldValue.increment(-1),
+            updatedAt: now,
+          });
+
+          if (isChallengeEntry && creatorId) {
+            tx.set(
+              opportunityRef.collection("entries").doc(creatorId),
+              {
+                status: "removed",
+                eligible: false,
+                deleted: true,
+                moderationStatus: "removed",
+                removedAt: now,
+                removedBy: moderatorUid,
+                removalReasonCode: reasonCode,
+                removalReasonPublicText: publicText,
+                ...(imageUrl ? { removedImageUrl: imageUrl } : {}),
+                ...(imagePath ? { removedImagePath: imagePath } : {}),
+                imageUrl: admin.firestore.FieldValue.delete(),
+                imagePath: admin.firestore.FieldValue.delete(),
+                updatedAt: now,
+              },
+              { merge: true }
+            );
+          }
+
+          if (isChallengeEntry && imagePath) {
+            storagePathToDelete = imagePath;
+          }
+        }
+
+        tx.set(reportRef, {
+          status: "resolved",
+          actionTaken: isChallengeEntry
+            ? "challenge_entry_removed"
+            : "comment_removed",
+          removalReasonCode: reasonCode,
+          removalReasonPublicText: publicText,
+          resolvedAt: now,
+          resolvedBy: moderatorUid,
+        }, { merge: true });
+
+        if (!alreadyRemoved && creatorId) {
+          notificationPayload = {
+            userId: creatorId,
+            notificationId: `content_removed_comment_${notificationSafeId(targetPath)}`,
+            contentType: isChallengeEntry ? "challenge_entry" : "comment",
+            contentId: targetPath,
+            contentTitle: title,
+          };
+        }
+      });
+    }
+
+    if (notificationPayload) {
+      await notifyContentRemoved({
+        ...notificationPayload,
+        reasonCode,
+        reasonText: publicText,
+      });
+    }
+
+    if (storagePathToDelete) {
+      try {
+        await admin.storage().bucket().file(storagePathToDelete).delete({
+          ignoreNotFound: true,
+        });
+      } catch (error) {
+        logger.error("Challenge entry image deletion failed", {
+          storagePath: storagePathToDelete,
+          error: error?.message || String(error),
+          code: error?.code || "unknown",
+        });
+        throw new HttpsError(
+          "internal",
+          "The entry was removed, but the photo could not be deleted. Please try again."
+        );
+      }
+    }
+
+    return { ok: true };
+  }
+);
+
+async function getModeratorNotificationRecipients(excludedUid) {
+  const recipients = new Set();
+
+  const privateAdminSnap = await db
+    .collectionGroup("private")
+    .where("isAdmin", "==", true)
+    .get();
+  privateAdminSnap.forEach((doc) => {
+    if (doc.id !== "account") return;
+    const uid = doc.ref.parent.parent?.id;
+    if (uid && uid !== excludedUid) recipients.add(uid);
+  });
+
+  // Phase A fallback for accounts not yet copied to private/account.
+  const adminUsersSnap = await db
+    .collection("users")
+    .where("isAdmin", "==", true)
+    .get();
+  for (const doc of adminUsersSnap.docs) {
+    const privateAccount = await doc.ref.collection("private").doc("account").get();
+    if (!privateAccount.exists && doc.id !== excludedUid) recipients.add(doc.id);
+  }
+
+  const adminEmailsSnap = await db.collection("adminEmails").get();
+  for (const adminEmailDoc of adminEmailsSnap.docs) {
+    const adminEmail = safeTrim(adminEmailDoc.id).toLowerCase();
+    if (!adminEmail || adminEmailDoc.data()?.enabled === false) continue;
+    try {
+      const adminUser = await admin.auth().getUserByEmail(adminEmail);
+      if (adminUser.uid !== excludedUid) recipients.add(adminUser.uid);
+    } catch (error) {
+      if (error?.code !== "auth/user-not-found") throw error;
+    }
+  }
+
+  return [...recipients];
+}
+
+exports.onListingClaimCreated = onDocumentCreated(
+  "listingClaims/{claimId}",
+  async (event) => {
+    const claim = event.data?.data() || {};
+    if (claim.status && claim.status !== "pending") return;
+
+    const listingTitle = safeTrim(claim.listingTitle) || "a listing";
+    const listingType = safeTrim(claim.listingType) || "listing";
+    const listingId = safeTrim(claim.listingId);
+    const claimantUserId = safeTrim(claim.claimantUserId);
+    const claimantName = safeTrim(claim.claimantName) || "Someone";
+    const notificationId = `moderation_claim_${event.params.claimId}`;
+    const title = listingType === "community_help_missing_pet"
+      ? "New missing pet claim"
+      : listingType === "opportunity"
+      ? "New event claim"
+      : listingType === "organisation"
+        ? "New organisation claim"
+        : "New business claim";
+    const body =
+      `${claimantName} has requested to claim ${listingTitle}. Tap to review.`;
+
+    if (!listingId || !claimantUserId) {
+      logger.warn("Moderator claim notification skipped: missing claim data", {
+        claimId: event.params.claimId,
+        listingType,
+        hasListingId: Boolean(listingId),
+        hasClaimantUserId: Boolean(claimantUserId),
+      });
+      return;
+    }
+
+    if (listingType === "community_help_missing_pet") {
+      const postRef = db.collection("communityHelpPosts").doc(listingId);
+      await db.runTransaction(async (tx) => {
+        const postSnap = await tx.get(postRef);
+        if (!postSnap.exists) return;
+        const post = postSnap.data() || {};
+        if (
+          isCommunityAddedMissingPet(post) &&
+          !resolveCommunityHelpOwnerId(post) &&
+          safeTrim(post.claimStatus) !== "approved"
+        ) {
+          tx.set(postRef, {
+            claimStatus: "pending",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      });
+    }
+
+    const recipientIds = await getModeratorNotificationRecipients(
+      claimantUserId
+    );
+    if (recipientIds.length === 0) {
+      logger.warn("Moderator claim notification skipped: no recipients", {
+        claimId: event.params.claimId,
+      });
+      return;
+    }
+
+    await Promise.all(recipientIds.map(async (recipientId) => {
+      await db
+        .collection("users")
+        .doc(recipientId)
+        .collection("notifications")
+        .doc(notificationId)
+        .set({
+          type: "moderation_claim",
+          title,
+          body,
+          listingClaimId: event.params.claimId,
+          listingType,
+          listingId,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+      try {
+        await sendPushToUser(recipientId, {
+          title,
+          body,
+          data: {
+            type: "moderation_claim",
+            listingClaimId: event.params.claimId,
+            listingType,
+            listingId,
+            notificationId,
+          },
+        });
+      } catch (error) {
+        logger.error("Moderator claim push failed", {
+          claimId: event.params.claimId,
+          recipientId,
+          error: error?.message || String(error),
+          code: error?.code || "unknown",
+        });
+      }
+    }));
+  }
+);
+
+exports.reviewListingClaim = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    assert(request.auth, "unauthenticated", "Login required.");
+    assert(
+      await requestHasAdminAccess({ db, auth: request.auth }),
+      "permission-denied",
+      "Admin access required."
+    );
+
+    const claimId = safeTrim(request.data?.claimId);
+    const approve = request.data?.approve === true;
+    assert(claimId, "invalid-argument", "Missing claim.");
+
+    const moderatorUid = request.auth.uid;
+    const claimRef = db.collection("listingClaims").doc(claimId);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    let listingType = "";
+    let listingId = "";
+    let claimantId = "";
+
+    await db.runTransaction(async (tx) => {
+      const claimSnap = await tx.get(claimRef);
+      assert(claimSnap.exists, "not-found", "Claim not found.");
+      const claim = claimSnap.data() || {};
+      assert(claim.status === "pending", "failed-precondition", "This claim has already been reviewed.");
+
+      listingType = safeTrim(claim.listingType);
+      listingId = safeTrim(claim.listingId);
+      claimantId = safeTrim(claim.claimantUserId);
+      assert(listingType && listingId && claimantId, "invalid-argument", "Claim is missing listing or claimant details.");
+
+      const collection = listingType === "business"
+        ? "businesses"
+        : listingType === "organisation"
+          ? "organisations"
+          : listingType === "community_help_missing_pet"
+            ? "communityHelpPosts"
+            : "opportunities";
+      const listingRef = db.collection(collection).doc(listingId);
+      const metadataRef = db.collection("moderatorListingMetadata").doc(listingId);
+      const listingSnap = await tx.get(listingRef);
+      assert(listingSnap.exists, "not-found", "Listing no longer exists.");
+      const listing = listingSnap.data() || {};
+
+      if (approve) {
+        const approvedFields = {
+          listingOwnershipStatus: "claimed",
+          claimedByUserId: claimantId,
+          claimedBy: claimantId,
+          claimedAt: now,
+          claimStatus: "approved",
+          updatedAt: now,
+        };
+
+        if (listingType === "business") {
+          assert(listing.claimStatus !== "approved" && listing.listingOwnershipStatus !== "claimed", "failed-precondition", "This listing has already been claimed.");
+          tx.update(listingRef, {
+            ...approvedFields,
+            ownerId: claimantId,
+            businessOwnerId: claimantId,
+            isClaimed: true,
+            acceptingLeads: true,
+          });
+          tx.set(
+            listingRef.collection("staff").doc(claimantId),
+            {
+              name: safeTrim(claim.claimantName) || "Owner",
+              email: safeTrim(claim.claimantEmail),
+              isActive: true,
+              seatRank: 0,
+              createdAt: now,
+            },
+            { merge: true }
+          );
+        } else if (listingType === "organisation") {
+          assert(listing.claimStatus !== "approved" && listing.listingOwnershipStatus !== "claimed", "failed-precondition", "This listing has already been claimed.");
+          tx.update(listingRef, {
+            ...approvedFields,
+            ownerId: claimantId,
+            adminUserIds: admin.firestore.FieldValue.arrayUnion(claimantId),
+          });
+        } else if (listingType === "community_help_missing_pet") {
+          assert(isCommunityAddedMissingPet(listing), "failed-precondition", "This is not a community-added missing pet.");
+          assert(listing.isActive === true, "failed-precondition", "This post is no longer active.");
+          assert(!listing.resolvedAt && safeTrim(listing.status) !== "resolved", "failed-precondition", "This pet has already been resolved.");
+          assert(!resolveCommunityHelpOwnerId(listing), "failed-precondition", "This missing pet post already has an owner.");
+          tx.update(listingRef, {
+            ownerId: claimantId,
+            claimStatus: "approved",
+            claimedBy: claimantId,
+            claimedByUserId: claimantId,
+            claimedAt: now,
+            claimReviewedBy: moderatorUid,
+            claimReviewedAt: now,
+            listingOwnershipStatus: "claimed",
+            updatedAt: now,
+          });
+        } else {
+          assert(listing.claimStatus !== "approved" && listing.listingOwnershipStatus !== "claimed", "failed-precondition", "This listing has already been claimed.");
+          tx.update(listingRef, {
+            ...approvedFields,
+            organiserId: claimantId,
+          });
+        }
+      } else if (listingType === "community_help_missing_pet") {
+        tx.set(listingRef, {
+          claimStatus: resolveCommunityHelpOwnerId(listing) ? "approved" : "unclaimed",
+          claimReviewedBy: moderatorUid,
+          claimReviewedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      }
+
+      tx.update(claimRef, {
+        status: approve ? "approved" : "rejected",
+        reviewedBy: moderatorUid,
+        reviewedAt: now,
+        updatedAt: now,
+      });
+
+      tx.set(metadataRef, {
+        listingType,
+        listingId,
+        claimStatus: approve ? "approved" : "rejected",
+        reviewedClaimId: claimId,
+        reviewedByModeratorUserId: moderatorUid,
+        reviewedAt: now,
+        ...(approve ? {
+          resultingOwnerUserId: claimantId,
+          ownershipTransferredAt: now,
+        } : {}),
+        updatedAt: now,
+      }, { merge: true });
+    });
+
+    return { ok: true, listingType, listingId };
   }
 );
 
@@ -3832,8 +7128,13 @@ async function createAndSendCommunityAlertCampaign({ postId, post }) {
   if (!alertCategory || !isCommunityHelpActive(post)) {
     return;
   }
+  if (["missingDogs", "missingCats", "otherMissingPets"].includes(alertCategory)) {
+    // Missing pets are aggregated by processNearbyMissingPetAlerts so several
+    // reports arriving together do not produce one push per animal.
+    return;
+  }
 
-  const ownerId = safeTrim(post.createdBy);
+  const ownerId = resolveCommunityHelpOwnerId(post) || safeTrim(post.createdBy);
   const campaignId = `${postId}_initial`;
   const campaignRef = db.collection("communityAlertCampaigns").doc(campaignId);
   const campaignSnap = await campaignRef.get();
@@ -3997,7 +7298,7 @@ exports.notifyCommunityHelpMatches = onDocumentCreated(
       return;
     }
 
-    const ownerId = safeTrim(newPost.createdBy);
+    const ownerId = resolveCommunityHelpOwnerId(newPost);
     const oppositeMode = safeTrim(newPost.mode) === "lost" ? "found" : "lost";
     const snapshot = await db
       .collection("communityHelpPosts")
@@ -4011,7 +7312,7 @@ exports.notifyCommunityHelpMatches = onDocumentCreated(
     for (const doc of snapshot.docs) {
       if (doc.id === event.params.postId) continue;
       const matchingPost = doc.data() || {};
-      const matchingOwnerId = safeTrim(matchingPost.createdBy);
+      const matchingOwnerId = resolveCommunityHelpOwnerId(matchingPost);
       if (!matchingOwnerId || matchingOwnerId === ownerId) continue;
       if (!communityHelpPostsMayMatch(newPost, matchingPost)) continue;
 
@@ -4066,15 +7367,242 @@ exports.notifyCommunityHelpMatches = onDocumentCreated(
   }
 );
 
+async function refreshNearbyMissingPetAlertsForUser(uid) {
+    const subscriptionRef = db.collection("communityAlertSubscriptions").doc(uid);
+    const subscriptionSnap = await subscriptionRef.get();
+    const subscription = subscriptionSnap.data() || {};
+    if (!subscriptionSnap.exists ||
+        subscription.communityAlertsEnabled !== true ||
+        subscription.isActive !== true) {
+      return { sent: false, reason: "alerts_disabled" };
+    }
+
+    const latitude = numberFrom(subscription.approxLatitude);
+    const longitude = numberFrom(subscription.approxLongitude);
+    const maxRadiusMiles = numberFrom(subscription.maxRadiusMiles) ?? 3;
+    if (latitude === null || longitude === null) {
+      return { sent: false, reason: "missing_location" };
+    }
+    const userRef = db.collection("users").doc(uid);
+    if (!(await notifications.userAllowsPush(userRef, "nearbyCommunityAlerts"))) {
+      return { sent: false, reason: "preference_disabled" };
+    }
+
+    const reportsSnap = await db
+      .collection("communityHelpPosts")
+      .where("type", "==", "lost_found")
+      .where("mode", "==", "lost")
+      .where("isActive", "==", true)
+      .limit(200)
+      .get();
+    const reportEntries = reportsSnap.docs.map((doc) => ({
+      id: doc.id,
+      ref: doc.ref,
+      data: doc.data() || {},
+    }));
+    const preliminaryCandidates = eligibleMissingPets({
+      reports: reportEntries,
+      latitude,
+      longitude,
+      maxRadiusMiles,
+      enabledCategories: subscription.enabledCategories || [],
+      recipientId: uid,
+      nowMs: Date.now(),
+    });
+    if (!preliminaryCandidates.length) {
+      return { sent: false, reason: "no_unseen_reports" };
+    }
+    const candidateEntries = preliminaryCandidates.map((candidate) =>
+      reportEntries.find((entry) => entry.id === candidate.id)
+    ).filter(Boolean).slice(0, 100);
+    const areaKey = crypto
+      .createHash("sha256")
+      .update(`${latitude.toFixed(2)}:${longitude.toFixed(2)}:${maxRadiusMiles}`)
+      .digest("hex")
+      .slice(0, 24);
+    const areaStateRef = db.collection("users").doc(uid)
+      .collection("nearbyCommunityAlertAreas").doc(areaKey);
+    const reportStateRefs = candidateEntries.map((entry) => ({
+      entry,
+      ref: db.collection("users").doc(uid)
+        .collection("nearbyCommunityAlertReports").doc(entry.id),
+    }));
+    const nowMs = Date.now();
+    const notificationId = `community_alert_area_${areaKey}_${Math.floor(nowMs / 86400000)}`;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const preferenceRef = userRef.collection("preferences").doc("notifications");
+    const reservation = await db.runTransaction(async (tx) => {
+      const [freshSubscriptionSnap, preferenceSnap, areaStateSnap] =
+        await Promise.all([
+          tx.get(subscriptionRef),
+          tx.get(preferenceRef),
+          tx.get(areaStateRef),
+        ]);
+      const freshSubscription = freshSubscriptionSnap.data() || {};
+      const freshLatitude = numberFrom(freshSubscription.approxLatitude);
+      const freshLongitude = numberFrom(freshSubscription.approxLongitude);
+      const freshRadius = numberFrom(freshSubscription.maxRadiusMiles) ?? 3;
+      const freshAreaKey = freshLatitude === null || freshLongitude === null
+        ? ""
+        : crypto
+          .createHash("sha256")
+          .update(`${freshLatitude.toFixed(2)}:${freshLongitude.toFixed(2)}:${freshRadius}`)
+          .digest("hex")
+          .slice(0, 24);
+      if (!freshSubscriptionSnap.exists ||
+          freshSubscription.communityAlertsEnabled !== true ||
+          freshSubscription.isActive !== true ||
+          freshAreaKey !== areaKey) {
+        return { reason: "subscription_changed", candidates: [], notification: null };
+      }
+      if (preferenceSnap.exists &&
+          preferenceSnap.data()?.nearbyCommunityAlerts === false) {
+        return { reason: "preference_disabled", candidates: [], notification: null };
+      }
+      const lastSentAtMs = timestampToMillis(areaStateSnap.data()?.lastSentAt);
+      if (!cooldownAllows(lastSentAtMs, nowMs)) {
+        return { reason: "cooldown", candidates: [], notification: null };
+      }
+
+      const freshReportSnaps = await Promise.all(
+        candidateEntries.map(({ ref }) => tx.get(ref))
+      );
+      const followerSnaps = await Promise.all(
+        candidateEntries.map(({ ref }) =>
+          tx.get(ref.collection("followers").doc(uid))
+        )
+      );
+      const reportStateSnaps = await Promise.all(
+        reportStateRefs.map(({ ref }) => tx.get(ref))
+      );
+      const alertedVersions = {};
+      reportStateSnaps.forEach((snap, index) => {
+        if (snap.exists) {
+          alertedVersions[reportStateRefs[index].entry.id] =
+            safeTrim(snap.data()?.version) || "initial";
+        }
+      });
+      const freshReports = freshReportSnaps
+        .map((snap) => ({ id: snap.id, data: snap.data() || {} }))
+        .filter((entry, index) => freshReportSnaps[index].exists);
+      const followedReportIds = followerSnaps
+        .map((snap, index) =>
+          snap.exists && snap.data()?.notificationState === "active"
+            ? candidateEntries[index].id
+            : ""
+        )
+        .filter(Boolean);
+      const candidates = eligibleMissingPets({
+        reports: freshReports,
+        latitude,
+        longitude,
+        maxRadiusMiles,
+        alertedVersions,
+        excludedReportIds: followedReportIds,
+        enabledCategories: freshSubscription.enabledCategories || [],
+        recipientId: uid,
+        nowMs,
+      });
+      if (!candidates.length) {
+        return { reason: "no_unseen_reports", candidates: [], notification: null };
+      }
+
+      const notification = buildNearbyNotification(candidates);
+      tx.set(areaStateRef, {
+        areaKey,
+        lastSentAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      for (const candidate of candidates) {
+        const stateRef = db.collection("users").doc(uid)
+          .collection("nearbyCommunityAlertReports").doc(candidate.id);
+        tx.set(stateRef, {
+          postId: candidate.id,
+          version: candidate.version,
+          alertedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      }
+      tx.set(
+        db.collection("users").doc(uid).collection("notifications").doc(notificationId),
+        {
+          ...notification,
+          notificationId,
+          reportCount: candidates.length,
+          isRead: false,
+          createdAt: now,
+        }
+      );
+      return { reason: "sent", candidates, notification };
+    });
+    if (!reservation.notification) {
+      return { sent: false, reason: reservation.reason };
+    }
+    const { candidates, notification } = reservation;
+
+    await sendPushToUser(uid, {
+      title: notification.title,
+      body: notification.body,
+      preferenceKey: "nearbyCommunityAlerts",
+      data: {
+        type: notification.type,
+        communityHelpPostId: notification.communityHelpPostId,
+        notificationId,
+      },
+    });
+    return { sent: true, count: candidates.length, type: notification.type };
+}
+
+exports.refreshNearbyMissingPetAlerts = onCall(
+  { region: "us-central1", preserveExternalChanges: true },
+  async (request) => {
+    const uid = assertRegisteredAuth(request);
+    return refreshNearbyMissingPetAlertsForUser(uid);
+  }
+);
+
+exports.processNearbyMissingPetAlerts = onSchedule(
+  {
+    preserveExternalChanges: true,
+    schedule: "every 15 minutes",
+    region: "us-central1",
+  },
+  async () => {
+    const subscriptions = await db
+      .collection("communityAlertSubscriptions")
+      .where("communityAlertsEnabled", "==", true)
+      .where("isActive", "==", true)
+      .limit(500)
+      .get();
+    let sentCount = 0;
+    for (const subscription of subscriptions.docs) {
+      try {
+        const result = await refreshNearbyMissingPetAlertsForUser(
+          safeTrim(subscription.data()?.userId) || subscription.id
+        );
+        if (result.sent) sentCount += 1;
+      } catch (error) {
+        logger.error("Nearby missing-pet alert refresh failed", {
+          userId: subscription.id,
+          error: safeTrim(error?.message),
+        });
+      }
+    }
+    logger.info("Nearby missing-pet alert refresh completed", {
+      subscriptionCount: subscriptions.size,
+      sentCount,
+    });
+  }
+);
+
 exports.createCommunityHelpConversation = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const postId = safeTrim(request.data?.postId);
     const text = safeTrim(request.data?.text);
     const sightingPhotoUrl = safeTrim(request.data?.sightingPhotoUrl);
 
-    assert(uid, "unauthenticated", "Login required.");
     assert(postId, "invalid-argument", "Missing Community Help post.");
     assert(text, "invalid-argument", "Please enter a message.");
     assert(text.length <= 2000, "invalid-argument", "Message is too long.");
@@ -4084,8 +7612,8 @@ exports.createCommunityHelpConversation = onCall(
     assert(postSnap.exists, "not-found", "Community Help post not found.");
 
     const post = postSnap.data() || {};
-    const ownerId = safeTrim(post.createdBy);
-    assert(ownerId, "failed-precondition", "This post is missing an owner.");
+    const ownerId = resolveCommunityHelpOwnerId(post);
+    assert(ownerId, "failed-precondition", "This post is not claimed by an owner yet.");
     assert(ownerId !== uid, "failed-precondition", "You cannot respond to your own post.");
     assert(isCommunityHelpActive(post), "failed-precondition", "This post is no longer active.");
 
@@ -4122,7 +7650,7 @@ exports.createCommunityHelpConversation = onCall(
       assert(freshPostSnap.exists, "not-found", "Community Help post not found.");
       const freshPost = freshPostSnap.data() || {};
       assert(isCommunityHelpActive(freshPost), "failed-precondition", "This post is no longer active.");
-      assert(safeTrim(freshPost.createdBy) === ownerId, "failed-precondition", "Post owner changed.");
+      assert(resolveCommunityHelpOwnerId(freshPost) === ownerId, "failed-precondition", "Post owner changed.");
 
       const conversationSnap = await tx.get(conversationRef);
       const conversation = conversationSnap.data() || {};
@@ -4278,9 +7806,8 @@ exports.createCommunityHelpConversation = onCall(
 exports.followCommunityHelpPost = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const postId = safeTrim(request.data?.postId);
-    assert(uid, "unauthenticated", "Login required.");
     assert(postId, "invalid-argument", "Missing Community Help post.");
 
     const postRef = db.collection("communityHelpPosts").doc(postId);
@@ -4291,7 +7818,8 @@ exports.followCommunityHelpPost = onCall(
       const postSnap = await tx.get(postRef);
       assert(postSnap.exists, "not-found", "Community Help post not found.");
       post = postSnap.data() || {};
-      assert(safeTrim(post.createdBy) !== uid, "failed-precondition", "You already own this post.");
+      const ownerId = resolveCommunityHelpOwnerId(post);
+      assert(ownerId !== uid, "failed-precondition", "You already own this post.");
       assert(isCommunityHelpActive(post), "failed-precondition", "This post is no longer active.");
 
       const followerSnap = await tx.get(followerRef);
@@ -4315,7 +7843,7 @@ exports.followCommunityHelpPost = onCall(
       }
     });
 
-    const ownerId = safeTrim(post?.createdBy);
+    const ownerId = resolveCommunityHelpOwnerId(post);
     if (createdFollow && ownerId && ownerId !== uid) {
       const notificationId = `community_help_lookout_${postId}_${uid}`;
       const title = "Someone is keeping a lookout";
@@ -4358,9 +7886,8 @@ exports.followCommunityHelpPost = onCall(
 exports.unfollowCommunityHelpPost = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const postId = safeTrim(request.data?.postId);
-    assert(uid, "unauthenticated", "Login required.");
     assert(postId, "invalid-argument", "Missing Community Help post.");
 
     const postRef = db.collection("communityHelpPosts").doc(postId);
@@ -4395,7 +7922,7 @@ async function notifyCommunityHelpFollowers({ postId, post, title, body, updateI
 
   for (const followerDoc of followers.docs) {
     const followerId = safeTrim(followerDoc.data()?.userId) || followerDoc.id;
-    if (!followerId || followerId === safeTrim(post.createdBy)) continue;
+    if (!followerId || followerId === resolveCommunityHelpOwnerId(post)) continue;
 
     const notificationId = updateId
       ? `community_help_update_${postId}_${updateId}`
@@ -4435,10 +7962,9 @@ async function notifyCommunityHelpFollowers({ postId, post, title, body, updateI
 exports.publishCommunityHelpUpdate = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const postId = safeTrim(request.data?.postId);
     const text = safeTrim(request.data?.text);
-    assert(uid, "unauthenticated", "Login required.");
     assert(postId, "invalid-argument", "Missing Community Help post.");
     assert(text, "invalid-argument", "Write a short update.");
     assert(text.length <= 240, "invalid-argument", "Keep updates under 240 characters.");
@@ -4452,7 +7978,7 @@ exports.publishCommunityHelpUpdate = onCall(
       const postSnap = await tx.get(postRef);
       assert(postSnap.exists, "not-found", "Community Help post not found.");
       post = postSnap.data() || {};
-      assert(safeTrim(post.createdBy) === uid, "permission-denied", "Only the post owner can publish updates.");
+      assert(resolveCommunityHelpOwnerId(post) === uid, "permission-denied", "Only the post owner can publish updates.");
       assert(isCommunityHelpActive(post), "failed-precondition", "This post is not active.");
 
       const lastUpdateMillis = timestampToMillis(post.lastPublicUpdateAt);
@@ -4618,7 +8144,7 @@ exports.processCommunityHelpLifecycle = onSchedule(
     let reminderCount = 0;
     for (const doc of reminderSnapshot.docs) {
       const data = doc.data() || {};
-      const ownerId = safeTrim(data.createdBy);
+      const ownerId = resolveCommunityHelpOwnerId(data);
       const expiresAtMillis = timestampToMillis(data.expiresAt);
       if (!ownerId || data.resolvedAt || data.status === "resolved") continue;
       if (expiresAtMillis !== null && expiresAtMillis <= Date.now()) continue;
@@ -4699,11 +8225,20 @@ exports.processCommunityHelpLifecycle = onSchedule(
 exports.sendBookingMessage = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
     const text = safeTrim(request.data?.text);
+    const attachments = Array.isArray(request.data?.attachments)
+      ? request.data.attachments
+          .map((item) => ({
+            type: safeTrim(item?.type),
+            url: safeTrim(item?.url),
+          }))
+          .filter((item) => item.type === "image" && item.url)
+          .slice(0, 4)
+      : [];
 
-    assert(text, "invalid-argument", "Message cannot be empty.");
+    assert(text || attachments.length > 0, "invalid-argument", "Message cannot be empty.");
     assert(text.length <= 2000, "invalid-argument", "Message is too long.");
 
     const {
@@ -4739,7 +8274,7 @@ exports.sendBookingMessage = onCall(
         read: false,
         edited: false,
         deleted: false,
-        attachments: [],
+        attachments,
       });
 
       tx.set(
@@ -4838,7 +8373,7 @@ exports.markBookingConversationRead = onCall(
     const {
       conversationRef,
       senderType,
-    } = await requireConversationAccess(request.auth?.uid, conversationId);
+    } = await requireConversationAccess(assertRegisteredAuth(request), conversationId);
 
     const unreadField = senderType === "customer"
       ? "unreadCustomerCount"
@@ -4881,7 +8416,7 @@ exports.markBookingConversationRead = onCall(
 exports.editBookingMessage = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
     const messageId = safeTrim(request.data?.messageId);
     const text = safeTrim(request.data?.text);
@@ -4943,7 +8478,7 @@ exports.editBookingMessage = onCall(
 exports.deleteBookingMessage = onCall(
   { region: "us-central1" },
   async (request) => {
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const conversationId = safeTrim(request.data?.conversationId) || safeTrim(request.data?.bookingId);
     const messageId = safeTrim(request.data?.messageId);
 
@@ -5038,11 +8573,11 @@ exports.autoCompleteBookings = onSchedule(
   { schedule: "every 15 minutes", region: "us-central1" },
   async () => {
 
-    const now = new Date();
+    const cutoff = autoCompleteCutoffDate(new Date());
 
     const snap = await db.collection("bookings")
       .where("status", "==", "confirmed")
-      .where("endDate", "<=", now)
+      .where("endDate", "<=", cutoff)
       .get();
 
     if (snap.empty) return;
@@ -5155,24 +8690,42 @@ exports.decrementStaffSubscriptionQuantity = onCall(
 exports.stripeWebhook = onRequest(
   {
     region: "us-central1",
-    secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+    secrets: [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_CONNECT_WEBHOOK_SECRET",
+      "RESEND_API_KEY",
+    ],
   },
   async (req, res) => {
     console.log("🔥 STRIPE WEBHOOK HIT");
 
     const stripe = getStripe();
     const sig = req.headers["stripe-signature"];
-    const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
     if (!sig) return res.status(400).send("Missing stripe-signature.");
-    if (!endpointSecret) return res.status(500).send("Missing webhook secret.");
 
     let event;
 
     try {
-      event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
-      console.log("✅ Event:", event.type);
+      const verified = verifyStripeWebhookEvent({
+        stripe,
+        rawBody: req.rawBody,
+        signature: sig,
+        platformSecret: process.env.STRIPE_WEBHOOK_SECRET,
+        connectSecret: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+      });
+      event = verified.event;
+      console.log(
+        "✅ Event:",
+        event.type,
+        "account:",
+        event.account || "platform"
+      );
     } catch (err) {
+      if (err?.code === "missing_secret") {
+        return res.status(500).send("Missing webhook secret.");
+      }
       console.error("❌ Signature failed:", err.message);
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
@@ -5194,6 +8747,7 @@ exports.stripeWebhook = onRequest(
       // ===============================
       if (event.type === "payment_intent.succeeded") {
         const pi = event.data.object;
+        const eventStripeAccountId = safeTrim(event.account);
 
         const bookingId = pi.metadata?.bookingId;
         const slotId = pi.metadata?.slotId;
@@ -5220,6 +8774,7 @@ exports.stripeWebhook = onRequest(
               staffId,
               slotId,
               directAvailability: String(directAvailability),
+              stripeAccountId: eventStripeAccountId,
             },
           });
         });
@@ -5233,6 +8788,7 @@ exports.stripeWebhook = onRequest(
 
         if (booking && booking.customerId && businessId) {
           const businessSnap = await db.collection("businesses").doc(businessId).get();
+          const business = businessSnap.data() || {};
           const ownerId = businessSnap.data()?.ownerId;
           const awaitingApproval = booking.status === "pending_business_confirmation";
 
@@ -5243,11 +8799,12 @@ exports.stripeWebhook = onRequest(
             body: awaitingApproval
               ? `This appointment starts soon, so the business needs to confirm it. Most businesses respond within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
               : `Your booking for ${booking.serviceName} is confirmed`,
-            data: {
-              bookingId,
-              businessId,
-              type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
-            },
+	            data: {
+	              bookingId,
+	              businessId,
+	              viewerType: "customer",
+	              type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
+	            },
             preferenceKey: "serviceBookingUpdates",
           });
 
@@ -5259,13 +8816,25 @@ exports.stripeWebhook = onRequest(
               body: awaitingApproval
                 ? `${booking.customerName || "A customer"} booked ${booking.serviceName || "a service"} soon. Please accept or decline within ${SHORT_NOTICE_APPROVAL_TIMEOUT_MINUTES} minutes.`
                 : `${booking.customerName || "A customer"} has a confirmed booking for ${booking.serviceName || "a service"}.`,
-	              data: {
-	                bookingId,
-	                businessId,
-	                type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
-	              },
+		              data: {
+		                bookingId,
+		                businessId,
+		                viewerType: "business",
+		                type: awaitingApproval ? "last_minute_request" : "booking_confirmed"
+		              },
 	              preferenceKey: "serviceBookingUpdates",
-	            });
+		            });
+          }
+
+          if (booking.status === "confirmed") {
+            await sendBookingConfirmationEmailsSafe({
+              db,
+              admin,
+              logger,
+              bookingId,
+              booking,
+              business,
+            });
           }
         }
 
@@ -5281,6 +8850,7 @@ exports.stripeWebhook = onRequest(
 ) {
 
   const pi = event.data.object;
+  const eventStripeAccountId = safeTrim(event.account);
 
   const bookingId =
     pi.metadata?.bookingId;
@@ -5317,6 +8887,20 @@ exports.stripeWebhook = onRequest(
   const bookingRef =
     db.collection("bookings")
       .doc(bookingId);
+
+  if (eventStripeAccountId) {
+    const bookingSnap = await bookingRef.get();
+    const booking = bookingSnap.data() || {};
+    const expectedAccountId = safeTrim(booking.paymentStripeAccountId);
+    if (expectedAccountId && expectedAccountId !== eventStripeAccountId) {
+      console.warn("Connected Stripe event account did not match booking", {
+        bookingId,
+        expectedAccountId,
+        eventStripeAccountId,
+      });
+      return res.json({ received: true });
+    }
+  }
 
   await db.runTransaction(async (tx) => {
 
@@ -5403,10 +8987,11 @@ exports.stripeWebhook = onRequest(
 	    body:
 	      "Your booking payment failed. Please try again.",
 	    preferenceKey: "serviceBookingUpdates",
-	    data: {
-	      type: "payment_failed",
-	      bookingId,
-	    },
+		    data: {
+		      type: "payment_failed",
+		      bookingId,
+		      viewerType: "customer",
+		    },
 	  });
 
   console.log(
@@ -5493,7 +9078,7 @@ exports.cleanupPendingBookings = onSchedule(
   {
     schedule: "every 5 minutes",
     region: "us-central1",
-    secrets: ["STRIPE_SECRET_KEY"],
+    secrets: ["STRIPE_SECRET_KEY", "RESEND_API_KEY"],
   },
   async () => {
     const stripe = getStripe();
@@ -5556,6 +9141,20 @@ exports.cleanupPendingBookings = onSchedule(
             bookingId: doc.id,
             status: outcome.status,
           });
+          if (outcome.status === "confirmed") {
+            const [bookingSnap, businessSnap] = await Promise.all([
+              doc.ref.get(),
+              db.collection("businesses").doc(booking.businessId).get(),
+            ]);
+            await sendBookingConfirmationEmailsSafe({
+              db,
+              admin,
+              logger,
+              bookingId: doc.id,
+              booking: bookingSnap.data() || booking,
+              business: businessSnap.data() || {},
+            });
+          }
         }
 
         continue;
@@ -5564,7 +9163,7 @@ exports.cleanupPendingBookings = onSchedule(
       await cancelAbandonedPaymentIntentIfNeeded(
         stripe,
         paymentIntentState.paymentIntent,
-        doc.id
+        { ...booking, bookingId: doc.id }
       );
 
       await db.runTransaction(async (tx) => {
@@ -5644,10 +9243,8 @@ exports.createConnectedAccount = onCall(
   { region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
 
-    assert(request.auth, "unauthenticated", "Login required.");
-
     const stripe = getStripe();
-    const uid = request.auth.uid;
+    const uid = assertRegisteredAuth(request);
     const requestedBusinessId = safeTrim(request.data?.businessId);
 
     let businessDoc = null;
@@ -5704,20 +9301,27 @@ exports.refreshStripeConnectionStatus = onCall(
   { region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
 
-    assert(request.auth, "unauthenticated", "Login required.");
-
     const stripe = getStripe();
-    const uid = request.auth.uid;
+    const uid = assertRegisteredAuth(request);
+    const requestedBusinessId = safeTrim(request.data?.businessId);
 
-    const snap = await db
-      .collection("businesses")
-      .where("ownerId", "==", uid)
-      .limit(1)
-      .get();
+    let businessDoc = null;
+    if (requestedBusinessId) {
+      const businessSnap = await db.collection("businesses").doc(requestedBusinessId).get();
+      assert(businessSnap.exists, "not-found", "Business not found.");
+      assert(businessSnap.data().ownerId === uid, "permission-denied", "Not your business.");
+      businessDoc = businessSnap;
+    } else {
+      const snap = await db
+        .collection("businesses")
+        .where("ownerId", "==", uid)
+        .limit(1)
+        .get();
 
-    assert(!snap.empty, "not-found", "Business not found.");
+      assert(!snap.empty, "not-found", "Business not found.");
+      businessDoc = snap.docs[0];
+    }
 
-    const businessDoc = snap.docs[0];
     const stripeAccountId = businessDoc.data().stripeAccountId;
 
     assert(stripeAccountId, "failed-precondition", "Stripe not set up.");
@@ -5746,10 +9350,8 @@ exports.refreshStripeConnectionStatus = onCall(
 exports.createAccountLink = onCall(
   { region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
-    assert(request.auth, "unauthenticated", "Login required.");
-
     const stripe = getStripe();
-    const uid = request.auth.uid;
+    const uid = assertRegisteredAuth(request);
     const businessId = safeTrim(request.data?.businessId);
 
     assert(businessId, "invalid-argument", "businessId is required.");
@@ -5778,20 +9380,11 @@ exports.createAccountLink = onCall(
 exports.createStripePortalLink = onCall(
   { region: "us-central1", secrets: ["STRIPE_SECRET_KEY"] },
   async (request) => {
-    assert(request.auth, "unauthenticated", "Login required.");
-
+    const uid = assertRegisteredAuth(request);
+    const businessRef = await require("./business_billing").ownedBillingBusiness({
+      db, uid, businessId: request.data?.businessId, HttpsError,
+    });
     const stripe = getStripe();
-    const uid = request.auth.uid;
-
-    const snap = await db
-      .collection("businesses")
-      .where("ownerId", "==", uid)
-      .limit(1)
-      .get();
-
-    assert(!snap.empty, "not-found", "Business not found.");
-
-    const businessRef = snap.docs[0].ref;
 
     await ensureEntitlementsDoc(businessRef.id);
 
@@ -5952,11 +9545,10 @@ exports.verifyAppleSeatPurchase = onCall(
   { region: "us-central1" },
   async (request) => {
 
-    const uid = request.auth?.uid;
+    const uid = assertRegisteredAuth(request);
     const businessId = request.data?.businessId;
     const productId = request.data?.productId;
 
-    assert(uid, "unauthenticated", "Login required.");
     assert(businessId, "invalid-argument", "Missing businessId.");
     assert(productId, "invalid-argument", "Missing productId.");
 
@@ -5970,39 +9562,10 @@ exports.verifyAppleSeatPurchase = onCall(
       "Not owner."
     );
 
-    await ensureEntitlementsDoc(businessId);
-
-    const entRef = entitlementsRef(businessId);
-
-    // 🧠 PLAN SIZE
-    let planSeats = 0;
-
-    if (productId === "locallink.staff.1") planSeats = 1;
-    if (productId === "locallink.staff.3") planSeats = 3;
-    if (productId === "locallink.staff.5") planSeats = 5;
-
-    assert(planSeats > 0, "invalid-argument", "Invalid productId.");
-
-    // 💰 APPLY
-   await entRef.set(
-  {
-    extraStaffSlots: planSeats,
-    restrictionMode: false,
-    billingSource: "apple",
-
-    // 🔥 CLEAR STRIPE STATE
-    stripeStatus: "apple",
-    stripeCustomerId: null,
-    stripeSubscriptionId: null,
-    currentPeriodEnd: null,
-    pastDueSince: null
-  },
-  { merge: true }
-);
-
-    await applySeatEnforcement(businessId);
-
-    return { success: true };
+    // Fail closed: a product identifier is not proof of an Apple purchase.
+    // No entitlement or Stripe metadata is mutated until verified transaction
+    // processing is implemented. Existing entitlements are left untouched.
+    throw new HttpsError("failed-precondition", "Apple staff purchases are not available until purchase verification is configured.");
   }
 );
    
@@ -6121,6 +9684,44 @@ exports.onCommentCreatedAnalytics = onDocumentCreated(
   async () => {
     await incrementAnalytics({
       "engagement.comments": 1,
+    });
+  }
+);
+
+exports.onOpportunityCommentParticipationCreated = onDocumentCreated(
+  {
+    document: "opportunities/{opportunityId}/comments/{commentId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    await notifyOpportunityParticipationCreated({
+      db,
+      admin,
+      sendPushToUser,
+      logger,
+      opportunityId: event.params.opportunityId,
+      commentId: event.params.commentId,
+      source: "comment",
+      data: event.data?.data(),
+    });
+  }
+);
+
+exports.onOpportunityEntryParticipationCreated = onDocumentCreated(
+  {
+    document: "opportunities/{opportunityId}/entries/{entryId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    await notifyOpportunityParticipationCreated({
+      db,
+      admin,
+      sendPushToUser,
+      logger,
+      opportunityId: event.params.opportunityId,
+      entryId: event.params.entryId,
+      source: "entry",
+      data: event.data?.data(),
     });
   }
 );
@@ -6252,23 +9853,49 @@ exports.banUserForReport = onCall(
 
       const reportId = safeTrim(request.data?.reportId);
       const userId = safeTrim(request.data?.userId);
+      const { reasonCode, publicText } = validateModerationReason(
+        request.data || {
+          reasonCode: "not_suitable",
+          publicText: "Not suitable for LocalLink",
+        }
+      );
 
       assert(reportId, "invalid-argument", "Missing report ID.");
       assert(userId, "invalid-argument", "Missing user ID.");
 
-      await db.collection("users").doc(userId).set({
+      await db.collection("users").doc(userId)
+        .collection("private").doc("account").set({
         isBanned: true,
         bannedAt: admin.firestore.FieldValue.serverTimestamp(),
         bannedBy: request.auth.uid,
         moderationStatus: "banned",
+        moderationReasonCode: reasonCode,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      await db.collection("users").doc(userId)
+        .collection("private").doc("access").set({
+          isBanned: true,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
 
       await db.collection("reports").doc(reportId).set({
         status: "resolved",
         actionTaken: "user_banned",
+        removalReasonCode: reasonCode,
+        removalReasonPublicText: publicText,
         resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
         resolvedBy: request.auth.uid,
       }, { merge: true });
+
+      await notifyContentRemoved({
+        userId,
+        notificationId: `account_moderation_${reportId}`,
+        contentType: "account",
+        contentId: userId,
+        contentTitle: "LocalLink account",
+        reasonCode,
+        reasonText: publicText,
+      });
 
       return { ok: true };
     } catch (error) {
@@ -6389,6 +10016,8 @@ exports.deleteUserAccount = onCall({ region: "us-central1", timeoutSeconds: 120,
       "blockedUsers",
       "preferences",
       "deviceTokens",
+      "devices",
+      "private",
     ];
 
     for (const name of subcollections) {

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../models/business_dashboard_model.dart';
@@ -28,6 +31,20 @@ class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
   void initState() {
     super.initState();
     loadDashboard();
+    unawaited(_registerReminderRoute());
+  }
+
+  Future<void> _registerReminderRoute() async {
+    try {
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable(
+            'beginBusinessServiceSetup',
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 5)),
+          )
+          .call({'businessId': widget.businessId, 'registerRouteOnly': true});
+    } catch (_) {
+      // Older backends, staff accounts and offline dashboards remain usable.
+    }
   }
 
   void loadDashboard() {
@@ -70,13 +87,14 @@ class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
     );
   }
 
-  void _openServices() {
-    Navigator.push(
+  Future<void> _openServices() async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => BusinessServicesScreen(businessId: widget.businessId),
       ),
     );
+    if (mounted) await _refresh();
   }
 
   void _openRequests() {
@@ -158,7 +176,11 @@ class _BusinessHomeScreenState extends State<BusinessHomeScreen> {
               children: [
                 _DashboardHeader(dashboard: dashboard),
                 const SizedBox(height: 18),
-                _SetupAlerts(dashboard: dashboard),
+                _SetupAlerts(
+                  dashboard: dashboard,
+                  onServices: _openServices,
+                  onProfile: _openProfile,
+                ),
                 const SizedBox(height: 18),
                 _SectionHeader(
                   title: 'Quick actions',
@@ -331,9 +353,7 @@ class _DashboardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusText = dashboard.isHealthy
-        ? 'Ready for bookings'
-        : dashboard.healthTitle;
+    final statusText = dashboard.healthTitle;
     final statusColor = dashboard.isHealthy
         ? AppColors.success
         : AppColors.warning;
@@ -379,6 +399,16 @@ class _DashboardHeader extends StatelessWidget {
                   style: TextStyle(color: AppColors.textMuted, height: 1.35),
                 ),
                 const SizedBox(height: 12),
+                Text(
+                  '${dashboard.listingLive ? "Listing is live" : "Listing is not live"} · '
+                  '${dashboard.canEnquire ? "Enquiries available" : "Enquiries not available yet"} · '
+                  '${dashboard.canBook ? "Bookings available" : "Bookings not available yet"}',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 12),
                 _StatusPill(
                   label: statusText,
                   icon: dashboard.isHealthy
@@ -397,43 +427,43 @@ class _DashboardHeader extends StatelessWidget {
 
 class _SetupAlerts extends StatelessWidget {
   final BusinessDashboardModel dashboard;
-
-  const _SetupAlerts({required this.dashboard});
+  final VoidCallback onServices;
+  final VoidCallback onProfile;
+  const _SetupAlerts({
+    required this.dashboard,
+    required this.onServices,
+    required this.onProfile,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    final alerts = <String>[
-      if (!dashboard.hasServices)
-        'Add a service before sharing when people can book you.',
-      if (!dashboard.hasAvailability)
-        'Share your first available time so nearby people can see you.',
-      if (dashboard.restrictionMode)
-        'A subscription step is needed before every Page tool is available.',
-    ];
-
-    if (alerts.isEmpty) {
-      return const _TrustNotice(
-        icon: Icons.check_circle_outline,
-        text: 'Your Page is ready for local bookings.',
-        color: AppColors.success,
-      );
-    }
-
-    return Column(
-      children: alerts
-          .map(
-            (alert) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _TrustNotice(
-                icon: Icons.info_outline,
-                text: alert,
-                color: AppColors.warning,
-              ),
-            ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _TrustNotice(
+        icon: Icons.info_outline,
+        text: dashboard.nextStep,
+        color: AppColors.info,
+      ),
+      if (!dashboard.hasServices && dashboard.hasClaimedOwner) ...[
+        const SizedBox(height: 8),
+        if (dashboard.suggestsFirstService)
+          OutlinedButton(
+            onPressed: onServices,
+            child: const Text('Add your first service'),
           )
-          .toList(),
-    );
-  }
+        else
+          OutlinedButton(
+            onPressed: onProfile,
+            child: const Text('Check your contact details'),
+          ),
+        if (dashboard.suggestsFirstService && !dashboard.hasContactOptions)
+          TextButton(
+            onPressed: onProfile,
+            child: const Text('Add contact details while you set up'),
+          ),
+      ],
+    ],
+  );
 }
 
 class _TrustNotice extends StatelessWidget {

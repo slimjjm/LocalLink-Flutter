@@ -1,3 +1,5 @@
+import '../services/business_activation_policy.dart';
+
 class BusinessDashboardModel {
   final int todayBookings;
   final int upcomingBookings;
@@ -18,10 +20,18 @@ class BusinessDashboardModel {
 
   final bool hasServices;
   final bool hasAvailability;
+  // Dashboard readiness only; legacy seat enforcement and bookings are unchanged.
+  final bool hasDirectAvailability;
   final bool hasStaff;
 
   final bool hasPhotos;
   final bool profileComplete;
+  final bool listingLive;
+  final bool hasClaimedOwner;
+  final bool hasContactOptions;
+  final bool acceptingEnquiries;
+  final bool hasPaymentMethod;
+  final String category;
 
   BusinessDashboardModel({
     required this.todayBookings,
@@ -43,10 +53,17 @@ class BusinessDashboardModel {
 
     required this.hasServices,
     required this.hasAvailability,
+    this.hasDirectAvailability = false,
     required this.hasStaff,
 
     required this.hasPhotos,
     required this.profileComplete,
+    this.listingLive = false,
+    this.hasClaimedOwner = false,
+    this.hasContactOptions = false,
+    this.acceptingEnquiries = true,
+    this.hasPaymentMethod = false,
+    this.category = '',
   });
 
   // =====================================
@@ -55,26 +72,53 @@ class BusinessDashboardModel {
 
   int get allowedStaff => freeStaffSlots + extraStaffSlots;
 
-  String get healthTitle {
-    if (!hasServices || !hasStaff || !hasPhotos) {
-      return 'Needs Attention';
+  bool get canEnquire =>
+      listingLive &&
+      hasClaimedOwner &&
+      (hasContactOptions || (hasServices && acceptingEnquiries));
+  bool get canBook =>
+      listingLive &&
+      hasClaimedOwner &&
+      hasServices &&
+      acceptingEnquiries &&
+      hasAvailability &&
+      hasPaymentMethod &&
+      (!restrictionMode || hasDirectAvailability);
+  bool get suggestsFirstService =>
+      acceptingEnquiries && BusinessActivationPolicy.suggestsServices(category);
+  String get nextStep {
+    if (!listingLive) {
+      return 'Your listing is not currently live. Check your page details.';
     }
-
-    if (!hasAvailability || !stripeConnected) {
-      return 'Almost Ready';
+    if (!hasClaimedOwner) {
+      return 'A verified owner needs to claim this page before managing customer enquiries.';
     }
-
-    return 'Operational';
+    if (!acceptingEnquiries) {
+      return 'Keep your contact details and opening hours up to date. LocalLink booking requests are switched off for this page.';
+    }
+    if (!hasServices) {
+      return BusinessActivationPolicy.firstStep(category);
+    }
+    if (restrictionMode && !hasDirectAvailability) {
+      return 'Check your subscription details to see which booking tools are available.';
+    }
+    if (!hasPaymentMethod) {
+      return 'Choose a supported payment method. Cash and bank transfer do not need Stripe.';
+    }
+    if (!hasAvailability) {
+      return 'Share available appointment times if you want customers to book.';
+    }
+    return 'Keep your services, contact details and available times up to date.';
   }
 
-  bool get isHealthy {
-    return hasServices &&
-        hasStaff &&
-        hasAvailability &&
-        stripeConnected &&
-        hasPhotos &&
-        !restrictionMode;
-  }
+  String get healthTitle => canBook
+      ? 'Customers can make bookings'
+      : canEnquire
+      ? 'Customers can make enquiries'
+      : listingLive
+      ? 'Listing is live'
+      : 'Listing is not live';
+  bool get isHealthy => canBook;
 }
 
 class BusinessDashboardMessagingModel {

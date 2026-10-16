@@ -1,10 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 
-enum StripeRuntimeMode {
-  test,
-  live,
-}
+enum StripeRuntimeMode { test, live }
+
+const String kStripeApplePayMerchantIdentifier = 'merchant.co.uk.locallinkapp';
 
 class StripeConfigurationException implements Exception {
   final String message;
@@ -53,8 +52,8 @@ class StripeEnvironmentConfig {
       'test' => StripeRuntimeMode.test,
       'live' => StripeRuntimeMode.live,
       _ => throw const StripeConfigurationException(
-          'Invalid STRIPE_MODE. Use test or live.',
-        ),
+        'Invalid STRIPE_MODE. Use test or live.',
+      ),
     };
 
     final keyMode = _modeForPublishableKey(normalisedKey);
@@ -70,7 +69,9 @@ class StripeEnvironmentConfig {
       );
     }
 
-    if (isDebug && configuredMode == StripeRuntimeMode.live && !allowLiveInDebug) {
+    if (isDebug &&
+        configuredMode == StripeRuntimeMode.live &&
+        !allowLiveInDebug) {
       throw const StripeConfigurationException(
         'Live Stripe mode is blocked in debug builds. Use STRIPE_MODE=test, '
         'or pass STRIPE_ALLOW_LIVE_IN_DEBUG=true only for an intentional '
@@ -96,6 +97,11 @@ Future<StripeEnvironmentConfig?> configureStripeForApp() async {
   if (config == null) return null;
 
   Stripe.publishableKey = config.publishableKey;
+  Stripe.stripeAccountId = null;
+  Stripe.merchantIdentifier =
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
+      ? kStripeApplePayMerchantIdentifier
+      : null;
   await Stripe.instance.applySettings();
 
   if (kDebugMode) {

@@ -2,8 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AdminAccessService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+  static const approvedAdminEmails = {
+    'jae19882011@hotmail.co.uk',
+    'founder@locallinkapp.co.uk',
+  };
+
+  static bool hasEffectiveAdminFlag(
+    Map<String, dynamic>? publicData,
+    Map<String, dynamic>? accessData,
+  ) => hasAdminProfileFlag(accessData ?? publicData);
+  AdminAccessService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _auth = auth ?? FirebaseAuth.instance;
+
+  final FirebaseFirestore _firestore;
+  final FirebaseAuth _auth;
 
   static bool hasAdminProfileFlag(Map<String, dynamic>? userData) {
     return userData?['isAdmin'] == true;
@@ -18,14 +31,24 @@ class AdminAccessService {
 
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
     final userData = userDoc.data();
+    final accessDoc = await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('private')
+        .doc('access')
+        .get();
 
-    if (hasAdminProfileFlag(userData)) {
+    final hasAdminFlag = hasEffectiveAdminFlag(
+      userData,
+      accessDoc.exists ? accessDoc.data() ?? {} : null,
+    );
+    if (hasAdminFlag) {
       return true;
     }
 
     final email = user.email?.trim().toLowerCase();
 
-    if (email == null || email.isEmpty) {
+    if (email == null || !approvedAdminEmails.contains(email)) {
       return false;
     }
 

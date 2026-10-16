@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_colors.dart';
+import '../services/notification_service.dart';
 
 class BannedAccountScreen extends StatelessWidget {
   const BannedAccountScreen({super.key});
@@ -14,6 +15,7 @@ class BannedAccountScreen extends StatelessWidget {
   }
 
   Future<void> _signOut() async {
+    await NotificationService.shared.unregisterCurrentDevice();
     await FirebaseAuth.instance.signOut();
   }
 

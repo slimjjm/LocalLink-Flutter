@@ -42,6 +42,13 @@ class BookingStatusChip extends StatelessWidget {
           background: Color(0xFFE7F0FF),
           foreground: Color(0xFF2457A6),
         );
+      case 'awaiting_completion':
+        return const BookingStatusPresentation(
+          label: 'Past - awaiting completion',
+          icon: Icons.pending_actions_rounded,
+          background: Color(0xFFF0F2F4),
+          foreground: Color(0xFF59636E),
+        );
       case 'refunded':
         return const BookingStatusPresentation(
           label: 'Refunded',

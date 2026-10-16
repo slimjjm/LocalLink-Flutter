@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'community_help_ownership.dart';
+
 class CommunityHelpLifecycle {
   static const lostExpiry = Duration(days: 7);
   static const foundExpiry = Duration(days: 14);
@@ -23,6 +25,7 @@ class CommunityHelpLifecycle {
     required String itemCategory,
   }) {
     if (type == 'free_item') return freeItemExpiry;
+    if (mode == foundMode && itemCategory == petCategory) return lostExpiry;
     if (mode == foundMode) return foundExpiry;
     return lostExpiry;
   }
@@ -97,6 +100,11 @@ class CommunityHelpLifecycle {
         !isExpired(data, now);
   }
 
+  static bool isVisibleInLostFoundUx(Map<String, dynamic> data) {
+    final type = data['type'] as String? ?? 'lost_found';
+    return type != 'free_item';
+  }
+
   static String lifecycleKind({
     required String type,
     required String mode,
@@ -162,6 +170,95 @@ class CommunityHelpLifecycle {
     return 'Missing';
   }
 
+  static DateTime? observedAt(Map<String, dynamic> data) {
+    return asDateTime(data['observedAt']) ??
+        asDateTime(data['lastSeenAt']) ??
+        asDateTime(data['foundAt']) ??
+        asDateTime(data['eventDate']);
+  }
+
+  static DateTime firstSelectableObservedDate(DateTime now) => DateTime(2000);
+
+  static DateTime latestSelectableObservedAt(DateTime now) => now;
+
+  static DateTime normaliseObservedAt(DateTime selected, DateTime now) {
+    if (selected.isAfter(now)) return now;
+    return selected;
+  }
+
+  static String observedAtText(Map<String, dynamic> data, DateTime now) {
+    final observed = observedAt(data);
+    if (observed == null) {
+      return (data['eventDateText'] as String?) ??
+          (data['timing'] as String?) ??
+          '';
+    }
+
+    final dateOnly =
+        data['observedDateOnly'] == true ||
+        (observed.hour == 0 &&
+            observed.minute == 0 &&
+            observed.second == 0 &&
+            observed.millisecond == 0 &&
+            observed.microsecond == 0);
+    if (dateOnly) return _formatDate(observed);
+
+    final difference = now.difference(observed);
+    if (difference.inMinutes < 0) return _formatAbsoluteDateTime(observed);
+    if (difference.inMinutes < 1) return 'Just now';
+    if (difference.inMinutes < 60) {
+      final minutes = difference.inMinutes;
+      return '$minutes ${minutes == 1 ? 'minute' : 'minutes'} ago';
+    }
+    if (_isSameDate(observed, now)) {
+      return 'Today, ${_formatTime(observed)}';
+    }
+
+    final yesterday = now.subtract(const Duration(days: 1));
+    if (_isSameDate(observed, yesterday)) {
+      return 'Yesterday, ${_formatTime(observed)}';
+    }
+
+    return _formatDate(observed);
+  }
+
+  static bool _isSameDate(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  static String _formatTime(DateTime value) {
+    final hour = value.hour == 0
+        ? 12
+        : value.hour > 12
+        ? value.hour - 12
+        : value.hour;
+    final minute = value.minute.toString().padLeft(2, '0');
+    final suffix = value.hour >= 12 ? 'pm' : 'am';
+    return '$hour:$minute$suffix';
+  }
+
+  static String _formatDate(DateTime value) {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${value.day} ${months[value.month - 1]} ${value.year}';
+  }
+
+  static String _formatAbsoluteDateTime(DateTime value) {
+    return '${_formatDate(value)}, ${_formatTime(value)}';
+  }
+
   static String responseActionLabel(Map<String, dynamic> data) {
     final mode = data['mode'] as String? ?? lostMode;
     final category = data['itemCategory'] as String? ?? '';
@@ -202,7 +299,7 @@ class CommunityHelpLifecycle {
   }) {
     return currentUserId != null &&
         currentUserId.isNotEmpty &&
-        post['createdBy'] == currentUserId;
+        resolveCommunityHelpOwnerId(post) == currentUserId;
   }
 
   static bool shouldMatch(
@@ -325,7 +422,7 @@ class CommunityHelpLifecycle {
   }) {
     return {
       'postId': postId,
-      'postOwnerId': post['createdBy'],
+      'postOwnerId': resolveCommunityHelpOwnerId(post),
       'responderId': responderId,
       'responderName': responderName,
       'message': message.trim(),

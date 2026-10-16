@@ -1,0 +1,5 @@
+// Copy this file to StripeLive.xcconfig.
+// Keep StripeLive.xcconfig local; it is ignored by git.
+// Use the existing LocalLink live publishable key only.
+STRIPE_PUBLISHABLE_KEY=pk_live_REPLACE_WITH_EXISTING_PUBLISHABLE_KEY
+STRIPE_MODE=live

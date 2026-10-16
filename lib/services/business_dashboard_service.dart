@@ -1,8 +1,29 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/business_dashboard_model.dart';
+import 'business_activation_policy.dart';
+import '../utils/helpers.dart';
 
 class BusinessDashboardService {
+  static bool hasUsableDirectAvailability({
+    required List<Map<String, dynamic>> services,
+    required List<Map<String, dynamic>> posts,
+    required DateTime now,
+  }) => BusinessActivationPolicy.hasBookingOptions(
+    services: services,
+    staff: const [],
+    slots: const [],
+    posts: posts.where((post) {
+      final raw = post['remainingCapacity'] ?? post['capacity'] ?? 1;
+      final remaining = raw is num ? raw : num.tryParse(raw.toString());
+      return post['archived'] != true &&
+          remaining != null &&
+          remaining.isFinite &&
+          remaining > 0;
+    }).toList(),
+    now: now,
+  );
+
   static Future<BusinessDashboardMessagingModel> loadMessagingSummary(
     String businessId,
   ) async {
@@ -134,8 +155,43 @@ class BusinessDashboardService {
         .doc(businessId)
         .collection('services')
         .where('isActive', isEqualTo: true)
-        .limit(1)
         .get();
+
+    final activeServiceIds = servicesSnap.docs.map((doc) => doc.id).toSet();
+    final assignedStaff = staffSnap.docs.where((doc) {
+      final ids = doc.data()['serviceIds'];
+      return ids is List && ids.any(activeServiceIds.contains);
+    });
+    // One range query per relevant staff member uses existing single-field
+    // indexes, avoiding a new collection-group composite index or migration.
+    final slotSnapshots = await Future.wait(
+      assignedStaff.map(
+        (person) => person.reference
+            .collection('availableSlots')
+            .where('startTime', isGreaterThan: Timestamp.fromDate(now))
+            .get(),
+      ),
+    );
+    final hasDirectBookingOptions = hasUsableDirectAvailability(
+      services: servicesSnap.docs
+          .map((doc) => {...doc.data(), 'id': doc.id})
+          .toList(),
+      posts: liveAvailabilitySnap.docs.map((doc) => doc.data()).toList(),
+      now: now,
+    );
+    final hasBookingOptions = BusinessActivationPolicy.hasBookingOptions(
+      services: servicesSnap.docs
+          .map((doc) => {...doc.data(), 'id': doc.id})
+          .toList(),
+      staff: staffSnap.docs
+          .map((doc) => {...doc.data(), 'id': doc.id})
+          .toList(),
+      slots: slotSnapshots
+          .expand((snapshot) => snapshot.docs.map((doc) => doc.data()))
+          .toList(),
+      posts: liveAvailabilitySnap.docs.map((doc) => doc.data()).toList(),
+      now: now,
+    );
 
     // =====================================
     // BUSINESS
@@ -214,12 +270,23 @@ class BusinessDashboardService {
 
       hasServices: servicesSnap.docs.isNotEmpty,
 
-      hasAvailability: liveAvailabilitySnap.docs.isNotEmpty,
+      hasAvailability: hasBookingOptions,
+      hasDirectAvailability: hasDirectBookingOptions,
 
       hasStaff: staffSnap.docs.isNotEmpty,
 
       hasPhotos: hasPhotos,
       profileComplete: profileComplete,
+      listingLive: BusinessActivationPolicy.listingLive(businessData),
+      hasClaimedOwner: BusinessActivationPolicy.hasClaimedOwner(businessData),
+      hasContactOptions: BusinessActivationPolicy.contactLinks(
+        businessData,
+      ).isNotEmpty,
+      acceptingEnquiries: businessData['acceptingLeads'] != false,
+      hasPaymentMethod: resolvePaymentMethods(
+        businessData,
+      ).any((method) => {'cash', 'bank_transfer', 'stripe'}.contains(method)),
+      category: (businessData['category'] ?? '').toString(),
     );
   }
 }

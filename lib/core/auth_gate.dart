@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 
 import '../screens/banned_account_screen.dart';
 import '../screens/email_verification_screen.dart';
-import '../screens/login_screen.dart';
 import '../screens/main_tab_shell_screen.dart';
-import '../screens/welcome_screen.dart';
+import '../services/analytics_service.dart';
 import '../services/deep_link_service.dart';
 import '../services/startup_timeline.dart';
+import '../services/uk_activity_periods.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -31,15 +30,61 @@ class AuthGate extends StatelessWidget {
         StartupTimeline.log(
           'auth user resolved: ${user == null ? 'signed_out' : 'signed_in'}',
         );
+        LocalLinkAnalytics.instance.updateUserProperties(user: user);
 
         if (user != null) {
           return _AuthenticatedUserGate(user: user);
         }
 
-        StartupTimeline.log(
-          kIsWeb ? 'showing public welcome' : 'showing login',
-        );
-        return kIsWeb ? const WelcomeScreen() : const LoginScreen();
+        StartupTimeline.log('starting guest home session');
+        return const _GuestHomeGate();
+      },
+    );
+  }
+}
+
+class _GuestHomeGate extends StatefulWidget {
+  const _GuestHomeGate();
+
+  @override
+  State<_GuestHomeGate> createState() => _GuestHomeGateState();
+}
+
+class _GuestHomeGateState extends State<_GuestHomeGate> {
+  late final Future<void> _guestSignIn = _startGuestSession();
+
+  Future<void> _startGuestSession() async {
+    final auth = FirebaseAuth.instance;
+    if (auth.currentUser != null) return;
+    await auth.signInAnonymously();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _guestSignIn,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return const Scaffold(
+            body: Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'LocalLink could not start guest browsing. Please try again.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          );
+        }
+
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
       },
     );
   }
@@ -63,11 +108,13 @@ class _AuthenticatedUserGateState extends State<_AuthenticatedUserGate> {
   void initState() {
     super.initState();
     StartupTimeline.log('AuthenticatedUserGate started');
-    _recordActivity().catchError((_) {});
+    if (!widget.user.isAnonymous) {
+      _recordActivity().catchError((_) {});
+    }
   }
 
   Future<void> _recordActivity() async {
-    final ids = _periodIds();
+    final ids = UkActivityPeriods.periodIds();
     final firestore = FirebaseFirestore.instance;
     final payload = {
       'uid': widget.user.uid,
@@ -96,27 +143,16 @@ class _AuthenticatedUserGateState extends State<_AuthenticatedUserGate> {
     ]);
   }
 
-  _PeriodIds _periodIds() {
-    final now = DateTime.now();
-    final month = now.month.toString().padLeft(2, '0');
-    final day = now.day.toString().padLeft(2, '0');
-    final firstDay = DateTime(now.year, 1, 1);
-    final today = DateTime(now.year, now.month, now.day);
-    final pastDays = today.difference(firstDay).inDays;
-    final week = ((pastDays + firstDay.weekday) / 7).ceil().toString().padLeft(
-      2,
-      '0',
-    );
-
-    return _PeriodIds(
-      day: '${now.year}-$month-$day',
-      week: '${now.year}-W$week',
-      month: '${now.year}-$month',
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    if (widget.user.isAnonymous) {
+      if (!_loggedHomeShown) {
+        _loggedHomeShown = true;
+        StartupTimeline.log('showing guest home');
+      }
+      return const MainTabShellScreen();
+    }
+
     if (_requiresEmailVerification(widget.user)) {
       StartupTimeline.log('showing email verification');
       return EmailVerificationScreen(user: widget.user);
@@ -143,18 +179,36 @@ class _AuthenticatedUserGateState extends State<_AuthenticatedUserGate> {
           StartupTimeline.log('profile resolved');
         }
 
-        if (userData?['isBanned'] == true) {
-          StartupTimeline.log('showing banned account');
-          return const BannedAccountScreen();
-        }
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(widget.user.uid)
+              .collection('private')
+              .doc('access')
+              .snapshots(),
+          builder: (context, accountSnapshot) {
+            if (accountSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final accountData = accountSnapshot.data?.data();
+            final isBanned = accountSnapshot.data?.exists == true
+                ? (accountData?['isBanned'] == true)
+                : (userData?['isBanned'] == true);
+            if (isBanned) {
+              StartupTimeline.log('showing banned account');
+              return const BannedAccountScreen();
+            }
 
-        _openPendingDeepLinkAfterGate();
-
-        if (!_loggedHomeShown) {
-          _loggedHomeShown = true;
-          StartupTimeline.log('showing home');
-        }
-        return const MainTabShellScreen();
+            _openPendingDeepLinkAfterGate();
+            if (!_loggedHomeShown) {
+              _loggedHomeShown = true;
+              StartupTimeline.log('showing home');
+            }
+            return const MainTabShellScreen();
+          },
+        );
       },
     );
   }
@@ -183,16 +237,4 @@ class _AuthenticatedUserGateState extends State<_AuthenticatedUserGate> {
         !providerIds.contains('google.com') &&
         !providerIds.contains('apple.com');
   }
-}
-
-class _PeriodIds {
-  final String day;
-  final String week;
-  final String month;
-
-  const _PeriodIds({
-    required this.day,
-    required this.week,
-    required this.month,
-  });
 }

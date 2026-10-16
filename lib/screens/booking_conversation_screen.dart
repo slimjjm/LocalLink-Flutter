@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/booking_conversation.dart';
 import '../models/booking_message.dart';
@@ -34,6 +36,7 @@ class _BookingConversationScreenState extends State<BookingConversationScreen> {
   late final Future<String> _conversationFuture;
   String? _resolvedConversationId;
   bool _isSending = false;
+  bool _isPreparingImage = false;
   bool _isMarkingRead = false;
   String? _retryText;
   int? _initialUnreadCount;
@@ -139,6 +142,65 @@ class _BookingConversationScreenState extends State<BookingConversationScreen> {
           _isSending = false;
         });
       }
+    }
+  }
+
+  Future<void> _sendImageMessage(BookingConversation conversation) async {
+    if (_isSending ||
+        _isPreparingImage ||
+        conversation.archived ||
+        (widget.viewerType == 'business' &&
+            !conversation.customerHasMessaged)) {
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _isPreparingImage = true);
+
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 78,
+        maxWidth: 1600,
+      );
+      if (picked == null) return;
+
+      final bytes = await picked.readAsBytes();
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ref = FirebaseStorage.instance.ref().child(
+        'conversationImages/${conversation.id}/${user.uid}/$fileName',
+      );
+
+      await ref.putData(
+        bytes,
+        SettableMetadata(
+          contentType: 'image/jpeg',
+          customMetadata: {
+            'ownerId': user.uid,
+            'conversationId': conversation.id,
+          },
+        ),
+      );
+      final imageUrl = await ref.getDownloadURL();
+
+      await _service.sendMessage(
+        conversationId: conversation.id,
+        text: 'Photo',
+        attachments: [
+          {'type': 'image', 'url': imageUrl},
+        ],
+      );
+
+      _scheduleScrollToBottom();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Photo could not be sent.')));
+    } finally {
+      if (mounted) setState(() => _isPreparingImage = false);
     }
   }
 
@@ -363,11 +425,13 @@ class _BookingConversationScreenState extends State<BookingConversationScreen> {
                       controller: _controller,
                       focusNode: _composerFocusNode,
                       isSending: _isSending,
+                      isPreparingImage: _isPreparingImage,
                       archived: conversation.archived,
                       waitingForCustomer:
                           widget.viewerType == 'business' &&
                           !conversation.customerHasMessaged,
                       onSend: () => _sendMessage(conversation),
+                      onAttachImage: () => _sendImageMessage(conversation),
                     ),
                   ],
                 ),
@@ -1172,17 +1236,21 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.isSending,
+    required this.isPreparingImage,
     required this.archived,
     required this.waitingForCustomer,
     required this.onSend,
+    required this.onAttachImage,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isSending;
+  final bool isPreparingImage;
   final bool archived;
   final bool waitingForCustomer;
   final VoidCallback onSend;
+  final VoidCallback onAttachImage;
 
   @override
   Widget build(BuildContext context) {
@@ -1197,6 +1265,28 @@ class _Composer extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            SizedBox(
+              width: 44,
+              height: 48,
+              child: IconButton(
+                tooltip: 'Attach photo',
+                onPressed:
+                    archived ||
+                        isSending ||
+                        isPreparingImage ||
+                        waitingForCustomer
+                    ? null
+                    : onAttachImage,
+                icon: isPreparingImage
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.photo_outlined),
+              ),
+            ),
+            const SizedBox(width: 6),
             Expanded(
               child: Semantics(
                 label: 'Message input',

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_secrets.dart';
 import '../models/address_result.dart';
+import 'community_help_location.dart';
 
 class AddressSearchService {
   Future<List<AddressResult>> search(String query) async {
@@ -39,6 +40,22 @@ class AddressSearchService {
           ),
         )
         .toList();
+  }
+
+  Future<String> getPublicAreaLabel(String placeId) async {
+    final url =
+        Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+          'place_id': placeId,
+          'fields': 'address_components',
+          'key': AppSecrets.googleApiKey,
+        });
+    final response = await http.get(url);
+    if (response.statusCode != 200) return 'Selected area';
+    final data = jsonDecode(response.body);
+    final components = data['result']?['address_components'];
+    return CommunityHelpLocation.areaFromComponents(
+      components is List ? components : [],
+    );
   }
 
   Future<Map<String, double>?> getCoordinates(String placeId) async {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../utils/helpers.dart';
+import '../services/booking_visibility_service.dart';
 import '../widgets/booking_status_chip.dart';
 import 'business_booking_detail_screen.dart';
 import 'post_availability_screen.dart';
@@ -94,8 +95,12 @@ class _BusinessCalendarScreenState extends State<BusinessCalendarScreen> {
       if (!mounted) return;
 
       setState(() {
-        bookings = bookingSnapshot.docs;
-        availabilityPosts = availabilitySnapshot.docs;
+        bookings = bookingSnapshot.docs
+            .where((doc) => isOperationalBusinessBooking(doc.data()))
+            .toList();
+        availabilityPosts = availabilitySnapshot.docs
+            .where((doc) => isAvailabilityUsable(doc.data(), DateTime.now()))
+            .toList();
         blockedTime = blocks;
         isLoading = false;
       });

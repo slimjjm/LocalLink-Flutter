@@ -9,11 +9,17 @@ import 'package:flutter/foundation.dart';
 
 import 'config/stripe_config.dart';
 import 'core/auth_gate.dart';
+import 'widgets/release_compatibility_gate.dart';
 import 'firebase_options.dart';
 import 'screens/public_shared_item_screen.dart';
+import 'screens/public_explore_screen.dart';
+import 'screens/welcome_screen.dart';
+import 'screens/email_action_screen.dart';
+import 'screens/stripe_connect_return_screen.dart';
 import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'services/startup_timeline.dart';
+import 'theme/local_link_theme.dart';
 
 import 'screens/inbox_screen.dart';
 import 'screens/customer_bookings_screen.dart';
@@ -59,7 +65,9 @@ Future<void> main() async {
       }
 
       if (!kIsWeb) {
-        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+        FirebaseMessaging.onBackgroundMessage(
+          firebaseMessagingBackgroundHandler,
+        );
         StartupTimeline.log('notification background handler registered');
         _configureCrashReporting();
       }
@@ -109,9 +117,9 @@ Future<void> _initialiseOptionalNativeServices() async {
 
 Future<void> _initialiseNotificationsSafely() async {
   try {
-    await NotificationService.shared
-        .initialise()
-        .timeout(const Duration(seconds: 8));
+    await NotificationService.shared.initialise().timeout(
+      const Duration(seconds: 8),
+    );
     StartupTimeline.log('notifications ready');
   } catch (error, stack) {
     StartupTimeline.log('notifications initialization skipped: $error');
@@ -136,9 +144,7 @@ Future<void> _configureStripeSafely() async {
 }
 
 class _StartupFailureApp extends StatelessWidget {
-  const _StartupFailureApp({
-    required this.error,
-  });
+  const _StartupFailureApp({required this.error});
 
   final Object error;
 
@@ -159,10 +165,7 @@ class _StartupFailureApp extends StatelessWidget {
                 const Text(
                   'LocalLink could not start',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 12),
                 const Text(
@@ -213,22 +216,31 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      builder: (context, child) =>
+          ReleaseCompatibilityGate(child: child ?? const SizedBox.shrink()),
 
       debugShowCheckedModeBanner: false,
+      theme: LocalLinkTheme.light,
 
       home: kIsWeb
-          ? PublicSharedItemScreen.fromUri(uri: Uri.base) ?? const AuthGate()
+          ? EmailActionScreen.fromUri(uri: Uri.base) ??
+                StripeConnectReturnScreen.fromUri(uri: Uri.base) ??
+                PublicSharedItemScreen.fromUri(uri: Uri.base) ??
+                PublicExploreScreen.fromUri(uri: Uri.base) ??
+                PublicCategoryLandingScreen.fromUri(uri: Uri.base) ??
+                const AuthGate()
           : const AuthGate(),
 
       routes: {
         '/home': (_) => const AuthGate(),
+        '/explore': (_) => const PublicExploreScreen(),
 
         '/claim-business': (_) => const ClaimBusinessScreen(),
 
         // =====================================================
         // INBOX
         // =====================================================
-        '/inbox': (_) => InboxScreen(currentRole: 'customer'),
+        '/inbox': (_) => const InboxScreen(currentRole: 'all'),
 
         // =====================================================
         // BOOKINGS
@@ -301,7 +313,93 @@ class _MyAppState extends State<MyApp> {
           return CustomerBookingDetailScreen(bookingId: bookingId);
         },
       },
+      onGenerateRoute: generateLocalLinkRoute,
+      onUnknownRoute: unknownLocalLinkRoute,
     );
+  }
+}
+
+@visibleForTesting
+Uri? localLinkUriFromRouteName(String? routeName) {
+  final name = routeName?.trim();
+  if (name == null || name.isEmpty || name == Navigator.defaultRouteName) {
+    return null;
+  }
+
+  final parsed = Uri.tryParse(name);
+  if (parsed == null) return null;
+
+  if (parsed.hasScheme) {
+    return parsed;
+  }
+
+  if (!name.startsWith('/')) {
+    return null;
+  }
+
+  return Uri.tryParse('https://locallinkapp.co.uk$name');
+}
+
+Route<dynamic>? generateLocalLinkRoute(RouteSettings settings) {
+  final uri = localLinkUriFromRouteName(settings.name);
+  if (uri == null) return null;
+
+  final target = LocalLinkDeepLinkTarget.fromUri(uri);
+  if (target == null) return null;
+
+  return MaterialPageRoute(
+    settings: settings,
+    builder: (_) => kIsWeb
+        ? EmailActionScreen.fromUri(uri: uri) ??
+              StripeConnectReturnScreen.fromUri(uri: uri) ??
+              PublicSharedItemScreen(target: target)
+        : _DeepLinkStartupScreen(uri: uri, target: target),
+  );
+}
+
+Route<dynamic> unknownLocalLinkRoute(RouteSettings settings) {
+  return MaterialPageRoute(
+    settings: settings,
+    builder: (_) => const _RouteFallbackScreen(
+      message: 'We could not open this LocalLink link.',
+    ),
+  );
+}
+
+class _DeepLinkStartupScreen extends StatefulWidget {
+  const _DeepLinkStartupScreen({required this.uri, required this.target});
+
+  final Uri uri;
+  final LocalLinkDeepLinkTarget target;
+
+  @override
+  State<_DeepLinkStartupScreen> createState() => _DeepLinkStartupScreenState();
+}
+
+class _DeepLinkStartupScreenState extends State<_DeepLinkStartupScreen> {
+  bool _opened = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_opened) return;
+
+    _opened = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        DeepLinkService.shared.openRouteTargetOrQueue(
+          context,
+          widget.uri,
+          widget.target,
+        ),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const AuthGate();
   }
 }
 

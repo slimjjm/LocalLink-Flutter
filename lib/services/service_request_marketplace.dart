@@ -113,7 +113,21 @@ class ServiceRequestMarketplace {
       service['searchKeywords'],
     ].map(_normalise).join(' ');
 
-    return serviceText.contains(category) || category.contains(serviceText);
+    if (serviceText.contains(category) || category.contains(serviceText)) {
+      return true;
+    }
+
+    final serviceTokens = _normalisedTokens([
+      service['category'],
+      service['name'],
+      service['serviceName'],
+      service['details'],
+      service['description'],
+      service['searchKeywords'],
+    ]).toSet();
+    final categoryTokens = _normalisedTokens(request['category']);
+    return categoryTokens.isNotEmpty &&
+        categoryTokens.every(serviceTokens.contains);
   }
 
   static double? distanceMiles(
@@ -152,6 +166,17 @@ class ServiceRequestMarketplace {
         .trim();
   }
 
+  static List<String> imageUrls(Map<String, dynamic> data) {
+    final raw = data['imageUrls'];
+    if (raw is! Iterable) return const [];
+
+    return raw
+        .map((value) => value?.toString().trim() ?? '')
+        .where((value) => value.isNotEmpty)
+        .take(3)
+        .toList(growable: false);
+  }
+
   static String _normalise(Object? value) {
     if (value is Iterable) {
       return value.map(_normalise).where((v) => v.isNotEmpty).join(' ');
@@ -160,6 +185,27 @@ class ServiceRequestMarketplace {
       RegExp('[^a-z0-9]+'),
       ' ',
     );
+  }
+
+  static List<String> _normalisedTokens(Object? value) {
+    return _normalise(value)
+        .split(RegExp(r'\s+'))
+        .map(_stemSearchToken)
+        .where((token) => token.length > 1)
+        .toList();
+  }
+
+  static String _stemSearchToken(String token) {
+    if (token.endsWith('ing') && token.length > 5) {
+      return token.substring(0, token.length - 3);
+    }
+    if (token.endsWith('er') && token.length > 4) {
+      return token.substring(0, token.length - 2);
+    }
+    if (token.endsWith('s') && token.length > 3) {
+      return token.substring(0, token.length - 1);
+    }
+    return token;
   }
 
   static double _radians(double value) => value * math.pi / 180;
@@ -184,9 +230,14 @@ class ServiceRequestCommands {
     required double approxLatitude,
     required double approxLongitude,
     String? budgetText,
-  }) {
+    String? requestId,
+    List<String> imageUrls = const [],
+  }) async {
     final now = DateTime.now();
-    return requests.add({
+    final requestRef = requestId == null || requestId.isEmpty
+        ? requests.doc()
+        : requests.doc(requestId);
+    await requestRef.set({
       'customerId': customerId,
       'category': category,
       'title': title,
@@ -201,12 +252,60 @@ class ServiceRequestCommands {
       'approxLongitude': approxLongitude,
       'status': ServiceRequestMarketplace.statusOpen,
       'isActive': true,
+      if (imageUrls.isNotEmpty) 'imageUrls': imageUrls.take(3).toList(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
       'expiresAt': Timestamp.fromDate(
         ServiceRequestMarketplace.defaultExpiresAt(now),
       ),
     });
+    return requestRef;
+  }
+
+  Future<void> updateRequestImages({
+    required String requestId,
+    required List<String> imageUrls,
+  }) {
+    return requests.doc(requestId).set({
+      'imageUrls': imageUrls.take(3).toList(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> updateCustomerRequest({
+    required String requestId,
+    required String category,
+    required String title,
+    required String description,
+    required String scheduleText,
+    required String publicLocation,
+    required double approxLatitude,
+    required double approxLongitude,
+    required List<String> imageUrls,
+    String? budgetText,
+  }) {
+    return requests.doc(requestId).set({
+      'category': category,
+      'title': title,
+      'description': description,
+      'details': description,
+      'scheduleText': scheduleText,
+      'publicLocation': publicLocation,
+      'location': publicLocation,
+      'locationPrecision': 'approximate',
+      'approxLatitude': approxLatitude,
+      'approxLongitude': approxLongitude,
+      'imageUrls': imageUrls.take(3).toList(),
+      if (budgetText != null && budgetText.trim().isNotEmpty)
+        'budgetText': budgetText.trim()
+      else
+        'budgetText': FieldValue.delete(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> deleteRequest(String requestId) {
+    return requests.doc(requestId).delete();
   }
 
   Future<void> closeRequest(String requestId, {required String status}) {
@@ -237,6 +336,7 @@ class ServiceRequestCommands {
     required String serviceId,
     required String serviceName,
     String? priceText,
+    String? proposedScheduleText,
     String? message,
   }) async {
     final offerRef = requests
@@ -251,6 +351,9 @@ class ServiceRequestCommands {
       'serviceName': serviceName,
       if (priceText != null && priceText.trim().isNotEmpty)
         'priceText': priceText.trim(),
+      if (proposedScheduleText != null &&
+          proposedScheduleText.trim().isNotEmpty)
+        'proposedScheduleText': proposedScheduleText.trim(),
       if (message != null && message.trim().isNotEmpty)
         'message': message.trim(),
       'status': ServiceRequestMarketplace.offerActive,

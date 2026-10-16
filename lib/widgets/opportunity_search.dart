@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 
 class OpportunitySearch extends StatelessWidget {
   final ValueChanged<String> onChanged;
@@ -12,11 +13,11 @@ class OpportunitySearch extends StatelessWidget {
     return TextField(
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
+      style: LocalLinkTextStyles.body,
       decoration: InputDecoration(
         hintText: 'Search activities, services and help',
-        hintStyle: const TextStyle(
+        hintStyle: LocalLinkTextStyles.secondary.copyWith(
           color: AppColors.textLight,
-          fontWeight: FontWeight.w600,
         ),
         prefixIcon: const Icon(
           Icons.search_rounded,
@@ -24,24 +25,24 @@ class OpportunitySearch extends StatelessWidget {
         ),
         suffixIcon: const Icon(Icons.tune_rounded, color: AppColors.textMuted),
         filled: true,
-        fillColor: AppColors.card,
+        fillColor: AppColors.elevatedSurface,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 15,
+          horizontal: LocalLinkSpacing.md,
+          vertical: LocalLinkSpacing.sm,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(LocalLinkRadius.lg),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(LocalLinkRadius.lg),
           borderSide: BorderSide(
             color: AppColors.charcoal.withValues(alpha: 0.06),
             width: 1,
           ),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(LocalLinkRadius.lg),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
         ),
       ),

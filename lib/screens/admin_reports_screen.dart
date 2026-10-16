@@ -1,10 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/admin_access_service.dart';
 import '../theme/app_colors.dart';
+import 'claim_review_screen.dart';
+import 'moderator_populate_area_screen.dart';
 import 'opportunity_detail_screen.dart';
 import 'profile_screen.dart';
 
@@ -31,49 +34,60 @@ class AdminReportsScreen extends StatelessWidget {
   Future<void> _removeOpportunity({
     required String reportId,
     required String opportunityId,
+    required ModerationRemovalReason reason,
   }) async {
-    await FirebaseFirestore.instance
-        .collection('opportunities')
-        .doc(opportunityId)
-        .set({
-          'isActive': false,
-          'moderationStatus': 'removed',
-          'removedAt': Timestamp.now(),
-          'removedBy': FirebaseAuth.instance.currentUser?.uid,
-        }, SetOptions(merge: true));
-
-    await _updateReport(
-      reportId: reportId,
-      status: 'resolved',
-      actionTaken: 'opportunity_removed',
-    );
+    await FirebaseFunctions.instance
+        .httpsCallable('moderateReportedContent')
+        .call({
+          'reportId': reportId,
+          'action': 'remove_opportunity',
+          'targetId': opportunityId,
+          'reasonCode': reason.code,
+          'publicText': reason.publicText,
+        });
   }
 
   Future<void> _deleteComment({
     required String reportId,
     required String? targetPath,
+    required ModerationRemovalReason reason,
   }) async {
     if (targetPath == null || targetPath.isEmpty) {
       throw Exception('This report does not include a comment path.');
     }
 
-    await FirebaseFirestore.instance.doc(targetPath).delete();
-
-    await _updateReport(
-      reportId: reportId,
-      status: 'resolved',
-      actionTaken: 'comment_deleted',
-    );
+    await FirebaseFunctions.instance
+        .httpsCallable('moderateReportedContent')
+        .call({
+          'reportId': reportId,
+          'action': 'remove_comment',
+          'targetPath': targetPath,
+          'reasonCode': reason.code,
+          'publicText': reason.publicText,
+        });
   }
 
   Future<void> _banUser({
     required String reportId,
     required String userId,
+    required ModerationRemovalReason reason,
   }) async {
     await FirebaseFunctions.instance.httpsCallable('banUserForReport').call({
       'reportId': reportId,
       'userId': userId,
+      'reasonCode': reason.code,
+      'publicText': reason.publicText,
     });
+  }
+
+  Future<ModerationRemovalReason?> _selectRemovalReason({
+    required BuildContext context,
+    required String title,
+  }) {
+    return showDialog<ModerationRemovalReason>(
+      context: context,
+      builder: (_) => _ModerationReasonDialog(title: title),
+    );
   }
 
   Future<void> _confirmAction({
@@ -112,6 +126,8 @@ class AdminReportsScreen extends StatelessWidget {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Moderation action saved.')));
+    } on _ModerationActionCancelled {
+      return;
     } catch (error) {
       if (!context.mounted) return;
 
@@ -274,7 +290,7 @@ class AdminReportsScreen extends StatelessWidget {
           appBar: AppBar(
             backgroundColor: AppColors.background,
             elevation: 0,
-            title: const Text('Reports'),
+            title: const Text('Moderation'),
           ),
           body: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -284,12 +300,16 @@ class AdminReportsScreen extends StatelessWidget {
                 .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(snapshot.error.toString()),
-                  ),
-                );
+                final error = snapshot.error;
+                if (kDebugMode) {
+                  debugPrint('AdminReportsScreen failed to load reports.');
+                  debugPrint('AdminReportsScreen error: $error');
+                  debugPrint(
+                    'AdminReportsScreen stack: ${snapshot.stackTrace}',
+                  );
+                }
+
+                return _ReportsError(message: _reportsErrorMessage(error));
               }
 
               if (!snapshot.hasData) {
@@ -299,16 +319,38 @@ class AdminReportsScreen extends StatelessWidget {
               final reports = snapshot.data!.docs;
 
               if (reports.isEmpty) {
-                return const _EmptyReports();
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                  children: [
+                    const _PopulateAreaCard(),
+                    const SizedBox(height: 16),
+                    ClaimRequestsModerationCard(
+                      countStream: pendingListingClaimCountStream(),
+                      onTap: () => _openClaimRequests(context),
+                    ),
+                    const SizedBox(height: 16),
+                    const _EmptyReports(),
+                  ],
+                );
               }
 
               return ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-                itemCount: reports.length,
+                itemCount: reports.length + 2,
                 separatorBuilder: (context, index) =>
                     const SizedBox(height: 12),
                 itemBuilder: (context, index) {
-                  final report = reports[index];
+                  if (index == 0) {
+                    return const _PopulateAreaCard();
+                  }
+                  if (index == 1) {
+                    return ClaimRequestsModerationCard(
+                      countStream: pendingListingClaimCountStream(),
+                      onTap: () => _openClaimRequests(context),
+                    );
+                  }
+
+                  final report = reports[index - 2];
                   final data = report.data() as Map<String, dynamic>;
 
                   return _ReportCard(
@@ -342,29 +384,60 @@ class AdminReportsScreen extends StatelessWidget {
                       title: 'Remove opportunity?',
                       message:
                           'This sets the opportunity inactive so it no longer appears publicly.',
-                      action: () => _removeOpportunity(
-                        reportId: report.id,
-                        opportunityId: data['targetId']?.toString() ?? '',
-                      ),
+                      action: () async {
+                        final reason = await _selectRemovalReason(
+                          context: context,
+                          title: 'Reason for removal',
+                        );
+                        if (reason == null) {
+                          throw const _ModerationActionCancelled();
+                        }
+                        await _removeOpportunity(
+                          reportId: report.id,
+                          opportunityId: data['targetId']?.toString() ?? '',
+                          reason: reason,
+                        );
+                      },
                     ),
                     onDeleteComment: () => _confirmAction(
                       context: context,
-                      title: 'Delete comment?',
-                      message: 'This permanently deletes the reported comment.',
-                      action: () => _deleteComment(
-                        reportId: report.id,
-                        targetPath: data['targetPath']?.toString(),
-                      ),
+                      title: 'Remove comment?',
+                      message:
+                          'This hides the comment publicly while keeping a moderation record.',
+                      action: () async {
+                        final reason = await _selectRemovalReason(
+                          context: context,
+                          title: 'Reason for removal',
+                        );
+                        if (reason == null) {
+                          throw const _ModerationActionCancelled();
+                        }
+                        await _deleteComment(
+                          reportId: report.id,
+                          targetPath: data['targetPath']?.toString(),
+                          reason: reason,
+                        );
+                      },
                     ),
                     onBanUser: () => _confirmAction(
                       context: context,
                       title: 'Ban user?',
                       message:
                           'This marks the reported user as banned in Firestore.',
-                      action: () => _banUser(
-                        reportId: report.id,
-                        userId: data['reportedUserId']?.toString() ?? '',
-                      ),
+                      action: () async {
+                        final reason = await _selectRemovalReason(
+                          context: context,
+                          title: 'Reason for restriction',
+                        );
+                        if (reason == null) {
+                          throw const _ModerationActionCancelled();
+                        }
+                        await _banUser(
+                          reportId: report.id,
+                          userId: data['reportedUserId']?.toString() ?? '',
+                          reason: reason,
+                        );
+                      },
                     ),
                   );
                 },
@@ -373,6 +446,136 @@ class AdminReportsScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+Future<void> _openClaimRequests(BuildContext context) {
+  return Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const ClaimReviewScreen()),
+  );
+}
+
+class _ModerationActionCancelled implements Exception {
+  const _ModerationActionCancelled();
+}
+
+class ModerationRemovalReason {
+  const ModerationRemovalReason({required this.code, required this.publicText});
+
+  final String code;
+  final String publicText;
+}
+
+class _ReasonOption {
+  const _ReasonOption(this.code, this.label);
+
+  final String code;
+  final String label;
+}
+
+const _moderationReasonOptions = [
+  _ReasonOption('duplicate_content', 'Duplicate content'),
+  _ReasonOption(
+    'incorrect_or_misleading',
+    'Incorrect or misleading information',
+  ),
+  _ReasonOption('inappropriate_content', 'Inappropriate content'),
+  _ReasonOption('spam_or_advertising', 'Spam or advertising'),
+  _ReasonOption('safety_concern', 'Safety concern'),
+  _ReasonOption('not_suitable', 'Not suitable for LocalLink'),
+  _ReasonOption('other', 'Other'),
+];
+
+class _ModerationReasonDialog extends StatefulWidget {
+  const _ModerationReasonDialog({required this.title});
+
+  final String title;
+
+  @override
+  State<_ModerationReasonDialog> createState() =>
+      _ModerationReasonDialogState();
+}
+
+class _ModerationReasonDialogState extends State<_ModerationReasonDialog> {
+  String _selectedCode = _moderationReasonOptions.first.code;
+  final _explanationController = TextEditingController();
+
+  @override
+  void dispose() {
+    _explanationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _moderationReasonOptions.firstWhere(
+      (option) => option.code == _selectedCode,
+    );
+    final requiresExplanation = _selectedCode == 'other';
+    final explanation = _explanationController.text.trim();
+
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selectedCode,
+            decoration: const InputDecoration(labelText: 'Public reason'),
+            items: _moderationReasonOptions
+                .map(
+                  (option) => DropdownMenuItem(
+                    value: option.code,
+                    child: Text(option.label),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+              setState(() => _selectedCode = value);
+            },
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _explanationController,
+            minLines: 2,
+            maxLines: 4,
+            maxLength: 180,
+            decoration: InputDecoration(
+              labelText: requiresExplanation
+                  ? 'Public explanation'
+                  : 'Optional public explanation',
+              hintText:
+                  'Shown to the creator. Do not include reporter or moderator details.',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: requiresExplanation && explanation.isEmpty
+              ? null
+              : () {
+                  Navigator.pop(
+                    context,
+                    ModerationRemovalReason(
+                      code: selected.code,
+                      publicText: explanation.isEmpty
+                          ? selected.label
+                          : explanation,
+                    ),
+                  );
+                },
+          child: const Text('Continue'),
+        ),
+      ],
     );
   }
 }
@@ -531,6 +734,70 @@ class _ReportCard extends StatelessWidget {
   }
 }
 
+class _PopulateAreaCard extends StatelessWidget {
+  const _PopulateAreaCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ModeratorPopulateAreaScreen(),
+            ),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AppColors.border.withValues(alpha: 0.72)),
+          ),
+          child: const Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: AppColors.surface,
+                foregroundColor: AppColors.primary,
+                child: Icon(Icons.add_location_alt_outlined),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Populate Area',
+                      style: TextStyle(
+                        color: AppColors.charcoal,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Add and manage unclaimed businesses, organisations and events.',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TypeBadge extends StatelessWidget {
   final String label;
 
@@ -576,6 +843,50 @@ class _IdLine extends StatelessWidget {
           color: AppColors.textMuted,
           fontSize: 12,
           fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+String _reportsErrorMessage(Object? error) {
+  if (error is FirebaseException && error.code == 'permission-denied') {
+    return 'You do not have permission to view moderation reports. Please check that your admin access is active.';
+  }
+
+  return 'Reports could not be loaded. Please try again in a moment.';
+}
+
+class _ReportsError extends StatelessWidget {
+  const _ReportsError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.lock_outline_rounded,
+              color: AppColors.textMuted,
+              size: 34,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 15,
+                height: 1.35,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );

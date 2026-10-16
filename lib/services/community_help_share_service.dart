@@ -1,6 +1,5 @@
-import 'dart:ui';
-
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'local_link_share_service.dart';
@@ -28,6 +27,18 @@ class CommunityHelpShareService {
         data: const {},
       ),
     );
+  }
+
+  static Future<void> copyPostLink(
+    String postId, {
+    Future<void> Function(String value)? copy,
+  }) async {
+    final url = postUrl(postId);
+    if (copy != null) {
+      await copy(url);
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: url));
   }
 
   static String buildShareText({

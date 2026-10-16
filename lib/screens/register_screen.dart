@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  const RegisterScreen({super.key, this.onAuthenticated});
+
+  final Future<void> Function()? onAuthenticated;
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -38,7 +40,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      Navigator.pushReplacementNamed(context, '/');
+      final pendingAction = widget.onAuthenticated;
+      if (pendingAction == null) {
+        Navigator.pushReplacementNamed(context, '/');
+      } else {
+        final navigator = Navigator.of(context);
+        navigator.pop();
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
+        await pendingAction();
+      }
     } catch (_) {
       if (!mounted) return;
 

@@ -88,6 +88,22 @@ void main() {
     expect(text, isNot(contains("If you've seen")));
   });
 
+  test('reunited missing pet share text is not an active missing alert', () {
+    final text = CommunityHelpShareService.buildShareText(
+      postId: 'reunited-1',
+      post: {...post(), 'status': 'resolved', 'resolvedReason': 'reunited'},
+    );
+
+    expect(text, contains('REUNITED DOG — BURNTWOOD'));
+    expect(text, contains('has been reunited'));
+    expect(text, isNot(contains('🚨 MISSING DOG')));
+    expect(text, isNot(contains('Please keep a lookout')));
+    expect(
+      text,
+      contains('https://locallinkapp.co.uk/community-help/reunited-1'),
+    );
+  });
+
   test('free item share text adapts to free item posts', () {
     final text = CommunityHelpShareService.buildShareText(
       postId: 'free-1',
@@ -127,6 +143,35 @@ void main() {
       CommunityHelpShareService.postUrl('abc_123'),
       'https://locallinkapp.co.uk/community-help/abc_123',
     );
+  });
+
+  test('share payload contains canonical LocalLink URL', () async {
+    final shared = <ShareParams>[];
+    final service = CommunityHelpShareService(
+      shareInvoker: (params) async => shared.add(params),
+    );
+
+    await service.sharePost(
+      postId: 'billie-1',
+      post: post(title: 'Billie'),
+    );
+
+    expect(shared, hasLength(1));
+    expect(
+      shared.single.text,
+      contains('https://locallinkapp.co.uk/community-help/billie-1'),
+    );
+  });
+
+  test('copy link copies the canonical Community Help URL', () async {
+    String? copied;
+
+    await CommunityHelpShareService.copyPostLink(
+      'copy-1',
+      copy: (value) async => copied = value,
+    );
+
+    expect(copied, 'https://locallinkapp.co.uk/community-help/copy-1');
   });
 
   test('missing pet with photo shares image file plus text', () async {

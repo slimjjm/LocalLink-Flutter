@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../constants/business_categories.dart';
+import '../services/address_search_service.dart';
+import '../services/business_location_update.dart';
+import '../services/home_business_discovery_policy.dart';
+import '../models/address_result.dart';
+import '../models/business_opening_hours.dart';
 import '../theme/app_colors.dart';
+import '../widgets/business_opening_hours_editor.dart';
 import 'dart:io';
 
 import 'package:firebase_storage/firebase_storage.dart';
@@ -44,6 +51,66 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
   // STATE
   // =====================================================
 
+  final addressService = AddressSearchService();
+  String originalAddress = '';
+  String? selectedAddress;
+  double? selectedLatitude;
+  double? selectedLongitude;
+  List<AddressResult> addressSuggestions = [];
+  int addressSearchSerial = 0;
+
+  Future<void> searchAddresses(String value) async {
+    final serial = ++addressSearchSerial;
+    setState(() {
+      selectedAddress = null;
+      selectedLatitude = null;
+      selectedLongitude = null;
+      addressSuggestions = [];
+    });
+    if (value.trim().length < 3 || value.trim() == originalAddress) return;
+    try {
+      final results = await addressService.search(value);
+      if (mounted && serial == addressSearchSerial) {
+        setState(() => addressSuggestions = results.take(5).toList());
+      }
+    } catch (_) {
+      /* Keep the typed address; saving requires a confirmed selection. */
+    }
+  }
+
+  Future<void> selectAddress(AddressResult suggestion) async {
+    final serial = ++addressSearchSerial;
+    try {
+      final coordinates = await addressService.getCoordinates(
+        suggestion.placeId,
+      );
+      if (!mounted || serial != addressSearchSerial) return;
+      if (!HomeBusinessDiscoveryPolicy.hasValidCoordinates(
+        coordinates?['lat'],
+        coordinates?['lng'],
+      )) {
+        throw StateError('Location unavailable');
+      }
+      setState(() {
+        selectedAddress = suggestion.description.trim();
+        addressController.text = selectedAddress!;
+        selectedLatitude = coordinates!['lat'];
+        selectedLongitude = coordinates['lng'];
+        addressSuggestions = [];
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'We could not confirm that address. Please choose it again.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   bool isLoading = true;
   bool isSaving = false;
 
@@ -53,32 +120,15 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
 
   double serviceRadiusMiles = 10;
 
-  bool acceptsCash = true;
+  bool acceptsCash = false;
+  bool acceptsBankTransfer = false;
   bool acceptsStripe = false;
   bool acceptingLeads = true;
   bool stripeReady = false;
   bool stripeSetupInProgress = false;
-
-  final categories = [
-    'Aesthetics',
-    'Beauty',
-    'Brows & Lashes',
-    'Hair Salon',
-    'Barber',
-    'Nails',
-    'Massage',
-    'Skin Clinic',
-
-    'Cleaner',
-    'Dog Groomer',
-    'Dog Walker',
-    'Gardener',
-    'Handyman',
-    'Mobile Valeting',
-    'Pressure Washing',
-
-    'Specialist Services',
-  ];
+  String? legacyCategory;
+  Map<String, dynamic> openingHours = BusinessOpeningHours.defaultStructured();
+  bool openingHoursTouched = false;
 
   // =====================================================
   // INIT
@@ -107,8 +157,22 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       businessNameController.text = data['businessName'] ?? '';
 
       addressController.text = data['address'] ?? '';
+      originalAddress = addressController.text.trim();
 
-      selectedCategory = data['category'];
+      final normalisedCategory = BusinessCategories.normalise(
+        data['category']?.toString(),
+      );
+      selectedCategory = BusinessCategories.isCanonical(normalisedCategory)
+          ? normalisedCategory
+          : null;
+      legacyCategory = selectedCategory == null && normalisedCategory.isNotEmpty
+          ? normalisedCategory
+          : null;
+
+      final structuredOpeningHours = BusinessOpeningHours.fromData(data);
+      if (structuredOpeningHours != null) {
+        openingHours = structuredOpeningHours;
+      }
 
       serviceMode = data['serviceMode'] ?? 'premises';
 
@@ -125,6 +189,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           data['stripeChargesEnabled'] == true;
 
       acceptsCash = methods.contains('cash');
+      acceptsBankTransfer = methods.contains('bank_transfer');
 
       acceptsStripe =
           methods.contains('stripe') || data['stripeRequested'] == true;
@@ -157,21 +222,26 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       paymentMethods.add('cash');
     }
 
-    if (acceptsStripe) {
+    if (acceptsBankTransfer) {
+      paymentMethods.add('bank_transfer');
+    }
+
+    if (acceptsStripe && stripeReady) {
       paymentMethods.add('stripe');
     }
 
-    if (paymentMethods.isEmpty) {
+    final categoryToSave = selectedCategory ?? legacyCategory;
+    if (categoryToSave == null || categoryToSave.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose at least one payment method.')),
+        const SnackBar(content: Text('Choose a business category.')),
       );
-
       setState(() {
         isSaving = false;
       });
-
       return;
     }
+
+    final openingHoursChanged = openingHoursTouched;
 
     try {
       await FirebaseFirestore.instance
@@ -180,9 +250,15 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
           .update({
             'businessName': businessNameController.text.trim(),
 
-            'address': addressController.text.trim(),
+            ...BusinessLocationUpdate.build(
+              originalAddress: originalAddress,
+              address: addressController.text,
+              selectedAddress: selectedAddress,
+              latitude: selectedLatitude,
+              longitude: selectedLongitude,
+            ),
 
-            'category': selectedCategory,
+            'category': categoryToSave,
 
             'serviceMode': serviceMode,
 
@@ -193,9 +269,15 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
             'stripeRequested': acceptsStripe,
 
             'acceptingLeads': acceptingLeads,
+
+            if (openingHoursChanged) ...{
+              'openingHoursStructured': openingHours,
+              'openingHours': BusinessOpeningHours.summary(openingHours),
+            },
           });
 
       if (!mounted) return;
+      originalAddress = addressController.text.trim();
 
       ScaffoldMessenger.of(
         context,
@@ -204,7 +286,9 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'We could not save your Page details just now. Please try again.',
+            e is StateError
+                ? e.message.toString()
+                : 'We could not save your Page details just now. Please try again.',
           ),
         ),
       );
@@ -630,9 +714,17 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
 
             TextField(
               controller: addressController,
+              onChanged: searchAddresses,
 
               decoration: _inputDecoration('Page address'),
             ),
+
+            for (final suggestion in addressSuggestions)
+              ListTile(
+                title: Text(suggestion.description),
+                leading: const Icon(Icons.place_outlined),
+                onTap: () => selectAddress(suggestion),
+              ),
 
             const SizedBox(height: 24),
 
@@ -648,7 +740,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
 
               decoration: _inputDecoration('Select category'),
 
-              items: categories.map((category) {
+              items: BusinessCategories.values.map((category) {
                 return DropdownMenuItem(value: category, child: Text(category));
               }).toList(),
 
@@ -656,6 +748,27 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                 setState(() {
                   selectedCategory = value;
                 });
+              },
+            ),
+
+            if (legacyCategory != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Current legacy category: $legacyCategory',
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 24),
+
+            BusinessOpeningHoursEditor(
+              initialHours: openingHours,
+              onChanged: (value) {
+                openingHours = value;
+                openingHoursTouched = true;
               },
             ),
 
@@ -725,16 +838,38 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
             const SizedBox(height: 30),
 
             // =================================================
+            // BOOKING REQUESTS
+            // =================================================
+            _SectionTitle(title: 'How customers can book'),
+
+            CheckboxListTile(
+              value: acceptingLeads,
+              activeColor: AppColors.primary,
+              title: const Text('Take bookings through LocalLink'),
+              subtitle: const Text(
+                'Customers can request appointments or services directly from your page.',
+              ),
+              onChanged: (value) {
+                setState(() {
+                  acceptingLeads = value ?? true;
+                });
+              },
+            ),
+
+            const SizedBox(height: 24),
+
+            // =================================================
             // PAYMENTS
             // =================================================
-            _SectionTitle(title: 'Payment Methods'),
+            _SectionTitle(title: 'How customers can pay'),
 
             CheckboxListTile(
               value: acceptsCash,
 
               activeColor: AppColors.primary,
 
-              title: const Text('Accept Cash'),
+              title: const Text('Cash'),
+              subtitle: const Text('Paid directly to you.'),
 
               onChanged: (value) {
                 setState(() {
@@ -744,40 +879,38 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
             ),
 
             CheckboxListTile(
-              value: acceptsStripe,
+              value: acceptsBankTransfer,
 
               activeColor: AppColors.primary,
 
-              title: const Text('Accept Card Payments'),
-              subtitle: stripeReady
-                  ? null
-                  : const Text('Complete Stripe onboarding to enable cards.'),
+              title: const Text('Bank transfer'),
+              subtitle: const Text(
+                'Arrange payment directly with the customer.',
+              ),
 
+              onChanged: (value) {
+                setState(() {
+                  acceptsBankTransfer = value ?? false;
+                });
+              },
+            ),
+
+            CheckboxListTile(
+              value: stripeReady && acceptsStripe,
+              activeColor: AppColors.primary,
+              title: const Text('Card & Apple Pay'),
+              subtitle: Text(
+                stripeReady
+                    ? 'Accept online payments through Stripe.'
+                    : 'Connect Stripe to accept online payments.',
+              ),
               onChanged: stripeReady
                   ? (value) {
                       setState(() {
                         acceptsStripe = value ?? false;
                       });
                     }
-                  : (value) {
-                      setState(() {
-                        acceptsStripe = value ?? false;
-                      });
-                    },
-            ),
-
-            CheckboxListTile(
-              value: acceptingLeads,
-              activeColor: AppColors.primary,
-              title: const Text('Accept customer requests'),
-              subtitle: const Text(
-                'Let nearby customers ask for quotes from your active services.',
-              ),
-              onChanged: (value) {
-                setState(() {
-                  acceptingLeads = value ?? true;
-                });
-              },
+                  : null,
             ),
 
             if (!stripeReady) ...[
@@ -792,7 +925,7 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                   label: Text(
                     stripeSetupInProgress
                         ? 'Opening Stripe...'
-                        : 'Set up card payments',
+                        : 'Connect Stripe',
                   ),
                 ),
               ),

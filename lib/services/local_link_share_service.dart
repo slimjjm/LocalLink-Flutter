@@ -10,6 +10,8 @@ import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 
+import 'community_help_lifecycle.dart';
+
 typedef LocalLinkShareInvoker = Future<void> Function(ShareParams params);
 
 enum LocalLinkShareItemType {
@@ -18,6 +20,7 @@ enum LocalLinkShareItemType {
   availability,
   business,
   service,
+  serviceRequest,
 }
 
 class LocalLinkShareItem {
@@ -67,6 +70,8 @@ class LocalLinkShareService {
       case LocalLinkShareItemType.service:
         final businessId = Uri.encodeComponent(_text(item.parentId));
         return '$baseUrl/services/$businessId/$id';
+      case LocalLinkShareItemType.serviceRequest:
+        return '$baseUrl/service-requests/$id';
     }
   }
 
@@ -82,6 +87,8 @@ class LocalLinkShareService {
         return _businessText(item);
       case LocalLinkShareItemType.service:
         return _serviceText(item);
+      case LocalLinkShareItemType.serviceRequest:
+        return _serviceRequestText(item);
     }
   }
 
@@ -212,6 +219,7 @@ class LocalLinkShareService {
   Future<void> _recordShare(LocalLinkShareItem item) async {
     if (Firebase.apps.isEmpty) return;
     try {
+      final user = FirebaseAuth.instance.currentUser;
       await FirebaseFirestore.instance.collection('shares').add({
         'itemType': item.type.name,
         'itemId': item.id,
@@ -224,7 +232,9 @@ class LocalLinkShareService {
           'availabilityPostId': item.id,
         if (item.type == LocalLinkShareItemType.business) 'businessId': item.id,
         if (item.type == LocalLinkShareItemType.service) 'serviceId': item.id,
-        'userId': FirebaseAuth.instance.currentUser?.uid,
+        if (item.type == LocalLinkShareItemType.serviceRequest)
+          'serviceRequestId': item.id,
+        if (user != null && !user.isAnonymous) 'userId': user.uid,
         'createdAt': Timestamp.now(),
       });
     } catch (error, stackTrace) {
@@ -238,12 +248,38 @@ class LocalLinkShareService {
     final mode = _text(post['mode'], fallback: 'lost');
     final title = _text(post['title'], fallback: 'Community Help alert');
     final publicLocation = _text(post['publicLocation']);
-    final timing = _firstText([post['eventDateText'], post['timing']]);
+    final timing = CommunityHelpLifecycle.observedAtText(post, DateTime.now());
     final itemCategory = _text(post['itemCategory'], fallback: 'Item');
+    final isResolved = CommunityHelpLifecycle.isResolved(post);
+    final resolvedReason = _text(post['resolvedReason']);
     final link = urlFor(item);
     final locationSuffix = publicLocation.isEmpty
         ? ''
         : ' — ${publicLocation.toUpperCase()}';
+
+    if (isResolved) {
+      if (type != 'free_item' && mode == 'lost' && itemCategory == 'Pet') {
+        final petType = _petType(post);
+        return [
+          'REUNITED ${petType.toUpperCase()}$locationSuffix',
+          if (timing.isNotEmpty) 'Originally last seen: $timing',
+          '$title has been reunited. Open the live LocalLink post for the latest update.',
+          link,
+        ].join('\n\n');
+      }
+
+      final statusLabel = resolvedReason == 'collected'
+          ? 'COLLECTED'
+          : resolvedReason == 'returned'
+          ? 'RETURNED'
+          : 'RESOLVED';
+      return [
+        '$statusLabel$locationSuffix',
+        if (timing.isNotEmpty) 'Original timing: $timing',
+        '$title has been updated on LocalLink.',
+        link,
+      ].join('\n\n');
+    }
 
     if (type == 'free_item') {
       return [
@@ -363,11 +399,46 @@ class LocalLinkShareService {
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
+  static String _serviceRequestText(LocalLinkShareItem item) {
+    final data = item.data;
+    final category = _text(data['category'], fallback: 'service');
+    final location = _publicLocation(data);
+    final title = _text(data['title'], fallback: 'Service request');
+    final description = _text(data['description'] ?? data['details']);
+    final schedule = _text(data['scheduleText'] ?? data['neededBy']);
+    final isOpen =
+        _text(data['status'], fallback: 'open').toLowerCase() == 'open' &&
+        data['isActive'] != false;
+    final intro = isOpen
+        ? [
+            "I'm looking for a local $category",
+            if (location.isNotEmpty) 'in $location',
+            'on LocalLink.',
+          ].join(' ')
+        : 'View this LocalLink service request.';
+
+    return [
+      intro,
+      title,
+      [
+        if (description.isNotEmpty) description,
+        if (schedule.isNotEmpty) schedule,
+      ].join('\n'),
+      'View the request on LocalLink:',
+      urlFor(item),
+    ].where((part) => part.trim().isNotEmpty).join('\n\n');
+  }
+
   static String _shareSubject(LocalLinkShareItem item) {
     switch (item.type) {
       case LocalLinkShareItemType.communityHelp:
         final mode = _text(item.data['mode'], fallback: 'lost');
         final category = _text(item.data['itemCategory'], fallback: 'item');
+        final isResolved = CommunityHelpLifecycle.isResolved(item.data);
+        if (isResolved && mode == 'lost' && category == 'Pet') {
+          return 'Reunited pet on LocalLink';
+        }
+        if (isResolved) return 'Resolved Community Help post';
         if (_text(item.data['type']) == 'free_item') {
           return 'Free item on LocalLink';
         }
@@ -382,6 +453,8 @@ class LocalLinkShareService {
         return '${_text(item.data['businessName'], fallback: 'Business')} on LocalLink';
       case LocalLinkShareItemType.service:
         return '${_text(item.data['name'], fallback: 'Service')} on LocalLink';
+      case LocalLinkShareItemType.serviceRequest:
+        return '${_text(item.data['title'], fallback: 'Service request')} on LocalLink';
     }
   }
 

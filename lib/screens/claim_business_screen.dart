@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
+import '../services/analytics_service.dart';
 import 'business_home_screen.dart';
 import 'login_screen.dart';
 
@@ -54,27 +55,14 @@ class _ClaimBusinessScreenState extends State<ClaimBusinessScreen> {
     });
 
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('businesses')
-          .where('claimCode', isEqualTo: code)
-          .limit(1)
-          .get();
-
-      if (snapshot.docs.isEmpty) {
-        setState(() {
-          errorMessage = 'No business found for that code.';
-        });
-
-        return;
-      }
-
-      final doc = snapshot.docs.first;
-
-      final data = doc.data();
+      final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('findBusinessClaim')
+          .call(<String, dynamic>{'claimCode': code});
+      final data = Map<String, dynamic>.from(result.data as Map);
 
       setState(() {
         businessData = data;
-        businessId = doc.id;
+        businessId = data['businessId']?.toString();
       });
     } catch (e) {
       setState(() {
@@ -120,85 +108,31 @@ class _ClaimBusinessScreenState extends State<ClaimBusinessScreen> {
       errorMessage = null;
       successMessage = null;
     });
+    await LocalLinkAnalytics.instance.logEvent('business_claim_started', {
+      'source': 'claim_code',
+    });
 
     try {
-      final ref = FirebaseFirestore.instance
-          .collection('businesses')
-          .doc(businessId);
-
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final snapshot = await transaction.get(ref);
-
-        final data = snapshot.data() ?? {};
-
-        final ownerId = data['ownerId'] ?? '';
-
-        final claimEmail = (data['claimEmail'] ?? '').toString().toLowerCase();
-
-        final userEmail = (user.email ?? '').toLowerCase();
-
-        // =========================================
-        // ALREADY CLAIMED
-        // =========================================
-
-        if (ownerId.toString().isNotEmpty) {
-          throw Exception('This business has already been claimed.');
-        }
-
-        // =========================================
-        // EMAIL CHECK
-        // =========================================
-
-        if (claimEmail.isNotEmpty && claimEmail != userEmail) {
-          throw Exception('This business was assigned to a different email.');
-        }
-
-        // =========================================
-        // CLAIM
-        // =========================================
-
-        transaction.update(ref, {
-          'ownerId': user.uid,
-
-          'isClaimed': true,
-
-          'claimedAt': FieldValue.serverTimestamp(),
-
-          'claimEmail': FieldValue.delete(),
-        });
-      });
-
-      // =====================================================
-      // CREATE OWNER STAFF RECORD
-      // =====================================================
-
-      await FirebaseFirestore.instance
-          .collection('businesses')
-          .doc(businessId)
-          .collection('staff')
-          .doc(user.uid)
-          .set({
-            'name': 'Owner',
-
-            'email': user.email,
-
-            'isActive': true,
-
-            'seatRank': 0,
-
-            'createdAt': FieldValue.serverTimestamp(),
+      final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('claimBusinessByCode')
+          .call(<String, dynamic>{
+            'claimCode': claimCodeController.text.trim().toUpperCase(),
           });
+      final claimed = Map<String, dynamic>.from(result.data as Map);
+      businessId = claimed['businessId']?.toString() ?? businessId;
 
       setState(() {
         successMessage = 'Business claimed successfully 🎉';
       });
+      await LocalLinkAnalytics.instance.logEvent('business_claim_completed', {
+        'source': 'claim_code',
+      });
 
       if (!mounted) return;
+      final navigator = Navigator.of(context);
 
       Future.delayed(const Duration(milliseconds: 700), () {
-        Navigator.pushReplacement(
-          context,
-
+        navigator.pushReplacement(
           MaterialPageRoute(
             builder: (_) => BusinessHomeScreen(businessId: businessId!),
           ),

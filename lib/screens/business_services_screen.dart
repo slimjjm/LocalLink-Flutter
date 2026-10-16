@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -16,6 +19,9 @@ class BusinessServicesScreen extends StatelessWidget {
     String? serviceId,
     Map<String, dynamic>? service,
   }) async {
+    if (serviceId == null) {
+      unawaited(_beginSetupReminders());
+    }
     final result = await Navigator.push<AddServiceResult>(
       context,
       MaterialPageRoute(
@@ -39,6 +45,21 @@ class BusinessServicesScreen extends StatelessWidget {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _beginSetupReminders() async {
+    // Intentional setup entry only; the editor remains usable with an older or
+    // offline backend, and service creation can safely beat this enrolment call.
+    try {
+      await FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable(
+            'beginBusinessServiceSetup',
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 5)),
+          )
+          .call({'businessId': businessId});
+    } catch (_) {
+      // Reminders are optional and must never block adding a service.
     }
   }
 

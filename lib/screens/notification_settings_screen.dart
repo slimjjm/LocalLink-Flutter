@@ -221,11 +221,23 @@ class _NotificationSettingsScreenState
                   _PreferenceTile(
                     title: 'Reminders',
                     subtitle:
-                        'Useful reminders about activities, bookings and expiring posts.',
+                        'Useful reminders about activities, bookings, expiring posts and business setup.',
                     value: values[NotificationPreferences.reminders]!,
                     enabled: !_isSaving,
                     onChanged: (value) => _setPreference(
                       NotificationPreferences.reminders,
+                      value,
+                    ),
+                  ),
+                  _PreferenceTile(
+                    title: 'Business setup reminders',
+                    subtitle:
+                        'Up to three friendly reminders to add a first service, where useful. Turning off Reminders also stops these.',
+                    value:
+                        values[NotificationPreferences.businessSetupReminders]!,
+                    enabled: !_isSaving,
+                    onChanged: (value) => _setPreference(
+                      NotificationPreferences.businessSetupReminders,
                       value,
                     ),
                   ),

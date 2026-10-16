@@ -2,21 +2,32 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../models/organisation.dart';
+import '../models/organisation_role.dart';
 import '../services/business_access_service.dart';
+import '../services/my_locallink_organisation_service.dart';
+import '../services/organisation_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
+import '../utils/helpers.dart';
 import 'business_bookings_screen.dart';
 import 'business_calendar_screen.dart';
+import 'business_detail_screen.dart';
 import 'business_onboarding_screen.dart';
 import 'business_profile_screen.dart';
 import 'business_service_requests_screen.dart';
 import 'business_services_screen.dart';
+import 'create_organisation_screen.dart';
 import 'customer_bookings_screen.dart';
 import 'customer_service_request_screen.dart';
 import 'my_opportunities_screen.dart';
+import 'organisation_management_screen.dart';
 import 'post_availability_screen.dart';
 import 'post_service_request_screen.dart';
-import 'profile_screen.dart';
 import 'saved_opportunities_screen.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_image.dart';
+import '../widgets/local_link_surface_card.dart';
 
 class MyLocalLinkScreen extends StatefulWidget {
   const MyLocalLinkScreen({super.key});
@@ -71,57 +82,47 @@ class _MyLocalLinkScreenState extends State<MyLocalLinkScreen> {
             ),
             const SizedBox(height: 22),
             const _SectionHeader('Your activity'),
-            _ActionTile(
-              icon: Icons.calendar_today_outlined,
-              title: 'Bookings',
-              subtitle: 'Upcoming and past bookings',
-              color: AppColors.serviceGreen,
-              onTap: () => _push(context, const CustomerBookingsScreen()),
-            ),
-            _ActionTile(
-              icon: Icons.groups_2_outlined,
-              title: 'Activities',
-              subtitle: 'Joined and hosted activities',
-              color: AppColors.activityBlue,
-              onTap: () => _push(context, const MyOpportunitiesScreen()),
-            ),
-            _ActionTile(
-              icon: Icons.bookmark_border_rounded,
-              title: 'Saved',
-              subtitle: 'Saved Pages, activities and services',
-              color: AppColors.primary,
-              onTap: () => _push(context, const SavedOpportunitiesScreen()),
-            ),
-            _ActionTile(
-              icon: Icons.volunteer_activism_outlined,
-              title: 'Community Help',
-              subtitle: 'Lost, found and free item posts',
-              color: AppColors.primary,
-              onTap: () => _push(context, const PostServiceRequestScreen()),
-            ),
-            _ActionTile(
-              icon: Icons.manage_search_outlined,
-              title: 'Service requests',
-              subtitle: 'Requests you have posted for local providers',
-              color: AppColors.serviceGreen,
-              onTap: () => _push(context, const CustomerServiceRequestScreen()),
-            ),
-            if (user != null)
-              _ActionTile(
-                icon: Icons.person_outline_rounded,
-                title: 'Profile',
-                subtitle: 'Your LocalLink identity',
-                color: AppColors.charcoal,
-                onTap: () => _push(
-                  context,
-                  ProfileScreen(
-                    userId: user.uid,
-                    userName: user.displayName ?? 'User',
-                    photoUrl: user.photoURL,
-                  ),
+            _ActivityQuickPanel(
+              items: [
+                _ActivityQuickItem(
+                  icon: Icons.calendar_today_outlined,
+                  title: 'Bookings',
+                  subtitle: 'Upcoming and past bookings',
+                  onTap: () => _push(context, const CustomerBookingsScreen()),
                 ),
-              ),
+                _ActivityQuickItem(
+                  icon: Icons.groups_2_outlined,
+                  title: 'Activities',
+                  subtitle: 'Joined and hosted activities',
+                  onTap: () => _push(context, const MyOpportunitiesScreen()),
+                ),
+                _ActivityQuickItem(
+                  icon: Icons.bookmark_border_rounded,
+                  title: 'Saved',
+                  subtitle: 'Saved pages',
+                  onTap: () => _push(context, const SavedOpportunitiesScreen()),
+                ),
+                _ActivityQuickItem(
+                  icon: Icons.volunteer_activism_outlined,
+                  title: 'Community Help',
+                  subtitle: 'Lost and found',
+                  onTap: () => _push(context, const PostServiceRequestScreen()),
+                ),
+                _ActivityQuickItem(
+                  icon: Icons.manage_search_outlined,
+                  title: 'Service requests',
+                  subtitle: 'Requests posted',
+                  onTap: () => _push(context, const MyServiceRequestsScreen()),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
+            if (user != null) ...[
+              const _SectionHeader('Your organisations'),
+              _OrganisationSection(uid: user.uid),
+              _ArchivedOrganisationEntry(uid: user.uid),
+              const SizedBox(height: 20),
+            ],
             const _SectionHeader('Your business'),
             FutureBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
               future: _businessFuture,
@@ -150,6 +151,429 @@ class _MyLocalLinkScreenState extends State<MyLocalLinkScreen> {
   }
 }
 
+class _ActivityQuickItem {
+  const _ActivityQuickItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+}
+
+class _ActivityQuickPanel extends StatelessWidget {
+  const _ActivityQuickPanel({required this.items});
+
+  final List<_ActivityQuickItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (final item in items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: LocalLinkSpacing.xs),
+            child: _ActivityDashboardTile(item: item),
+          ),
+      ],
+    );
+  }
+}
+
+class _ActivityDashboardTile extends StatelessWidget {
+  const _ActivityDashboardTile({required this.item});
+
+  final _ActivityQuickItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return LocalLinkSurfaceCard(
+      onTap: item.onTap,
+      elevated: false,
+      radius: LocalLinkRadius.lg,
+      color: AppColors.card,
+      padding: const EdgeInsets.all(LocalLinkSpacing.sm),
+      child: Row(
+        children: [
+          LocalLinkIconBadge(
+            icon: item.icon,
+            color: AppColors.primary,
+            size: 40,
+          ),
+          const SizedBox(width: LocalLinkSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: LocalLinkTextStyles.cardTitle.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: LocalLinkSpacing.xxs),
+                Text(
+                  item.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: LocalLinkTextStyles.metadata.copyWith(fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: LocalLinkSpacing.xs),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.primary,
+              size: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrganisationSection extends StatelessWidget {
+  _OrganisationSection({required this.uid})
+    : _service = MyLocalLinkOrganisationService();
+
+  final String uid;
+  final MyLocalLinkOrganisationService _service;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<_ManagedOrganisationEntry>>(
+      future: _loadOrganisations(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _BusinessLoadingCard(label: 'Checking organisations...');
+        }
+
+        if (snapshot.hasError) {
+          return const _OrganisationErrorCard();
+        }
+
+        final docs = snapshot.data ?? const [];
+        if (docs.isEmpty) {
+          return const _EmptyOrganisationCard();
+        }
+
+        return Column(
+          children: [
+            ...docs.map((entry) {
+              final organisation = entry.organisation;
+              return _ActionTile(
+                icon: Icons.groups_2_outlined,
+                title: organisation.name,
+                subtitle: _organisationSubtitle(entry),
+                color: AppColors.activityBlue,
+                compact: true,
+                trailing: const Text(
+                  'Manage',
+                  style: TextStyle(
+                    color: AppColors.activityBlue,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OrganisationManagementScreen(
+                      organisation: organisation,
+                    ),
+                  ),
+                ),
+              );
+            }),
+            _ActionTile(
+              icon: Icons.add_rounded,
+              title: 'Create another organisation',
+              subtitle: 'Add another club, group or community organisation.',
+              color: AppColors.activityBlue,
+              compact: true,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CreateOrganisationScreen(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<List<_ManagedOrganisationEntry>> _loadOrganisations() async {
+    final entries = await _service.loadManagedOrganisations(uid);
+    return entries
+        .map(
+          (entry) => _ManagedOrganisationEntry(
+            organisation: entry.organisation,
+            role: entry.role,
+            activityCount: entry.activityCount,
+          ),
+        )
+        .toList();
+  }
+
+  static String _organisationSubtitle(_ManagedOrganisationEntry entry) {
+    final organisation = entry.organisation;
+    return [
+      organisationRoleLabel(entry.role),
+      if (organisation.category.isNotEmpty) organisation.category,
+      if (organisation.publicLocation.isNotEmpty) organisation.publicLocation,
+      if (entry.activityCount is num) '${entry.activityCount} activities',
+    ].join(' · ');
+  }
+}
+
+class _ArchivedOrganisationEntry extends StatelessWidget {
+  _ArchivedOrganisationEntry({required this.uid})
+    : _service = MyLocalLinkOrganisationService();
+
+  final String uid;
+  final MyLocalLinkOrganisationService _service;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<ManagedOrganisationEntry>>(
+      future: _service.loadArchivedOrganisations(uid),
+      builder: (context, snapshot) {
+        final archived = snapshot.data ?? const <ManagedOrganisationEntry>[];
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            archived.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return _ActionTile(
+          icon: Icons.inventory_2_outlined,
+          title: 'Archived organisations',
+          subtitle: '${archived.length} hidden from LocalLink',
+          color: AppColors.textMuted,
+          compact: true,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ArchivedOrganisationsScreen(uid: uid),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class ArchivedOrganisationsScreen extends StatefulWidget {
+  const ArchivedOrganisationsScreen({super.key, required this.uid});
+
+  final String uid;
+
+  @override
+  State<ArchivedOrganisationsScreen> createState() =>
+      _ArchivedOrganisationsScreenState();
+}
+
+class _ArchivedOrganisationsScreenState
+    extends State<ArchivedOrganisationsScreen> {
+  final _myLocalLinkService = MyLocalLinkOrganisationService();
+  final _organisationService = OrganisationService();
+  late Future<List<ManagedOrganisationEntry>> _future;
+  String _restoringId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _myLocalLinkService.loadArchivedOrganisations(widget.uid);
+  }
+
+  void _reload() {
+    setState(() {
+      _future = _myLocalLinkService.loadArchivedOrganisations(widget.uid);
+    });
+  }
+
+  Future<void> _restore(Organisation organisation) async {
+    setState(() => _restoringId = organisation.id);
+    try {
+      await _organisationService.restoreOrganisation(
+        organisationId: organisation.id,
+      );
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${organisation.name} is live again.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Organisation could not be restored.')),
+      );
+    } finally {
+      if (mounted) setState(() => _restoringId = '');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: const Text('Archived organisations'),
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.charcoal,
+        elevation: 0,
+      ),
+      body: FutureBuilder<List<ManagedOrganisationEntry>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return const Center(
+              child: Text('Archived organisations could not be loaded.'),
+            );
+          }
+          final entries = snapshot.data ?? const <ManagedOrganisationEntry>[];
+          if (entries.isEmpty) {
+            return const Center(child: Text('No archived organisations.'));
+          }
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+            children: [
+              for (final entry in entries)
+                _ActionTile(
+                  icon: Icons.inventory_2_outlined,
+                  title: entry.organisation.name,
+                  subtitle: 'Hidden from public LocalLink pages',
+                  color: AppColors.textMuted,
+                  compact: true,
+                  trailing: Text(
+                    _restoringId == entry.organisation.id
+                        ? 'Restoring...'
+                        : 'Restore',
+                    style: const TextStyle(
+                      color: AppColors.activityBlue,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  onTap: _restoringId.isEmpty
+                      ? () => _restore(entry.organisation)
+                      : () {},
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ManagedOrganisationEntry {
+  const _ManagedOrganisationEntry({
+    required this.organisation,
+    required this.role,
+    this.activityCount,
+  });
+
+  final Organisation organisation;
+  final String role;
+  final Object? activityCount;
+}
+
+class _EmptyOrganisationCard extends StatelessWidget {
+  const _EmptyOrganisationCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Run a club, group or organisation?',
+            style: TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Create it on LocalLink to manage activities, groups and people in one place.',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          LocalLinkButton(
+            label: 'Create organisation',
+            icon: Icons.add_rounded,
+            expand: true,
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const CreateOrganisationScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OrganisationErrorCard extends StatelessWidget {
+  const _OrganisationErrorCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Text(
+        'Your organisations could not be loaded. Please try again in a moment.',
+        style: TextStyle(
+          color: AppColors.textMuted,
+          height: 1.35,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
 class _BusinessSection extends StatelessWidget {
   const _BusinessSection({required this.business});
 
@@ -159,6 +583,14 @@ class _BusinessSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = business.data() ?? {};
     final name = data['businessName']?.toString().trim();
+    final category = data['category']?.toString().trim();
+    final address = data['address']?.toString().trim();
+    final logoUrl = data['logoUrl']?.toString().trim();
+    final imageUrl = logoUrl?.isNotEmpty == true
+        ? logoUrl!
+        : businessCoverImageUrl(data);
+    final isActive = data['isActive'] != false && data['status'] != 'inactive';
+    final acceptingLeads = data['acceptingLeads'] != false;
     final businessId = business.id;
 
     return Column(
@@ -166,76 +598,113 @@ class _BusinessSection extends StatelessWidget {
         Container(
           width: double.infinity,
           margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: AppColors.card,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: AppColors.serviceGreen.withValues(alpha: 0.22),
             ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: AppColors.serviceGreen.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.storefront_outlined,
-                  color: AppColors.serviceGreen,
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.charcoal.withValues(alpha: 0.045),
+                blurRadius: 18,
+                offset: const Offset(0, 9),
               ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name?.isNotEmpty == true ? name! : 'Your Page',
-                      style: const TextStyle(
-                        color: AppColors.charcoal,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  _BusinessImage(imageUrl: imageUrl),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name?.isNotEmpty == true ? name! : 'Your business',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.charcoal,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _businessSubtitle(
+                            category: category,
+                            address: address,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Manage the services people can book from you.',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _BusinessStatusPill(
+                    label: isActive ? 'Live page' : 'Not live',
+                    color: isActive
+                        ? AppColors.serviceGreen
+                        : AppColors.warning,
+                  ),
+                  _BusinessStatusPill(
+                    label: acceptingLeads ? 'Taking enquiries' : 'Paused',
+                    color: acceptingLeads
+                        ? AppColors.serviceGreen
+                        : AppColors.textMuted,
+                  ),
+                  _BusinessHeaderAction(
+                    onTap: () => _push(
+                      context,
+                      BusinessDetailScreen(businessId: businessId),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
         _ActionTile(
-          icon: Icons.storefront_outlined,
+          icon: Icons.edit_note_rounded,
           title: 'Business profile',
-          subtitle: 'Update your public Page',
+          subtitle: 'Edit public details',
           color: AppColors.serviceGreen,
+          compact: true,
           onTap: () =>
               _push(context, BusinessProfileScreen(businessId: businessId)),
         ),
         _ActionTile(
           icon: Icons.handshake_outlined,
           title: 'Services',
-          subtitle: 'Manage what customers can book',
+          subtitle: 'Manage bookable services',
           color: AppColors.serviceGreen,
+          compact: true,
           onTap: () =>
               _push(context, BusinessServicesScreen(businessId: businessId)),
         ),
         _ActionTile(
           icon: Icons.event_available_outlined,
           title: 'Share time',
-          subtitle: 'Publish a bookable service opening',
+          subtitle: 'Publish a bookable opening',
           color: AppColors.serviceGreen,
+          compact: true,
           onTap: () =>
               _push(context, PostAvailabilityScreen(businessId: businessId)),
         ),
@@ -243,23 +712,26 @@ class _BusinessSection extends StatelessWidget {
           icon: Icons.calendar_month_outlined,
           title: 'Diary',
           subtitle: 'See your business calendar',
-          color: AppColors.primary,
+          color: AppColors.serviceGreen,
+          compact: true,
           onTap: () =>
               _push(context, BusinessCalendarScreen(businessId: businessId)),
         ),
         _ActionTile(
           icon: Icons.calendar_today_outlined,
           title: 'Business bookings',
-          subtitle: 'Manage appointments and booking requests',
-          color: AppColors.primary,
+          subtitle: 'Appointments and requests',
+          color: AppColors.serviceGreen,
+          compact: true,
           onTap: () =>
               _push(context, BusinessBookingsScreen(businessId: businessId)),
         ),
         _ActionTile(
           icon: Icons.campaign_outlined,
           title: 'Customer requests',
-          subtitle: 'Find nearby people looking for help',
-          color: AppColors.warning,
+          subtitle: 'Nearby people looking for help',
+          color: AppColors.serviceGreen,
+          compact: true,
           onTap: () => _push(
             context,
             BusinessServiceRequestsScreen(businessId: businessId),
@@ -269,8 +741,113 @@ class _BusinessSection extends StatelessWidget {
     );
   }
 
+  static String _businessSubtitle({String? category, String? address}) {
+    final parts = [
+      if (category != null && category.isNotEmpty) category,
+      if (address != null && address.isNotEmpty) address,
+    ];
+    return parts.isEmpty ? 'Your LocalLink business page' : parts.join(' · ');
+  }
+
   static void _push(BuildContext context, Widget screen) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+}
+
+class _BusinessHeaderAction extends StatelessWidget {
+  const _BusinessHeaderAction({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.serviceGreen.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(
+                Icons.open_in_new_rounded,
+                size: 15,
+                color: AppColors.serviceGreen,
+              ),
+              SizedBox(width: 5),
+              Text(
+                'View page',
+                style: TextStyle(
+                  color: AppColors.serviceGreen,
+                  fontSize: 12,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BusinessImage extends StatelessWidget {
+  const _BusinessImage({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 52,
+        height: 52,
+        color: AppColors.serviceGreen.withValues(alpha: 0.10),
+        child: imageUrl.isEmpty
+            ? const Icon(
+                Icons.storefront_outlined,
+                color: AppColors.serviceGreen,
+              )
+            : LocalLinkImage(
+                imageUrl: imageUrl,
+                aspectRatio: 1,
+                fallbackIcon: Icons.storefront_outlined,
+                accentColor: AppColors.serviceGreen,
+                semanticLabel: 'Business image',
+              ),
+      ),
+    );
+  }
+}
+
+class _BusinessStatusPill extends StatelessWidget {
+  const _BusinessStatusPill({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
   }
 }
 
@@ -286,8 +863,15 @@ class _NoBusinessCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.charcoal.withValues(alpha: 0.045),
+            blurRadius: 18,
+            offset: const Offset(0, 9),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -330,7 +914,9 @@ class _NoBusinessCard extends StatelessWidget {
 }
 
 class _BusinessLoadingCard extends StatelessWidget {
-  const _BusinessLoadingCard();
+  const _BusinessLoadingCard({this.label = 'Checking business access...'});
+
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -339,18 +925,18 @@ class _BusinessLoadingCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(
+          const SizedBox(
             width: 18,
             height: 18,
             child: CircularProgressIndicator(strokeWidth: 2.4),
           ),
-          SizedBox(width: 12),
-          Text('Checking business access...'),
+          const SizedBox(width: 12),
+          Text(label),
         ],
       ),
     );
@@ -385,6 +971,8 @@ class _ActionTile extends StatelessWidget {
     required this.subtitle,
     required this.color,
     required this.onTap,
+    this.compact = false,
+    this.trailing,
   });
 
   final IconData icon;
@@ -392,35 +980,46 @@ class _ActionTile extends StatelessWidget {
   final String subtitle;
   final Color color;
   final VoidCallback onTap;
+  final bool compact;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = compact ? 38.0 : 42.0;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: compact ? 8 : 10),
       child: Material(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(16),
           child: Container(
-            padding: const EdgeInsets.all(14),
+            padding: EdgeInsets.all(compact ? 12 : 14),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color.withValues(alpha: 0.18)),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.16)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.charcoal.withValues(alpha: 0.03),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             child: Row(
               children: [
                 Container(
-                  width: 42,
-                  height: 42,
+                  width: iconSize,
+                  height: iconSize,
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: color, size: 22),
+                  child: Icon(icon, color: color, size: compact ? 20 : 22),
                 ),
-                const SizedBox(width: 13),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -433,21 +1032,21 @@ class _ActionTile extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 2),
                       Text(
                         subtitle,
-                        maxLines: 2,
+                        maxLines: compact ? 1 : 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.textMuted,
-                          height: 1.28,
+                          height: 1.25,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded, color: color),
+                trailing ?? Icon(Icons.chevron_right_rounded, color: color),
               ],
             ),
           ),

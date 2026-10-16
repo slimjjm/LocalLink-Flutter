@@ -123,6 +123,13 @@ class _SavedActivitySection extends StatelessWidget {
                   .doc(opportunityId)
                   .get(),
               builder: (context, oppSnapshot) {
+                if (oppSnapshot.hasError) {
+                  return const ListTile(
+                    title: Text(
+                      'This saved activity is no longer available to you.',
+                    ),
+                  );
+                }
                 if (!oppSnapshot.hasData) {
                   return const Padding(
                     padding: EdgeInsets.only(bottom: 12),

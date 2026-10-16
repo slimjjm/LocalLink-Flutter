@@ -1,5 +1,7 @@
 import 'package:geolocator/geolocator.dart';
 
+import 'home_business_discovery_policy.dart';
+
 class LocationService {
   Future<Position?> getCurrentLocation() async {
     try {
@@ -23,7 +25,13 @@ class LocationService {
         return null;
       }
 
-      return await Geolocator.getCurrentPosition();
+      final position = await Geolocator.getCurrentPosition();
+      return HomeBusinessDiscoveryPolicy.hasValidCoordinates(
+            position.latitude,
+            position.longitude,
+          )
+          ? position
+          : null;
     } catch (_) {
       return null;
     }

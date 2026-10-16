@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../services/analytics_service.dart';
+import '../services/booking_visibility_service.dart';
 import '../widgets/booking_message_button.dart';
 import '../widgets/booking_status_chip.dart';
 
@@ -79,6 +81,10 @@ class _CustomerBookingDetailScreenState
 
       await callable.call({'bookingId': widget.bookingId});
 
+      await LocalLinkAnalytics.instance.bookingCancelled(
+        source: 'customer_booking_detail',
+      );
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(
@@ -136,6 +142,7 @@ class _CustomerBookingDetailScreenState
           final paymentMethod = data['paymentMethod'] ?? 'Unknown';
 
           final status = data['status'] ?? 'unknown';
+          final displayStatus = bookingDisplayStatus(data, DateTime.now());
 
           final customerName = data['customerName'] ?? '';
 
@@ -146,10 +153,7 @@ class _CustomerBookingDetailScreenState
           final startTime =
               (data['startDate'] ?? data['startTime']) as Timestamp?;
 
-          final canCancel =
-              status == 'confirmed' ||
-              status == 'pending_payment' ||
-              status == 'pending_business_confirmation';
+          final canCancel = canCancelBookingFromUi(data, DateTime.now());
 
           final canMessage = status == 'confirmed' || status == 'completed';
           final conversationId =
@@ -179,7 +183,7 @@ class _CustomerBookingDetailScreenState
 
                 const SizedBox(height: 16),
 
-                BookingStatusChip(status: status),
+                BookingStatusChip(status: displayStatus),
 
                 const SizedBox(height: 30),
 

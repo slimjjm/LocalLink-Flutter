@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/account_deletion_service.dart';
 import '../services/admin_access_service.dart';
+import '../services/auth_required_action.dart';
+import '../services/notification_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/settings_tile.dart';
 import 'admin_reports_screen.dart';
@@ -11,11 +13,13 @@ import 'community_alert_settings_screen.dart';
 import 'founder_dashboard_screen.dart';
 import 'notification_settings_screen.dart';
 import 'notifications_screen.dart';
+import 'profile_screen.dart';
 
 class SettingsTabScreen extends StatelessWidget {
   const SettingsTabScreen({super.key});
 
   Future<void> _logout(BuildContext context) async {
+    await NotificationService.shared.unregisterCurrentDevice();
     await FirebaseAuth.instance.signOut();
   }
 
@@ -84,6 +88,9 @@ class SettingsTabScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final isGuest = user == null || user.isAnonymous;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -110,23 +117,60 @@ class SettingsTabScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 22),
+            if (isGuest)
+              SettingsTile(
+                icon: Icons.login_rounded,
+                title: 'Sign in or create account',
+                subtitle: 'Unlock messaging, bookings and saved places',
+                onTap: () =>
+                    AuthRequiredAction.run(context, action: () async {}),
+              )
+            else
+              SettingsTile(
+                icon: Icons.person_outline_rounded,
+                title: 'Profile',
+                subtitle: 'Update your LocalLink identity',
+                onTap: () => _push(
+                  context,
+                  ProfileScreen(
+                    userId: user.uid,
+                    userName: user.displayName ?? 'User',
+                    photoUrl: user.photoURL,
+                  ),
+                ),
+              ),
             SettingsTile(
               icon: Icons.notifications_outlined,
               title: 'Notification settings',
               subtitle: 'Choose which alerts you receive',
-              onTap: () => _push(context, const NotificationSettingsScreen()),
+              onTap: () => AuthRequiredAction.run(
+                context,
+                action: () async {
+                  _push(context, const NotificationSettingsScreen());
+                },
+              ),
             ),
             SettingsTile(
               icon: Icons.notifications_active_outlined,
               title: 'Notification history',
               subtitle: 'Review your LocalLink notifications',
-              onTap: () => _push(context, const NotificationsScreen()),
+              onTap: () => AuthRequiredAction.run(
+                context,
+                action: () async {
+                  _push(context, const NotificationsScreen());
+                },
+              ),
             ),
             SettingsTile(
               icon: Icons.crisis_alert_outlined,
               title: 'Community Alerts',
               subtitle: 'Choose which local alerts you receive',
-              onTap: () => _push(context, const CommunityAlertSettingsScreen()),
+              onTap: () => AuthRequiredAction.run(
+                context,
+                action: () async {
+                  _push(context, const CommunityAlertSettingsScreen());
+                },
+              ),
             ),
             SettingsTile(
               icon: Icons.language_rounded,
@@ -164,68 +208,72 @@ class SettingsTabScreen extends StatelessWidget {
               onTap: () =>
                   _openUrl(context, 'mailto:support@locallinkapp.co.uk'),
             ),
-            FutureBuilder<bool>(
-              future: AdminAccessService().isCurrentUserAdmin(),
-              builder: (context, snapshot) {
-                if (snapshot.data != true) {
-                  return const SizedBox.shrink();
-                }
+            if (!isGuest)
+              FutureBuilder<bool>(
+                future: AdminAccessService().isCurrentUserAdmin(),
+                builder: (context, snapshot) {
+                  if (snapshot.data != true) {
+                    return const SizedBox.shrink();
+                  }
 
-                return SettingsTile(
-                  icon: Icons.admin_panel_settings_outlined,
-                  title: 'Moderation',
-                  subtitle: 'Review reports and safety actions',
-                  onTap: () => _push(context, const AdminReportsScreen()),
-                );
-              },
-            ),
-            FutureBuilder<bool>(
-              future: AdminAccessService().isCurrentUserAdmin(),
-              builder: (context, snapshot) {
-                if (snapshot.data != true) {
-                  return const SizedBox.shrink();
-                }
+                  return SettingsTile(
+                    icon: Icons.admin_panel_settings_outlined,
+                    title: 'Moderation',
+                    subtitle: 'Review reports and safety actions',
+                    onTap: () => _push(context, const AdminReportsScreen()),
+                  );
+                },
+              ),
+            if (!isGuest)
+              FutureBuilder<bool>(
+                future: AdminAccessService().isCurrentUserAdmin(),
+                builder: (context, snapshot) {
+                  if (snapshot.data != true) {
+                    return const SizedBox.shrink();
+                  }
 
-                return SettingsTile(
-                  icon: Icons.analytics_outlined,
-                  title: 'Founder Dashboard',
-                  subtitle: 'Analytics, growth and community health',
-                  onTap: () => _push(context, const FounderDashboardScreen()),
-                );
-              },
-            ),
+                  return SettingsTile(
+                    icon: Icons.analytics_outlined,
+                    title: 'Founder Dashboard',
+                    subtitle: 'Analytics, growth and community health',
+                    onTap: () => _push(context, const FounderDashboardScreen()),
+                  );
+                },
+              ),
             const SizedBox(height: 14),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.logout_rounded),
-              label: const Text('Log out'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-                foregroundColor: AppColors.charcoal,
-                side: BorderSide(
-                  color: AppColors.charcoal.withValues(alpha: 0.14),
+            if (!isGuest) ...[
+              OutlinedButton.icon(
+                icon: const Icon(Icons.logout_rounded),
+                label: const Text('Log out'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  foregroundColor: AppColors.charcoal,
+                  side: BorderSide(
+                    color: AppColors.charcoal.withValues(alpha: 0.14),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                onPressed: () => _logout(context),
               ),
-              onPressed: () => _logout(context),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.delete_outline_rounded),
-              label: const Text('Delete account'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-                foregroundColor: AppColors.error,
-                side: BorderSide(
-                  color: AppColors.error.withValues(alpha: 0.36),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text('Delete account'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  foregroundColor: AppColors.error,
+                  side: BorderSide(
+                    color: AppColors.error.withValues(alpha: 0.36),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                onPressed: () => _deleteAccount(context),
               ),
-              onPressed: () => _deleteAccount(context),
-            ),
+            ],
           ],
         ),
       ),

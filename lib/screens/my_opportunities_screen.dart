@@ -27,17 +27,36 @@ class MyOpportunitiesScreen extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('opportunities')
-                  .where('createdBy', isEqualTo: uid)
-                  .snapshots(),
+            FutureBuilder<List<QuerySnapshot>>(
+              future: Future.wait([
+                FirebaseFirestore.instance
+                    .collection('opportunities')
+                    .where('createdBy', isEqualTo: uid)
+                    .get(),
+                FirebaseFirestore.instance
+                    .collection('opportunities')
+                    .where('organiserId', isEqualTo: uid)
+                    .get(),
+              ]),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const _EmptyCard(
+                    text:
+                        'Your activities could not be loaded. Please try again in a moment.',
+                  );
+                }
+
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final docs = snapshot.data!.docs;
+                final docsById = <String, QueryDocumentSnapshot>{};
+                for (final query in snapshot.data!) {
+                  for (final doc in query.docs) {
+                    docsById[doc.id] = doc;
+                  }
+                }
+                final docs = docsById.values.toList();
 
                 if (docs.isEmpty) {
                   return const _EmptyCard(
@@ -72,8 +91,16 @@ class MyOpportunitiesScreen extends StatelessWidget {
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collectionGroup('attendees')
+                  .where('userId', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
                   .snapshots(),
               builder: (context, attendeeSnapshot) {
+                if (attendeeSnapshot.hasError) {
+                  return const _EmptyCard(
+                    text:
+                        'Joined activities could not be loaded. Please try again in a moment.',
+                  );
+                }
+
                 if (!attendeeSnapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -103,6 +130,10 @@ class MyOpportunitiesScreen extends StatelessWidget {
                     return FutureBuilder<DocumentSnapshot>(
                       future: opportunityRef.get(),
                       builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const SizedBox.shrink();
+                        }
+
                         if (!snapshot.hasData || !snapshot.data!.exists) {
                           return const SizedBox.shrink();
                         }

@@ -71,6 +71,7 @@ class NotificationsScreen extends StatelessWidget {
               }
 
               if (type == 'community_alert' ||
+                  type == 'community_alert_group' ||
                   type == 'community_help_match' ||
                   type == 'community_help_update' ||
                   type == 'community_help_resolved' ||
@@ -90,6 +91,10 @@ class NotificationsScreen extends StatelessWidget {
                   type == 'booking_expired' ||
                   type == 'payment_failed') {
                 icon = Icons.calendar_today;
+              }
+
+              if (type == 'content_removed' || type == 'account_moderation') {
+                icon = Icons.policy_outlined;
               }
 
               return ListTile(

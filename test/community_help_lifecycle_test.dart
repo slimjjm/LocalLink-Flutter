@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:locallink_flutter/services/community_help_lifecycle.dart';
 
 void main() {
-  final now = DateTime(2026, 8, 16, 12);
+  final now = DateTime(2026, 9, 27, 12);
 
   Map<String, dynamic> post({
     String type = 'lost_found',
@@ -70,6 +70,17 @@ void main() {
     expect(expiry, now.add(const Duration(days: 14)));
   });
 
+  test('found pet gets one week expiry', () {
+    final expiry = CommunityHelpLifecycle.expiresAt(
+      now: now,
+      type: 'lost_found',
+      mode: 'found',
+      itemCategory: 'Pet',
+    );
+
+    expect(expiry, now.add(const Duration(days: 7)));
+  });
+
   test('free item gets correct expiry', () {
     final expiry = CommunityHelpLifecycle.expiresAt(
       now: now,
@@ -103,6 +114,16 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test('reunited missing pet is not active and displays reunited', () {
+    final reunited = post(
+      category: 'Pet',
+      status: CommunityHelpLifecycle.resolvedStatus,
+    )..['resolvedReason'] = 'reunited';
+
+    expect(CommunityHelpLifecycle.isActiveForDiscovery(reunited, now), isFalse);
+    expect(CommunityHelpLifecycle.friendlyStatus(reunited, now), 'Reunited');
   });
 
   test('owner can renew', () {
@@ -194,6 +215,119 @@ void main() {
     expect(CommunityHelpLifecycle.isActiveForDiscovery(legacy, now), isTrue);
     expect(CommunityHelpLifecycle.friendlyStatus(legacy, now), 'Missing');
   });
+
+  test('observed timestamp produces elapsed wording as time passes', () {
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': now.subtract(const Duration(minutes: 25)),
+      }, now),
+      '25 minutes ago',
+    );
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': DateTime(2026, 9, 27, 9, 30),
+      }, now),
+      'Today, 9:30am',
+    );
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': DateTime(2026, 8, 16, 9, 30),
+      }, now),
+      '16 August 2026',
+    );
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': now.subtract(const Duration(days: 1, hours: 1)),
+      }, now),
+      'Yesterday, 11:00am',
+    );
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': now.subtract(const Duration(days: 3)),
+      }, now),
+      '24 September 2026',
+    );
+  });
+
+  test('historical missing date can be selected and future time is capped', () {
+    expect(
+      CommunityHelpLifecycle.firstSelectableObservedDate(now),
+      DateTime(2000),
+    );
+    expect(CommunityHelpLifecycle.latestSelectableObservedAt(now), now);
+
+    final historical = DateTime(2026, 8, 22, 10, 30);
+    expect(
+      CommunityHelpLifecycle.normaliseObservedAt(historical, now),
+      historical,
+    );
+
+    final future = now.add(const Duration(minutes: 10));
+    expect(CommunityHelpLifecycle.normaliseObservedAt(future, now), now);
+  });
+
+  test('detail timing prefers lastSeenAt over createdAt', () {
+    final createdAt = now.subtract(const Duration(minutes: 2));
+    final lastSeenAt = DateTime(2026, 8, 22, 14, 15);
+
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'lastSeenAt': lastSeenAt,
+        'createdAt': createdAt,
+      }, now),
+      '22 August 2026',
+    );
+  });
+
+  test('community-added historical missing pet displays supplied date', () {
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'communityAdded': true,
+        'itemCategory': 'Pet',
+        'lastSeenAt': DateTime(2026, 8, 22),
+        'createdAt': now,
+      }, now),
+      '22 August 2026',
+    );
+  });
+
+  test('date-only observed timestamps display without a misleading time', () {
+    expect(
+      CommunityHelpLifecycle.observedAtText({
+        'observedAt': DateTime(2026, 8, 22),
+        'observedDateOnly': true,
+      }, now),
+      '22 August 2026',
+    );
+  });
+
+  test('legacy observed wording remains safe', () {
+    expect(
+      CommunityHelpLifecycle.observedAtText({'eventDateText': 'Today'}, now),
+      'Today',
+    );
+  });
+
+  test(
+    'free items remain lifecycle-compatible but hidden from Lost and Found UX',
+    () {
+      final freeItem = post(
+        type: 'free_item',
+        mode: 'offering',
+        category: 'Free item',
+      );
+
+      expect(
+        CommunityHelpLifecycle.isActiveForDiscovery(freeItem, now),
+        isTrue,
+      );
+      expect(CommunityHelpLifecycle.isVisibleInLostFoundUx(freeItem), isFalse);
+      expect(
+        CommunityHelpLifecycle.isVisibleInLostFoundUx(post(category: 'Pet')),
+        isTrue,
+      );
+    },
+  );
 
   test('free item lifecycle works', () {
     final freeItem = post(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/address_result.dart';
 import '../services/address_search_service.dart';
+import '../services/booking_messaging_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
 
@@ -131,6 +132,15 @@ class _CommunityAlertSettingsScreenState
         'createdAt': now,
         'updatedAt': now,
       }, SetOptions(merge: true));
+
+      if (_enabled) {
+        try {
+          await BookingMessagingService().refreshNearbyMissingPetAlerts();
+        } catch (_) {
+          // The area preference is already saved; the scheduled server pass
+          // will retry without blocking the user on a transient push failure.
+        }
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

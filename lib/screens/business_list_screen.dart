@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../constants/business_categories.dart';
 import '../models/business.dart';
+import '../services/business_discovery_service.dart';
+import '../services/home_business_discovery_policy.dart';
 import '../services/local_discovery_filters.dart';
 import '../services/location_service.dart';
 import '../services/service_catalog_discovery_service.dart';
-import '../utils/distance_helper.dart';
 import '../widgets/business_card.dart';
 
 class BusinessListScreen extends StatefulWidget {
@@ -30,36 +32,25 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
   final TextEditingController postcodeController = TextEditingController();
 
   Position? userPosition;
+  bool locationLoadComplete = false;
   Map<String, List<Map<String, dynamic>>> serviceDataByBusinessId = const {};
 
   String searchText = '';
   String postcodeText = '';
   String? selectedCategory;
 
-  final List<String> categories = const [
-    'Aesthetics',
-    'Beauty',
-    'Brows & Lashes',
-    'Hair Salon',
-    'Barber',
-    'Nails',
-    'Massage',
-    'Skin Clinic',
-    'Cleaner',
-    'Dog Groomer',
-    'Dog Walker',
-    'Gardener',
-    'Handyman',
-    'Mobile Valeting',
-    'Pressure Washing',
-    'Specialist Services',
-  ];
+  final List<String> categories = BusinessCategories.values;
 
   @override
   void initState() {
     super.initState();
 
-    selectedCategory = widget.initialCategory;
+    final initialCategory = BusinessCategories.normalise(
+      widget.initialCategory,
+    );
+    selectedCategory = BusinessCategories.isCanonical(initialCategory)
+        ? initialCategory
+        : widget.initialCategory;
 
     if (widget.initialPostcode != null &&
         widget.initialPostcode!.trim().isNotEmpty) {
@@ -87,7 +78,15 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
     if (!mounted) return;
 
     setState(() {
-      userPosition = position;
+      userPosition =
+          position != null &&
+              HomeBusinessDiscoveryPolicy.hasValidCoordinates(
+                position.latitude,
+                position.longitude,
+              )
+          ? position
+          : null;
+      locationLoadComplete = true;
     });
   }
 
@@ -215,7 +214,7 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
 
     final businessCategory = data['category']?.toString() ?? '';
 
-    if (businessCategory == category) return true;
+    if (BusinessCategories.normalise(businessCategory) == category) return true;
 
     return (serviceDataByBusinessId[businessId] ?? const []).any(
       (service) => service['category']?.toString() == category,
@@ -223,17 +222,20 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
   }
 
   double? _distanceFor(BusinessModel business) {
-    if (userPosition == null ||
-        business.latitude == null ||
-        business.longitude == null) {
+    final position = userPosition;
+    if (position == null ||
+        !HomeBusinessDiscoveryPolicy.hasValidCoordinates(
+          position.latitude,
+          position.longitude,
+        )) {
       return null;
     }
 
-    return calculateDistanceMiles(
-      startLat: userPosition!.latitude,
-      startLng: userPosition!.longitude,
-      endLat: business.latitude!,
-      endLng: business.longitude!,
+    return HomeBusinessDiscoveryPolicy.distanceMilesBetween(
+      startLatitude: position.latitude,
+      startLongitude: position.longitude,
+      endLatitude: business.latitude,
+      endLongitude: business.longitude,
     );
   }
 
@@ -375,7 +377,6 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
               stream: FirebaseFirestore.instance
                   .collection('businesses')
                   .where('isActive', isEqualTo: true)
-                  .where('isClaimed', isEqualTo: true)
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -402,14 +403,11 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                   return BusinessModel.fromFirestore(doc.id, data);
                 }).toList();
 
-                businesses = businesses
-                    .where((business) => business.canTakeBookings)
-                    .toList();
-
                 businesses = businesses.where((business) {
                   final data = originalDataById[business.id];
 
                   if (data == null) return false;
+                  if (!_isPubliclyDiscoverableBusiness(data)) return false;
 
                   return _matchesSearch(
                         business: business,
@@ -427,13 +425,48 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
                       );
                 }).toList();
 
-                if (userPosition != null) {
+                final requiresCurrentLocation =
+                    widget.useCurrentLocation && !hasPostcode;
+                final hasValidUserPosition =
+                    userPosition != null &&
+                    HomeBusinessDiscoveryPolicy.hasValidCoordinates(
+                      userPosition!.latitude,
+                      userPosition!.longitude,
+                    );
+
+                if (requiresCurrentLocation &&
+                    !locationLoadComplete &&
+                    !hasValidUserPosition) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (requiresCurrentLocation && !hasValidUserPosition) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'We need your location to show nearby businesses.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+
+                if (hasValidUserPosition) {
+                  final selectedRadius =
+                      HomeBusinessDiscoveryPolicy.selectedRadiusMiles(
+                        businesses.map(_distanceFor),
+                      );
+
                   businesses = businesses.where((business) {
                     final distance = _distanceFor(business);
 
                     if (distance == null) return false;
 
-                    return distance <= 10;
+                    return HomeBusinessDiscoveryPolicy.isWithinRadius(
+                      distanceMiles: distance,
+                      radiusMiles: selectedRadius,
+                    );
                   }).toList();
 
                   businesses.sort((a, b) {
@@ -498,5 +531,9 @@ class _BusinessListScreenState extends State<BusinessListScreen> {
         ],
       ),
     );
+  }
+
+  bool _isPubliclyDiscoverableBusiness(Map<String, dynamic> data) {
+    return BusinessDiscoveryService.isPubliclyDiscoverable(data);
   }
 }

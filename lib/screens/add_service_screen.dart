@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 
 import '../theme/app_colors.dart';
+import '../widgets/local_link_button.dart';
 
 enum _DurationUnit { minutes, hours }
 
@@ -583,32 +584,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
           const SizedBox(height: 22),
 
-          SizedBox(
-            width: double.infinity,
-
-            child: ElevatedButton.icon(
-              onPressed: isSaving ? null : saveService,
-              icon: isSaving
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.check_circle_outline),
-              label: Text(isEditing ? 'Update service' : 'Save service'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.serviceGreen,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                textStyle: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w900,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
+          LocalLinkButton(
+            label: isEditing ? 'Update service' : 'Save service',
+            icon: Icons.check_circle_outline,
+            isLoading: isSaving,
+            onPressed: isSaving ? null : saveService,
+            expand: true,
           ),
         ],
       ),

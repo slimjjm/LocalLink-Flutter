@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 
 import '../config/firestore_collections.dart';
 import '../models/inbox_conversation.dart';
-import '../services/business_access_service.dart';
 
 class InboxViewModel {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -44,30 +43,7 @@ class InboxViewModel {
 
     if (role == 'all') {
       _listenToCustomerInbox(user.uid, businessId.trim());
-      _listenToCommunityHelpInbox(user.uid, businessId.trim());
-      BusinessAccessService.loadLinkedBusiness()
-          .then((business) {
-            final resolvedBusinessId = business?.exists == true
-                ? business!.id
-                : '';
-            if (resolvedBusinessId.isEmpty) return;
-
-            _listenToBusinessInbox(
-              user.uid,
-              resolvedBusinessId,
-              isSupplemental: true,
-            );
-          })
-          .catchError((error, stackTrace) {
-            _debugLog(
-              'Linked business lookup failed for universal inbox.',
-              error,
-              stackTrace is StackTrace ? stackTrace : null,
-              authenticatedUid: user.uid,
-              selectedBusinessId: businessId.trim(),
-              queryName: 'linked business lookup',
-            );
-          });
+      _listenToBusinessOwnerInbox(user.uid, businessId.trim());
       return;
     }
 
@@ -79,7 +55,14 @@ class InboxViewModel {
       _listenToCustomerInbox(user.uid, businessId.trim());
     }
 
-    _listenToCommunityHelpInbox(user.uid, businessId.trim());
+    if (role != 'business') {
+      _listenToBusinessOwnerInbox(
+        user.uid,
+        businessId.trim(),
+        isSupplemental: true,
+        includeConversation: (conversation) => conversation.isCommunityHelp,
+      );
+    }
   }
 
   void _listenToCustomerInbox(String uid, String selectedBusinessId) {
@@ -99,6 +82,15 @@ class InboxViewModel {
     String selectedBusinessId, {
     bool isSupplemental = false,
   }) {
+    if (selectedBusinessId.isEmpty) {
+      _listenToBusinessOwnerInbox(
+        uid,
+        selectedBusinessId,
+        isSupplemental: isSupplemental,
+      );
+      return;
+    }
+
     _listenToQuery(
       _db
           .collection(FirestoreCollections.conversations)
@@ -114,16 +106,22 @@ class InboxViewModel {
     );
   }
 
-  void _listenToCommunityHelpInbox(String uid, String selectedBusinessId) {
+  void _listenToBusinessOwnerInbox(
+    String uid,
+    String selectedBusinessId, {
+    bool isSupplemental = true,
+    bool Function(InboxConversation conversation)? includeConversation,
+  }) {
     _listenToQuery(
       _db
           .collection(FirestoreCollections.conversations)
-          .where('conversationType', isEqualTo: 'community_help')
-          .where('communityHelpParticipantIds', arrayContains: uid),
-      queryName: 'communityHelpParticipantIds inbox',
+          .where('businessOwnerId', isEqualTo: uid)
+          .orderBy('lastMessageAt', descending: true),
+      queryName: 'businessOwnerId universal inbox',
       authenticatedUid: uid,
       selectedBusinessId: selectedBusinessId,
-      isSupplemental: true,
+      isSupplemental: isSupplemental,
+      includeConversation: includeConversation,
     );
   }
 

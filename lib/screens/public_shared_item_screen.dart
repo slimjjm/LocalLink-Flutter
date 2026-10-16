@@ -4,6 +4,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/deep_link_service.dart';
 import '../theme/app_colors.dart';
+import 'login_screen.dart';
+import 'register_screen.dart';
 
 class PublicSharedItemScreen extends StatefulWidget {
   const PublicSharedItemScreen({super.key, required this.target});
@@ -153,10 +155,23 @@ class _PreviewContent extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 26),
-        FilledButton.icon(
-          onPressed: () => _openNativeApp(context),
-          icon: const Icon(Icons.phone_iphone_rounded),
-          label: const Text('Open in LocalLink'),
+        _LockedDetailsPanel(onSignIn: () => _openSignIn(context)),
+        const SizedBox(height: 18),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton.icon(
+              onPressed: () => _openCreateAccount(context),
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: const Text('Create account'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _openNativeApp(context),
+              icon: const Icon(Icons.phone_iphone_rounded),
+              label: const Text('Open app'),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         Text(
@@ -189,6 +204,84 @@ class _PreviewContent extends StatelessWidget {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Open the LocalLink app to continue.')),
+    );
+  }
+
+  void _openSignIn(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+  }
+
+  void _openCreateAccount(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+    );
+  }
+}
+
+class _LockedDetailsPanel extends StatelessWidget {
+  const _LockedDetailsPanel({required this.onSignIn});
+
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.lock_outline_rounded, color: AppColors.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Sign in for the live LocalLink details',
+                    style: TextStyle(
+                      color: AppColors.charcoal,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  const Text(
+                    'Messages, bookings, exact contact actions, comments and private details stay inside LocalLink.',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontWeight: FontWeight.w600,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: onSignIn,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Sign in',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -308,6 +401,7 @@ class _PublicSharePreview {
       case 'communityHelp':
         return Uri(scheme: 'locallink', host: 'community-help', path: '/$id');
       case 'activity':
+      case 'opportunity':
         return Uri(scheme: 'locallink', host: 'opportunity', path: '/$id');
       case 'availability':
         return Uri(scheme: 'locallink', host: 'availability', path: '/$id');

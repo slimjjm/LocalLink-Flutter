@@ -4,6 +4,8 @@ import 'package:geolocator/geolocator.dart';
 
 import '../screens/opportunity_detail_screen.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
+import 'local_link_image.dart';
 import 'local_link_surface_card.dart';
 
 class OpportunityCard extends StatelessWidget {
@@ -181,8 +183,8 @@ class OpportunityCard extends StatelessWidget {
           ),
         );
       },
-      padding: const EdgeInsets.all(14),
-      radius: 20,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
+      radius: LocalLinkRadius.lg,
       elevated: false,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -192,7 +194,7 @@ class OpportunityCard extends StatelessWidget {
             colour: colour,
             icon: _categoryIcon(category),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: LocalLinkSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,10 +202,10 @@ class OpportunityCard extends StatelessWidget {
                 Row(
                   children: [
                     const _ActivityBadge(),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: LocalLinkSpacing.xs),
                     if (badge.isNotEmpty) ...[
                       _DateBadge(label: badge),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: LocalLinkSpacing.xs),
                     ],
                     if (category.isNotEmpty)
                       Flexible(
@@ -220,20 +222,15 @@ class OpportunityCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: LocalLinkSpacing.xs),
                 Text(
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    height: 1.18,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.charcoal,
-                  ),
+                  style: LocalLinkTextStyles.cardTitle.copyWith(fontSize: 16),
                 ),
                 if (organiserName.isNotEmpty || postedAt.isNotEmpty) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: LocalLinkSpacing.xxs),
                   Text(
                     [
                       if (organiserName.isNotEmpty) 'By $organiserName',
@@ -241,16 +238,11 @@ class OpportunityCard extends StatelessWidget {
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12.5,
-                      height: 1.25,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: LocalLinkTextStyles.metadata,
                   ),
                 ],
                 if (location.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: LocalLinkSpacing.xs),
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -259,16 +251,13 @@ class OpportunityCard extends StatelessWidget {
                         size: 16,
                         color: AppColors.charcoal.withValues(alpha: 0.48),
                       ),
-                      const SizedBox(width: 5),
+                      const SizedBox(width: LocalLinkSpacing.xxs),
                       Expanded(
                         child: Text(
                           location,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 13,
-                            height: 1.25,
+                          style: LocalLinkTextStyles.metadata.copyWith(
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -276,10 +265,10 @@ class OpportunityCard extends StatelessWidget {
                     ],
                   ),
                 ],
-                const SizedBox(height: 10),
+                const SizedBox(height: LocalLinkSpacing.xs),
                 Wrap(
-                  spacing: 12,
-                  runSpacing: 6,
+                  spacing: LocalLinkSpacing.sm,
+                  runSpacing: LocalLinkSpacing.xs,
                   children: [
                     if (milesAway != null)
                       _MetaItem(
@@ -321,45 +310,15 @@ class _OpportunityImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (photoUrl.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Image.network(
-          photoUrl,
-          width: 76,
-          height: 76,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return _FallbackImage(colour: colour, icon: icon);
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return _FallbackImage(colour: colour, icon: icon);
-          },
-        ),
-      );
-    }
-
-    return _FallbackImage(colour: colour, icon: icon);
-  }
-}
-
-class _FallbackImage extends StatelessWidget {
-  final Color colour;
-  final IconData icon;
-
-  const _FallbackImage({required this.colour, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: 76,
       height: 76,
-      decoration: BoxDecoration(
-        color: colour.withValues(alpha: 0.11),
-        borderRadius: BorderRadius.circular(18),
+      child: LocalLinkImage(
+        imageUrl: photoUrl,
+        fallbackIcon: icon,
+        accentColor: colour,
+        semanticLabel: 'Activity image',
       ),
-      child: Icon(icon, color: colour, size: 28),
     );
   }
 }
@@ -372,17 +331,18 @@ class _DateBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LocalLinkSpacing.xs,
+        vertical: LocalLinkSpacing.xxs,
+      ),
       decoration: BoxDecoration(
         color: AppColors.activityBlue.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
       ),
       child: Text(
         label,
-        style: const TextStyle(
+        style: LocalLinkTextStyles.status.copyWith(
           color: AppColors.activityBlue,
-          fontSize: 10,
-          fontWeight: FontWeight.w900,
         ),
       ),
     );
@@ -395,17 +355,18 @@ class _ActivityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LocalLinkSpacing.xs,
+        vertical: LocalLinkSpacing.xxs,
+      ),
       decoration: BoxDecoration(
         color: AppColors.activityBlue.withValues(alpha: 0.11),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
       ),
-      child: const Text(
+      child: Text(
         'Activity',
-        style: TextStyle(
+        style: LocalLinkTextStyles.status.copyWith(
           color: AppColors.activityBlue,
-          fontSize: 10,
-          fontWeight: FontWeight.w900,
         ),
       ),
     );
@@ -424,15 +385,8 @@ class _MetaItem extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 15, color: AppColors.charcoal.withValues(alpha: 0.54)),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        const SizedBox(width: LocalLinkSpacing.xxs),
+        Text(label, style: LocalLinkTextStyles.metadata.copyWith(fontSize: 12)),
       ],
     );
   }

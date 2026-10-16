@@ -5,13 +5,26 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import '../utils/helpers.dart';
 import '../utils/single_flight_guard.dart';
+import '../services/booking_visibility_service.dart';
 import '../services/booking_messaging_service.dart';
+import '../services/auth_required_action.dart';
+import '../services/analytics_service.dart';
 import '../services/local_link_share_service.dart';
+import '../models/business_opening_hours.dart';
+import '../services/business_activation_policy.dart';
+import '../widgets/business_contact_actions.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_image.dart';
+import '../widgets/local_link_section_header.dart';
+import '../widgets/local_link_states.dart';
+import '../widgets/local_link_surface_card.dart';
 
 import 'availability_detail_screen.dart';
 import 'booking_conversation_screen.dart';
+import 'listing_claim_request_screen.dart';
 
 double _asDouble(dynamic value) {
   if (value is num) {
@@ -46,9 +59,18 @@ bool _isCurrentUserBusinessOwner(Map<String, dynamic> businessData) {
       matches(businessData['businessOwnerId']) ||
       matches(businessData['ownerUid']) ||
       matches(businessData['claimedBy']) ||
-      matches(businessData['createdBy']) ||
+      _creatorCanManageBusiness(businessData, uid) ||
       containsUser(businessData['ownerIds']) ||
       containsUser(businessData['adminUserIds']);
+}
+
+bool _creatorCanManageBusiness(Map<String, dynamic> businessData, String uid) {
+  if (businessData['createdBy']?.toString() != uid) return false;
+  final moderatorSeeded = businessData['createdByModerator'] == true;
+  final claimed =
+      businessData['isClaimed'] == true ||
+      businessData['listingOwnershipStatus']?.toString() == 'claimed';
+  return !(moderatorSeeded && claimed);
 }
 
 class BusinessDetailScreen extends StatefulWidget {
@@ -69,6 +91,7 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
   final ScrollController _scrollController = ScrollController();
   final Map<String, GlobalKey> _serviceKeys = {};
   bool _didScrollToInitialService = false;
+  bool _loggedView = false;
 
   @override
   void dispose() {
@@ -108,7 +131,8 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            backgroundColor: AppColors.background,
+            body: LocalLinkLoadingState(label: 'Loading business'),
           );
         }
 
@@ -118,6 +142,14 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
         final businessName = safeText(businessData['businessName'], 'Business');
 
         final category = safeText(businessData['category'], 'No category');
+        if (!_loggedView) {
+          _loggedView = true;
+          LocalLinkAnalytics.instance.discoveryView(
+            eventName: 'business_view',
+            source: widget.initialServiceId == null ? 'other' : 'service',
+            category: category,
+          );
+        }
 
         final bio = safeText(businessData['bio'], '');
 
@@ -125,7 +157,7 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
 
         final serviceArea = safeText(businessData['serviceArea'], '');
 
-        final openingHours = safeText(businessData['openingHours'], '');
+        final openingHours = BusinessOpeningHours.displayText(businessData);
 
         final logoUrl = safeText(businessData['logoUrl'], '');
 
@@ -152,9 +184,18 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
 
         final paymentMethods = resolvePaymentMethods(businessData);
 
-        final photoURLs = List<String>.from(businessData['photoURLs'] ?? []);
+        final photoURLs = businessPhotoUrls(businessData);
 
-        final coverPhoto = photoURLs.isNotEmpty ? photoURLs.first : null;
+        final coverPhoto = businessCoverImageUrl(businessData);
+
+        final galleryPhotoURLs = photoURLs
+            .where((url) => url.trim() != coverPhoto.trim())
+            .toList();
+
+        final isModeratorSeeded = businessData['createdByModerator'] == true;
+        final isUnclaimedListing =
+            isModeratorSeeded &&
+            businessData['listingOwnershipStatus'] != 'claimed';
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -205,33 +246,13 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
 
                     children: [
                       // IMAGE
-                      if (coverPhoto != null)
-                        Image.network(
-                          coverPhoto,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              color: AppColors.serviceGreen.withValues(
-                                alpha: 0.08,
-                              ),
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: AppColors.serviceGreen.withValues(
-                                alpha: 0.10,
-                              ),
-                              child: const Icon(
-                                Icons.storefront_outlined,
-                                size: 56,
-                                color: AppColors.serviceGreen,
-                              ),
-                            );
-                          },
+                      if (coverPhoto.isNotEmpty)
+                        LocalLinkImage(
+                          imageUrl: coverPhoto,
+                          aspectRatio: 16 / 9,
+                          fallbackIcon: Icons.storefront_outlined,
+                          accentColor: AppColors.serviceGreen,
+                          semanticLabel: businessName,
                         )
                       else
                         Container(
@@ -311,12 +332,16 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                             Row(
                               children: [
                                 if (logoUrl.isNotEmpty) ...[
-                                  CircleAvatar(
-                                    radius: 24,
-                                    backgroundImage: NetworkImage(logoUrl),
-                                    onBackgroundImageError:
-                                        (exception, stackTrace) {},
-                                    backgroundColor: Colors.white,
+                                  SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: LocalLinkImage(
+                                      imageUrl: logoUrl,
+                                      aspectRatio: 1,
+                                      fallbackIcon: Icons.storefront_outlined,
+                                      accentColor: AppColors.serviceGreen,
+                                      semanticLabel: '$businessName logo',
+                                    ),
                                   ),
 
                                   const SizedBox(width: 10),
@@ -443,29 +468,84 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
 
                     children: [
-                      _PrimaryBusinessActions(
-                        businessId: widget.businessId,
-                        businessName: businessName,
-                        category: category,
-                        onBook: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Choose a service below to book.'),
-                            ),
-                          );
-                        },
-                        onContact: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Choose a service below to ask a question.',
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: FirebaseFirestore.instance
+                            .collection('businesses')
+                            .doc(widget.businessId)
+                            .collection('services')
+                            .where('isActive', isEqualTo: true)
+                            .limit(1)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          final hasServices =
+                              snapshot.hasData &&
+                              snapshot.data!.docs.isNotEmpty;
+                          final canUseServices =
+                              hasServices &&
+                              BusinessActivationPolicy.listingLive(
+                                businessData,
+                              ) &&
+                              BusinessActivationPolicy.hasClaimedOwner(
+                                businessData,
+                              );
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (canUseServices) ...[
+                                LocalLinkButton(
+                                  label: 'View services and booking options',
+                                  icon: Icons.handyman_outlined,
+                                  expand: true,
+                                  onPressed: () {
+                                    final serviceId =
+                                        snapshot.data!.docs.first.id;
+                                    final destination =
+                                        _serviceKeys[serviceId]?.currentContext;
+                                    if (destination != null) {
+                                      Scrollable.ensureVisible(
+                                        destination,
+                                        duration: const Duration(
+                                          milliseconds: 450,
+                                        ),
+                                        alignment: 0.1,
+                                      );
+                                    } else {
+                                      _scrollController.animateTo(
+                                        _scrollController
+                                            .position
+                                            .maxScrollExtent,
+                                        duration: const Duration(
+                                          milliseconds: 450,
+                                        ),
+                                        curve: Curves.easeOut,
+                                      );
+                                    }
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              BusinessContactActions(
+                                businessData: businessData,
                               ),
-                            ),
+                              _FavoriteBusinessIconButton(
+                                businessId: widget.businessId,
+                                businessName: businessName,
+                                category: category,
+                              ),
+                            ],
                           );
                         },
                       ),
 
-                      const SizedBox(height: 22),
+                      if (isUnclaimedListing) ...[
+                        const SizedBox(height: 14),
+                        _UnclaimedBusinessCard(
+                          businessId: widget.businessId,
+                          businessName: businessName,
+                        ),
+                      ],
+
+                      const SizedBox(height: LocalLinkSpacing.lg),
 
                       _BusinessTrustSection(
                         verified: verified,
@@ -482,39 +562,23 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                       // ABOUT
                       // =================================
                       if (bio.trim().isNotEmpty) ...[
-                        const SizedBox(height: 28),
+                        const SizedBox(height: LocalLinkSpacing.xl),
 
-                        const Text(
-                          'About',
+                        const LocalLinkSectionHeader(title: 'About'),
 
-                          style: TextStyle(
-                            fontSize: 24,
+                        const SizedBox(height: LocalLinkSpacing.sm),
 
-                            fontWeight: FontWeight.w800,
-
-                            color: AppColors.charcoal,
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        Text(
-                          bio,
-
-                          style: TextStyle(
-                            height: 1.6,
-
-                            fontSize: 15,
-
-                            color: Colors.grey.shade800,
-                          ),
+                        LocalLinkSurfaceCard(
+                          elevated: false,
+                          padding: const EdgeInsets.all(LocalLinkSpacing.md),
+                          child: Text(bio, style: LocalLinkTextStyles.body),
                         ),
                       ],
 
-                      if (photoURLs.length > 1) ...[
+                      if (galleryPhotoURLs.isNotEmpty) ...[
                         const SizedBox(height: 24),
 
-                        _PhotoGallery(photoURLs: photoURLs.skip(1).toList()),
+                        _PhotoGallery(photoURLs: galleryPhotoURLs),
                       ],
 
                       if (openingHours.trim().isNotEmpty ||
@@ -531,21 +595,14 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                       // =================================
                       // SERVICES HEADER
                       // =================================
-                      const SizedBox(height: 36),
+                      const SizedBox(height: LocalLinkSpacing.xxl),
 
-                      const Text(
-                        'Services',
-
-                        style: TextStyle(
-                          fontSize: 28,
-
-                          fontWeight: FontWeight.w800,
-
-                          color: AppColors.charcoal,
-                        ),
+                      const LocalLinkSectionHeader(
+                        title: 'Services',
+                        subtitle: 'Explore what this business offers.',
                       ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: LocalLinkSpacing.md),
 
                       // =================================
                       // SERVICES
@@ -559,29 +616,36 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                             .snapshots(),
 
                         builder: (context, snapshot) {
+                          if (snapshot.hasError) {
+                            return const Text(
+                              'We could not load services just now. You can use the contact details above if available.',
+                            );
+                          }
                           if (!snapshot.hasData) {
-                            return const Padding(
-                              padding: EdgeInsets.all(30),
-
-                              child: Center(child: CircularProgressIndicator()),
+                            return const LocalLinkLoadingState(
+                              label: 'Loading services',
                             );
                           }
 
                           final services = snapshot.data?.docs ?? [];
 
+                          if (!BusinessActivationPolicy.listingLive(
+                                businessData,
+                              ) ||
+                              !BusinessActivationPolicy.hasClaimedOwner(
+                                businessData,
+                              )) {
+                            return const Text(
+                              'Services and LocalLink enquiries are not available for this listing yet.',
+                            );
+                          }
+
                           if (services.isEmpty) {
-                            return Container(
-                              width: double.infinity,
-
-                              padding: const EdgeInsets.all(24),
-
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-
-                              child: const Text('No services available yet.'),
+                            return const LocalLinkEmptyState(
+                              icon: Icons.handyman_outlined,
+                              title: 'No services yet',
+                              message:
+                                  'This business has not listed services. Use the contact details above if available, or save this page for later.',
                             );
                           }
 
@@ -643,99 +707,37 @@ class _TrustBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LocalLinkSpacing.sm,
+        vertical: LocalLinkSpacing.xs,
+      ),
 
       decoration: BoxDecoration(
-        color: AppColors.serviceGreen.withValues(alpha: 0.08),
+        color: AppColors.serviceGreen.withValues(alpha: 0.09),
 
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
+        border: Border.all(
+          color: AppColors.serviceGreen.withValues(alpha: 0.12),
+        ),
       ),
 
       child: Row(
         mainAxisSize: MainAxisSize.min,
 
         children: [
-          Icon(icon, size: 18, color: AppColors.serviceGreen),
+          Icon(icon, size: 17, color: AppColors.serviceGreen),
 
-          const SizedBox(width: 7),
+          const SizedBox(width: LocalLinkSpacing.xxs),
 
           Text(
             label,
 
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-
+            style: LocalLinkTextStyles.label.copyWith(
               color: AppColors.charcoal,
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _PrimaryBusinessActions extends StatelessWidget {
-  const _PrimaryBusinessActions({
-    required this.businessId,
-    required this.businessName,
-    required this.category,
-    required this.onBook,
-    required this.onContact,
-  });
-
-  final String businessId;
-  final String businessName;
-  final String category;
-  final VoidCallback onBook;
-  final VoidCallback onContact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: onBook,
-            icon: const Icon(Icons.calendar_month_outlined),
-            label: const Text('Book Service'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.serviceGreen,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onContact,
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Contact Business'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.serviceGreen,
-                  side: const BorderSide(color: AppColors.serviceGreen),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            _FavoriteBusinessIconButton(
-              businessId: businessId,
-              businessName: businessName,
-              category: category,
-            ),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -782,9 +784,14 @@ class _BusinessTrustSection extends StatelessWidget {
           label: 'Usually replies $responseTime',
         ),
       if (paymentMethods.contains('stripe'))
-        const _TrustBadge(icon: Icons.credit_card, label: 'Card Payments'),
+        const _TrustBadge(icon: Icons.credit_card, label: 'Card & Apple Pay'),
       if (paymentMethods.contains('cash'))
         const _TrustBadge(icon: Icons.payments, label: 'Cash Accepted'),
+      if (paymentMethods.contains('bank_transfer'))
+        const _TrustBadge(
+          icon: Icons.account_balance_outlined,
+          label: 'Bank Transfer',
+        ),
       if (insuranceVerified)
         const _TrustBadge(
           icon: Icons.shield_outlined,
@@ -801,16 +808,13 @@ class _BusinessTrustSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Trust',
-          style: TextStyle(
-            color: AppColors.charcoal,
-            fontSize: 22,
-            fontWeight: FontWeight.w900,
-          ),
+        const LocalLinkSectionHeader(title: 'Trust'),
+        const SizedBox(height: LocalLinkSpacing.sm),
+        Wrap(
+          spacing: LocalLinkSpacing.xs,
+          runSpacing: LocalLinkSpacing.xs,
+          children: items,
         ),
-        const SizedBox(height: 12),
-        Wrap(spacing: 10, runSpacing: 10, children: items),
       ],
     );
   }
@@ -859,6 +863,10 @@ class _FavoriteBusinessIconButton extends StatelessWidget {
                   'category': category,
                   'savedAt': FieldValue.serverTimestamp(),
                 });
+                await LocalLinkAnalytics.instance.businessSaved(
+                  source: 'business_detail',
+                  category: category,
+                );
               }
             },
             icon: Icon(saved ? Icons.favorite : Icons.favorite_border),
@@ -886,34 +894,71 @@ class _PhotoGallery extends StatelessWidget {
         itemBuilder: (context, index) {
           return ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              photoURLs[index],
+            child: SizedBox(
               width: 124,
               height: 92,
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return Container(
-                  width: 124,
-                  height: 92,
-                  color: AppColors.serviceGreen.withValues(alpha: 0.08),
-                  child: const Center(child: CircularProgressIndicator()),
-                );
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  width: 124,
-                  height: 92,
-                  color: AppColors.serviceGreen.withValues(alpha: 0.10),
-                  child: const Icon(
-                    Icons.image_not_supported_outlined,
-                    color: AppColors.serviceGreen,
-                  ),
-                );
-              },
+              child: LocalLinkImage(
+                imageUrl: photoURLs[index],
+                aspectRatio: 124 / 92,
+                fallbackIcon: Icons.image_not_supported_outlined,
+                accentColor: AppColors.serviceGreen,
+                semanticLabel: 'Business photo',
+              ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _UnclaimedBusinessCard extends StatelessWidget {
+  const _UnclaimedBusinessCard({
+    required this.businessId,
+    required this.businessName,
+  });
+
+  final String businessId;
+  final String businessName;
+
+  @override
+  Widget build(BuildContext context) {
+    return LocalLinkSurfaceCard(
+      elevated: false,
+      color: AppColors.primary.withValues(alpha: 0.07),
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Unclaimed listing',
+            style: LocalLinkTextStyles.label.copyWith(color: AppColors.primary),
+          ),
+          const SizedBox(height: LocalLinkSpacing.xxs),
+          Text(
+            'This business has not yet claimed or verified its LocalLink page.',
+            style: LocalLinkTextStyles.secondary,
+          ),
+          const SizedBox(height: LocalLinkSpacing.sm),
+          LocalLinkButton(
+            label: 'Claim this business',
+            icon: Icons.verified_user_outlined,
+            variant: LocalLinkButtonVariant.secondary,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ListingClaimRequestScreen(
+                    listingType: 'business',
+                    listingId: businessId,
+                    listingTitle: businessName,
+                  ),
+                ),
+              );
+            },
+            expand: true,
+          ),
+        ],
       ),
     );
   }
@@ -932,14 +977,9 @@ class _BusinessInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
+    return LocalLinkSurfaceCard(
+      elevated: false,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
       child: Column(
         children: [
           if (openingHours.trim().isNotEmpty)
@@ -959,9 +999,7 @@ class _BusinessInfoCard extends StatelessWidget {
             label: 'Payment',
             value: paymentMethods.isEmpty
                 ? 'Ask business'
-                : paymentMethods
-                      .map((method) => method == 'stripe' ? 'Card' : 'Cash')
-                      .join(', '),
+                : paymentMethods.map(paymentMethodLabel).join(', '),
           ),
         ],
       ),
@@ -1044,8 +1082,9 @@ class _ServiceCard extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null || user.isAnonymous) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to ask a question.')),
+      await AuthRequiredAction.run(
+        context,
+        action: () => _askQuestion(context),
       );
       return;
     }
@@ -1074,6 +1113,10 @@ class _ServiceCard extends StatelessWidget {
             serviceId: serviceId,
             text: message,
           );
+      await LocalLinkAnalytics.instance.messageStarted(
+        source: 'business_detail',
+        type: 'service_enquiry',
+      );
 
       if (kDebugMode) {
         debugPrint(
@@ -1158,92 +1201,47 @@ class _ServiceCard extends StatelessWidget {
 
     final isOwnBusiness = _isCurrentUserBusinessOwner(businessData);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-
-      decoration: BoxDecoration(
-        color: Colors.white,
-
-        borderRadius: BorderRadius.circular(24),
-        border: highlighted
-            ? Border.all(color: AppColors.serviceGreen, width: 2)
-            : null,
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-
-            blurRadius: 12,
-
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-
-      child: Padding(
-        padding: const EdgeInsets.all(18),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: LocalLinkSpacing.md),
+      child: LocalLinkSurfaceCard(
+        elevated: highlighted,
+        color: highlighted
+            ? AppColors.serviceGreen.withValues(alpha: 0.06)
+            : AppColors.card,
+        padding: const EdgeInsets.all(LocalLinkSpacing.md),
 
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
 
           children: [
-            if (imageUrl.isNotEmpty) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: Image.network(
-                  imageUrl,
-                  height: 150,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return Container(
-                      height: 150,
-                      color: AppColors.serviceGreen.withValues(alpha: 0.08),
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                          color: AppColors.serviceGreen,
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      height: 150,
-                      color: AppColors.serviceGreen.withValues(alpha: 0.08),
-                      child: const Icon(
-                        Icons.handshake_outlined,
-                        color: AppColors.serviceGreen,
-                      ),
-                    );
-                  },
+            if (imageUrl.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: LocalLinkSpacing.sm),
+                child: LocalLinkImage(
+                  imageUrl: imageUrl,
+                  aspectRatio: 16 / 9,
+                  fallbackIcon: Icons.handyman_outlined,
+                  accentColor: AppColors.serviceGreen,
+                  semanticLabel: 'Service photo',
                 ),
               ),
-              const SizedBox(height: 14),
-            ],
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: Text(
                     name,
-
-                    style: const TextStyle(
-                      fontSize: 20,
-
-                      fontWeight: FontWeight.w800,
-                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: LocalLinkTextStyles.cardTitle.copyWith(fontSize: 20),
                   ),
                 ),
+                const SizedBox(width: LocalLinkSpacing.sm),
 
                 Text(
                   price,
-
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-
+                  style: LocalLinkTextStyles.bodyStrong.copyWith(
                     fontSize: 18,
-
                     color: AppColors.serviceGreen,
                   ),
                 ),
@@ -1251,34 +1249,41 @@ class _ServiceCard extends StatelessWidget {
             ),
 
             if (duration != null) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: LocalLinkSpacing.xs),
 
-              Text('$duration mins'),
+              _ServiceMeta(icon: Icons.timer_outlined, label: '$duration mins'),
             ],
 
             if (details.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: LocalLinkSpacing.sm),
 
               Text(
                 details,
-
-                style: TextStyle(height: 1.5, color: Colors.grey.shade700),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: LocalLinkTextStyles.body,
               ),
             ],
 
-            const SizedBox(height: 18),
+            const SizedBox(height: LocalLinkSpacing.md),
 
             StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _liveAvailabilityStream(),
               builder: (context, snapshot) {
-                final docs = snapshot.data?.docs ?? const [];
+                final docs = (snapshot.data?.docs ?? const [])
+                    .where(
+                      (doc) => isAvailabilityUsable(doc.data(), DateTime.now()),
+                    )
+                    .toList();
                 final availability = docs.isEmpty ? null : docs.first;
 
                 if (availability != null) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      ElevatedButton.icon(
+                      LocalLinkButton(
+                        label: 'Book available time',
+                        icon: Icons.event_available_outlined,
                         onPressed: () {
                           Navigator.push(
                             context,
@@ -1291,33 +1296,14 @@ class _ServiceCard extends StatelessWidget {
                             ),
                           );
                         },
-                        icon: const Icon(Icons.event_available_outlined),
-                        label: const Text('Book available time'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.serviceGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
+                        expand: true,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: LocalLinkSpacing.xs),
                       if (!isOwnBusiness)
                         _ServiceEnquiryButton.outlined(
                           onPressed: () => _askQuestion(context),
                           icon: const Icon(Icons.chat_bubble_outline),
-                          label: 'Ask a Question',
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.serviceGreen,
-                            side: const BorderSide(
-                              color: AppColors.serviceGreen,
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                          ),
+                          label: 'Ask a question',
                         ),
                     ],
                   );
@@ -1326,68 +1312,48 @@ class _ServiceCard extends StatelessWidget {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
+                    Text(
                       'No times currently listed.',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      style: LocalLinkTextStyles.metadata,
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: LocalLinkSpacing.xs),
                     if (!isOwnBusiness)
                       _ServiceEnquiryButton.filled(
                         onPressed: () => _askQuestion(context),
                         icon: const Icon(Icons.chat_bubble_outline),
                         label: 'Enquire with business',
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.serviceGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
                       ),
                   ],
                 );
               },
             ),
 
-            const SizedBox(height: 10),
+            const SizedBox(height: LocalLinkSpacing.xs),
 
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  try {
-                    await LocalLinkShareService().shareItem(
-                      item: LocalLinkShareItem(
-                        type: LocalLinkShareItemType.service,
-                        id: serviceId,
-                        parentId: businessId,
-                        data: {...serviceData, 'businessName': businessName},
-                      ),
-                    );
-                  } catch (_) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Sharing could not be started.'),
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.ios_share_outlined),
-                label: const Text('Share'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.serviceGreen,
-                  side: const BorderSide(color: AppColors.serviceGreen),
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-              ),
+            LocalLinkButton(
+              label: 'Share service',
+              icon: Icons.ios_share_outlined,
+              variant: LocalLinkButtonVariant.secondary,
+              onPressed: () async {
+                try {
+                  await LocalLinkShareService().shareItem(
+                    item: LocalLinkShareItem(
+                      type: LocalLinkShareItemType.service,
+                      id: serviceId,
+                      parentId: businessId,
+                      data: {...serviceData, 'businessName': businessName},
+                    ),
+                  );
+                } catch (_) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Sharing could not be started.'),
+                    ),
+                  );
+                }
+              },
+              expand: true,
             ),
           ],
         ),
@@ -1454,20 +1420,17 @@ class _ServiceEnquiryButton extends StatefulWidget {
     required this.onPressed,
     required this.icon,
     required this.label,
-    required this.style,
   }) : type = _ServiceEnquiryButtonType.filled;
 
   const _ServiceEnquiryButton.outlined({
     required this.onPressed,
     required this.icon,
     required this.label,
-    required this.style,
   }) : type = _ServiceEnquiryButtonType.outlined;
 
   final Future<void> Function() onPressed;
   final Widget icon;
   final String label;
-  final ButtonStyle style;
   final _ServiceEnquiryButtonType type;
 
   @override
@@ -1493,28 +1456,38 @@ class _ServiceEnquiryButtonState extends State<_ServiceEnquiryButton> {
 
   @override
   Widget build(BuildContext context) {
-    final icon = _isSending
-        ? const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
-        : widget.icon;
+    final iconData = widget.icon is Icon
+        ? (widget.icon as Icon).icon
+        : Icons.chat_bubble_outline;
 
-    if (widget.type == _ServiceEnquiryButtonType.outlined) {
-      return OutlinedButton.icon(
-        onPressed: _isSending ? null : _handlePressed,
-        icon: icon,
-        label: Text(widget.label),
-        style: widget.style,
-      );
-    }
-
-    return ElevatedButton.icon(
+    return LocalLinkButton(
+      label: widget.label,
+      icon: iconData,
+      isLoading: _isSending,
+      variant: widget.type == _ServiceEnquiryButtonType.outlined
+          ? LocalLinkButtonVariant.secondary
+          : LocalLinkButtonVariant.primary,
       onPressed: _isSending ? null : _handlePressed,
-      icon: icon,
-      label: Text(widget.label),
-      style: widget.style,
+      expand: true,
+    );
+  }
+}
+
+class _ServiceMeta extends StatelessWidget {
+  const _ServiceMeta({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: AppColors.serviceGreen),
+        const SizedBox(width: LocalLinkSpacing.xxs),
+        Text(label, style: LocalLinkTextStyles.metadata),
+      ],
     );
   }
 }

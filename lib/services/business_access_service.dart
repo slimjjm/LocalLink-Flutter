@@ -8,7 +8,7 @@ class BusinessAccessService {
   loadLinkedBusiness() async {
     final user = FirebaseAuth.instance.currentUser;
 
-    if (user == null) return null;
+    if (user == null || user.isAnonymous) return null;
 
     final firestore = FirebaseFirestore.instance;
     final directFields = [
@@ -16,7 +16,6 @@ class BusinessAccessService {
       'businessOwnerId',
       'ownerUid',
       'claimedBy',
-      'createdBy',
     ];
 
     for (final field in directFields) {
@@ -28,6 +27,18 @@ class BusinessAccessService {
 
       if (snapshot.docs.isNotEmpty) {
         return snapshot.docs.first;
+      }
+    }
+
+    final createdSnapshot = await firestore
+        .collection('businesses')
+        .where('createdBy', isEqualTo: user.uid)
+        .limit(5)
+        .get();
+
+    for (final doc in createdSnapshot.docs) {
+      if (_creatorCanManageBusiness(doc.data(), user.uid)) {
+        return doc;
       }
     }
 
@@ -48,21 +59,33 @@ class BusinessAccessService {
     }
   }
 
+  static Future<DocumentSnapshot<Map<String, dynamic>>?>
+  loadLinkedChallengeHostBusiness() async {
+    final snapshot = await loadLinkedBusiness();
+    final data = snapshot?.data();
+    if (snapshot == null || data == null) return null;
+
+    return canHostCommunityChallengeData(data) ? snapshot : null;
+  }
+
   static Future<bool> canPostForBusiness({
     required String businessId,
     required Map<String, dynamic> businessData,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
 
-    if (user == null) return false;
+    if (user == null || user.isAnonymous) return false;
 
     if (_valueMatchesUser(businessData['ownerId'], user.uid) ||
         _valueMatchesUser(businessData['businessOwnerId'], user.uid) ||
         _valueMatchesUser(businessData['ownerUid'], user.uid) ||
         _valueMatchesUser(businessData['claimedBy'], user.uid) ||
-        _valueMatchesUser(businessData['createdBy'], user.uid) ||
         _listContainsUser(businessData['ownerIds'], user.uid) ||
         _listContainsUser(businessData['adminUserIds'], user.uid)) {
+      return true;
+    }
+
+    if (_creatorCanManageBusiness(businessData, user.uid)) {
       return true;
     }
 
@@ -77,6 +100,25 @@ class BusinessAccessService {
     return staffDoc.exists && staffData?['isActive'] == true;
   }
 
+  static bool canHostCommunityChallengeData(Map<String, dynamic> businessData) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return false;
+
+    final claimed =
+        businessData['isClaimed'] == true ||
+        businessData['listingOwnershipStatus']?.toString() == 'claimed' ||
+        businessData['claimStatus']?.toString() == 'approved';
+    if (!claimed) return false;
+
+    return _valueMatchesUser(businessData['ownerId'], user.uid) ||
+        _valueMatchesUser(businessData['businessOwnerId'], user.uid) ||
+        _valueMatchesUser(businessData['ownerUid'], user.uid) ||
+        _valueMatchesUser(businessData['claimedBy'], user.uid) ||
+        _listContainsUser(businessData['ownerIds'], user.uid) ||
+        _listContainsUser(businessData['adminUserIds'], user.uid) ||
+        _creatorCanManageBusiness(businessData, user.uid);
+  }
+
   static bool _valueMatchesUser(Object? value, String uid) {
     return value?.toString() == uid;
   }
@@ -87,5 +129,18 @@ class BusinessAccessService {
     }
 
     return false;
+  }
+
+  static bool _creatorCanManageBusiness(Map<String, dynamic> data, String uid) {
+    if (!_valueMatchesUser(data['createdBy'], uid)) {
+      return false;
+    }
+
+    final isClaimed =
+        data['isClaimed'] == true ||
+        data['listingOwnershipStatus']?.toString() == 'claimed';
+    final moderatorSeeded = data['createdByModerator'] == true;
+
+    return !(moderatorSeeded && isClaimed);
   }
 }

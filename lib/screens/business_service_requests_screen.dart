@@ -4,11 +4,73 @@ import 'package:flutter/material.dart';
 import '../services/service_request_marketplace.dart';
 import '../theme/app_colors.dart';
 import '../utils/helpers.dart';
+import '../widgets/service_request_photos.dart';
 
-class BusinessServiceRequestsScreen extends StatelessWidget {
-  const BusinessServiceRequestsScreen({super.key, this.businessId});
+typedef BusinessCustomerRequestContextLoader =
+    Future<BusinessCustomerRequestContext> Function(String businessId);
+typedef BusinessCustomerRequestStreamFactory =
+    Stream<List<BusinessCustomerRequestItem>> Function();
+typedef BusinessCustomerRequestSettingUpdater =
+    Future<void> Function(String businessId, bool enabled);
+
+class BusinessServiceRequestsScreen extends StatefulWidget {
+  const BusinessServiceRequestsScreen({
+    super.key,
+    this.businessId,
+    this.contextLoader,
+    this.requestsStreamFactory,
+    this.settingUpdater,
+  });
 
   final String? businessId;
+  final BusinessCustomerRequestContextLoader? contextLoader;
+  final BusinessCustomerRequestStreamFactory? requestsStreamFactory;
+  final BusinessCustomerRequestSettingUpdater? settingUpdater;
+
+  @override
+  State<BusinessServiceRequestsScreen> createState() =>
+      _BusinessServiceRequestsScreenState();
+}
+
+class _BusinessServiceRequestsScreenState
+    extends State<BusinessServiceRequestsScreen> {
+  late Future<BusinessCustomerRequestContext> _contextFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _contextFuture = _loadContext();
+  }
+
+  @override
+  void didUpdateWidget(BusinessServiceRequestsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.contextLoader != widget.contextLoader) {
+      _contextFuture = _loadContext();
+    }
+  }
+
+  Future<BusinessCustomerRequestContext> _loadContext() {
+    final businessId = widget.businessId;
+    if (businessId == null || businessId.isEmpty) {
+      return Future.value(BusinessCustomerRequestContext.missing());
+    }
+    final loader = widget.contextLoader ?? _loadBusinessCustomerRequestContext;
+    return loader(businessId);
+  }
+
+  Future<void> _updateCustomerRequests(bool enabled) async {
+    final businessId = widget.businessId;
+    if (businessId == null || businessId.isEmpty) return;
+    final updater =
+        widget.settingUpdater ?? _updateBusinessCustomerRequestsSetting;
+    await updater(businessId, enabled);
+    if (!mounted) return;
+    setState(() {
+      _contextFuture = _loadContext();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,125 +82,198 @@ class BusinessServiceRequestsScreen extends StatelessWidget {
         foregroundColor: AppColors.charcoal,
         elevation: 0,
       ),
-      body: businessId == null || businessId!.isEmpty
+      body: widget.businessId == null || widget.businessId!.isEmpty
           ? const _MessageState(
               icon: Icons.storefront_outlined,
               title: 'Choose a business first',
               message: 'Requests are matched to your active business services.',
             )
-          : _MatchedRequestList(businessId: businessId!),
+          : _MatchedRequestList(
+              businessId: widget.businessId!,
+              contextFuture: _contextFuture,
+              requestsStreamFactory: widget.requestsStreamFactory,
+              onToggleChanged: _updateCustomerRequests,
+            ),
     );
   }
 }
 
-class _MatchedRequestList extends StatelessWidget {
-  const _MatchedRequestList({required this.businessId});
+class _MatchedRequestList extends StatefulWidget {
+  const _MatchedRequestList({
+    required this.businessId,
+    required this.contextFuture,
+    required this.onToggleChanged,
+    this.requestsStreamFactory,
+  });
 
   final String businessId;
+  final Future<BusinessCustomerRequestContext> contextFuture;
+  final BusinessCustomerRequestStreamFactory? requestsStreamFactory;
+  final Future<void> Function(bool enabled) onToggleChanged;
 
-  Future<_BusinessOfferContext> _loadContext() async {
-    final businessRef = FirebaseFirestore.instance
-        .collection('businesses')
-        .doc(businessId);
-    final businessSnap = await businessRef.get();
-    final serviceSnap = await businessRef
-        .collection('services')
-        .where('isActive', isEqualTo: true)
-        .get();
+  @override
+  State<_MatchedRequestList> createState() => _MatchedRequestListState();
+}
 
-    return _BusinessOfferContext(
-      business: businessSnap,
-      services: serviceSnap.docs,
-    );
+class _MatchedRequestListState extends State<_MatchedRequestList> {
+  bool _updatingSetting = false;
+  String? _settingError;
+
+  Future<void> _handleToggle(
+    BusinessCustomerRequestContext offerContext,
+    bool value,
+  ) async {
+    if (_updatingSetting) return;
+
+    setState(() {
+      _updatingSetting = true;
+      _settingError = null;
+    });
+
+    try {
+      await widget.onToggleChanged(value);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _settingError =
+            'Customer requests could not be updated. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updatingSetting = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_BusinessOfferContext>(
-      future: _loadContext(),
+    return FutureBuilder<BusinessCustomerRequestContext>(
+      future: widget.contextFuture,
       builder: (context, contextSnapshot) {
+        if (contextSnapshot.hasError) {
+          assert(() {
+            debugPrint(
+              'business customer request context failed: ${contextSnapshot.error}',
+            );
+            return true;
+          }());
+          return const _MessageState(
+            icon: Icons.error_outline_rounded,
+            title: 'Unable to load customer requests',
+            message: 'Please try again in a moment.',
+          );
+        }
+
         if (!contextSnapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final offerContext = contextSnapshot.data!;
-        if (!offerContext.business.exists ||
-            !ServiceRequestMarketplace.isBusinessEligible(
-              offerContext.business.data() ?? const {},
-            )) {
+        if (!offerContext.businessExists) {
           return const _MessageState(
-            icon: Icons.pause_circle_outline,
-            title: 'Leads are paused',
-            message:
-                'Turn on leads and keep your business active to see matching requests.',
+            icon: Icons.storefront_outlined,
+            title: 'Business unavailable',
+            message: 'We could not load this business right now.',
           );
         }
 
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: FirebaseFirestore.instance
-              .collection('serviceRequests')
-              .where('isActive', isEqualTo: true)
-              .where('status', isEqualTo: ServiceRequestMarketplace.statusOpen)
-              .orderBy('createdAt', descending: true)
-              .limit(50)
-              .snapshots(),
+        final requestsEnabled = offerContext.customerRequestsEnabled;
+        return StreamBuilder<List<BusinessCustomerRequestItem>>(
+          stream:
+              widget.requestsStreamFactory?.call() ??
+              _watchOpenCustomerRequests(),
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            if (requestsEnabled &&
+                snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            if (snapshot.hasError) {
-              assert(() {
-                debugPrint(
-                  'serviceRequests provider query failed: ${snapshot.error}',
-                );
-                return true;
-              }());
-              return const _MessageState(
-                icon: Icons.error_outline_rounded,
-                title: 'Unable to load requests',
-                message: 'Please try again in a moment.',
-              );
-            }
-
             final now = DateTime.now();
-            final docs = (snapshot.data?.docs ?? const [])
+            final matches = (snapshot.data ?? const [])
                 .map((doc) {
-                  final service = offerContext.matchingServiceFor(doc.data());
+                  final service = offerContext.matchingServiceFor(doc.data);
                   if (service == null) return null;
-                  return _MatchedRequest(doc: doc, service: service);
+                  return _MatchedRequest(item: doc, service: service);
                 })
                 .whereType<_MatchedRequest>()
                 .where(
                   (match) => ServiceRequestMarketplace.isOpenForDiscovery(
-                    match.doc.data(),
+                    match.item.data,
                     now: now,
                   ),
                 )
                 .toList();
 
-            if (docs.isEmpty) {
-              return const _MessageState(
-                icon: Icons.search_off_rounded,
-                title: 'No matching requests right now',
-                message:
-                    'Customer requests that match your active services will appear here.',
-              );
-            }
-
-            return ListView.separated(
+            return ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-              itemCount: docs.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final match = docs[index];
-                return _ProviderRequestCard(
-                  businessId: businessId,
-                  businessData: offerContext.business.data() ?? const {},
-                  request: match.doc,
-                  service: match.service,
-                );
-              },
+              children: [
+                _CustomerRequestsToggleCard(
+                  enabled: requestsEnabled,
+                  updating: _updatingSetting,
+                  errorText: _settingError,
+                  onChanged: (value) => _handleToggle(offerContext, value),
+                ),
+                const SizedBox(height: 18),
+                if (!requestsEnabled)
+                  const _InlineMessageState(
+                    icon: Icons.pause_circle_outline,
+                    title: 'Customer requests are paused',
+                    message:
+                        "Turn them back on whenever you'd like to see new requests from people nearby.",
+                  )
+                else if (!offerContext.isActive)
+                  const _InlineMessageState(
+                    icon: Icons.storefront_outlined,
+                    title: 'Business page is not live',
+                    message:
+                        'Customer requests will appear when your business page is active.',
+                  )
+                else if (!offerContext.hasBusinessLocation)
+                  const _InlineMessageState(
+                    icon: Icons.location_off_outlined,
+                    title: 'Business location needed',
+                    message:
+                        'Add an approximate business location so LocalLink can show nearby customer requests.',
+                  )
+                else if (snapshot.hasError)
+                  const _InlineMessageState(
+                    icon: Icons.error_outline_rounded,
+                    title: 'Unable to load requests',
+                    message: 'Please try again in a moment.',
+                  )
+                else ...[
+                  const Text(
+                    'Matching requests',
+                    style: TextStyle(
+                      color: AppColors.charcoal,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (matches.isEmpty)
+                    const _InlineMessageState(
+                      icon: Icons.search_off_rounded,
+                      title: 'No matching requests right now',
+                      message:
+                          "We'll show them here when someone nearby is looking for a service you offer.",
+                    )
+                  else
+                    ...matches.map(
+                      (match) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _ProviderRequestCard(
+                          businessId: widget.businessId,
+                          businessData: offerContext.businessData,
+                          request: match.item,
+                          service: match.service,
+                        ),
+                      ),
+                    ),
+                ],
+              ],
             );
           },
         );
@@ -157,11 +292,14 @@ class _ProviderRequestCard extends StatelessWidget {
 
   final String businessId;
   final Map<String, dynamic> businessData;
-  final QueryDocumentSnapshot<Map<String, dynamic>> request;
-  final QueryDocumentSnapshot<Map<String, dynamic>> service;
+  final BusinessCustomerRequestItem request;
+  final BusinessCustomerRequestService service;
 
   Future<void> _showOfferSheet(BuildContext context) async {
-    final existing = await request.reference
+    final requestRef = request.reference;
+    if (requestRef == null) return;
+
+    final existing = await requestRef
         .collection('offers')
         .doc(businessId)
         .get();
@@ -171,9 +309,13 @@ class _ProviderRequestCard extends StatelessWidget {
     final priceController = TextEditingController(
       text: safeText(data['priceText'], ''),
     );
+    final proposedScheduleController = TextEditingController(
+      text: safeText(data['proposedScheduleText'], ''),
+    );
     final messageController = TextEditingController(
       text: safeText(data['message'], ''),
     );
+    final imageUrls = ServiceRequestMarketplace.imageUrls(request.data);
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -190,57 +332,72 @@ class _ProviderRequestCard extends StatelessWidget {
             20,
             MediaQuery.of(context).viewInsets.bottom + 20,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Offer your service',
-                style: TextStyle(
-                  color: AppColors.charcoal,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Offer your service',
+                  style: TextStyle(
+                    color: AppColors.charcoal,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: priceController,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Price or rate (optional)',
-                  hintText: '£18/hour or quote after chat',
+                const SizedBox(height: 12),
+                if (imageUrls.isNotEmpty) ...[
+                  ServiceRequestPhotoStrip(imageUrls: imageUrls),
+                  const SizedBox(height: 14),
+                ],
+                TextField(
+                  controller: priceController,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Price or rate (optional)',
+                    hintText: '£18/hour or quote after chat',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: messageController,
-                minLines: 3,
-                maxLines: 5,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Short message (optional)',
-                  hintText: 'I cover Burntwood and can do Friday mornings.',
+                const SizedBox(height: 12),
+                TextField(
+                  controller: proposedScheduleController,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Proposed time (optional)',
+                    hintText: 'Friday morning or Tuesday at 2pm',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => Navigator.pop(context, 'save'),
-                icon: const Icon(Icons.handshake_outlined),
-                label: const Text('Send offer'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.serviceGreen,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(50),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: messageController,
+                  minLines: 3,
+                  maxLines: 5,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Short message (optional)',
+                    hintText: 'I cover Burntwood and can do Friday mornings.',
+                  ),
                 ),
-              ),
-              if (existing.exists &&
-                  data['status'] != ServiceRequestMarketplace.offerWithdrawn)
-                TextButton.icon(
-                  onPressed: () => Navigator.pop(context, 'withdraw'),
-                  icon: const Icon(Icons.undo_outlined),
-                  label: const Text('Withdraw offer'),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(context, 'save'),
+                  icon: const Icon(Icons.handshake_outlined),
+                  label: const Text('Send offer'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.serviceGreen,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(50),
+                  ),
                 ),
-            ],
+                if (existing.exists &&
+                    data['status'] != ServiceRequestMarketplace.offerWithdrawn)
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context, 'withdraw'),
+                    icon: const Icon(Icons.undo_outlined),
+                    label: const Text('Withdraw offer'),
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -257,8 +414,9 @@ class _ProviderRequestCard extends StatelessWidget {
             'Business',
           ),
           serviceId: service.id,
-          serviceName: safeText(service.data()['name'], 'Service'),
+          serviceName: safeText(service.data['name'], 'Service'),
           priceText: priceController.text,
+          proposedScheduleText: proposedScheduleController.text,
           message: messageController.text,
         );
       } else if (action == 'withdraw') {
@@ -274,18 +432,20 @@ class _ProviderRequestCard extends StatelessWidget {
       );
     } finally {
       priceController.dispose();
+      proposedScheduleController.dispose();
       messageController.dispose();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final data = request.data();
+    final data = request.data;
     final title = safeText(data['title'], 'Request for help');
     final details = safeText(data['description'] ?? data['details'], '');
     final location = ServiceRequestMarketplace.publicLocation(data);
     final schedule = safeText(data['scheduleText'] ?? data['neededBy'], '');
     final budget = safeText(data['budgetText'] ?? data['budget'], '');
+    final imageUrls = ServiceRequestMarketplace.imageUrls(data);
     final distance = ServiceRequestMarketplace.distanceMiles(
       data['approxLatitude'],
       data['approxLongitude'],
@@ -293,11 +453,13 @@ class _ProviderRequestCard extends StatelessWidget {
       businessData['longitude'],
     );
 
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: request.reference
-          .collection('offers')
-          .doc(businessId)
-          .snapshots(),
+    final offerStream = request.reference
+        ?.collection('offers')
+        .doc(businessId)
+        .snapshots();
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
+      stream: offerStream,
       builder: (context, snapshot) {
         final offer = snapshot.data?.data();
         final offerStatus = safeText(offer?['status'], '');
@@ -335,6 +497,10 @@ class _ProviderRequestCard extends StatelessWidget {
                         ? AppColors.serviceGreen
                         : AppColors.primary,
                   ),
+                  if (imageUrls.isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    ServiceRequestPhotoPreview(imageUrls: imageUrls),
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
@@ -401,22 +567,107 @@ class _ProviderRequestCard extends StatelessWidget {
   }
 }
 
-class _BusinessOfferContext {
-  const _BusinessOfferContext({required this.business, required this.services});
+Future<BusinessCustomerRequestContext> _loadBusinessCustomerRequestContext(
+  String businessId,
+) async {
+  final businessRef = FirebaseFirestore.instance
+      .collection('businesses')
+      .doc(businessId);
+  final businessSnap = await businessRef.get();
+  final serviceSnap = await businessRef
+      .collection('services')
+      .where('isActive', isEqualTo: true)
+      .get();
 
-  final DocumentSnapshot<Map<String, dynamic>> business;
-  final List<QueryDocumentSnapshot<Map<String, dynamic>>> services;
+  return BusinessCustomerRequestContext(
+    businessId: businessId,
+    businessExists: businessSnap.exists,
+    businessData: businessSnap.data() ?? const {},
+    services: serviceSnap.docs
+        .map(
+          (doc) => BusinessCustomerRequestService(id: doc.id, data: doc.data()),
+        )
+        .toList(),
+  );
+}
 
-  QueryDocumentSnapshot<Map<String, dynamic>>? matchingServiceFor(
+Stream<List<BusinessCustomerRequestItem>> _watchOpenCustomerRequests() {
+  return FirebaseFirestore.instance
+      .collection('serviceRequests')
+      .where('isActive', isEqualTo: true)
+      .where('status', isEqualTo: ServiceRequestMarketplace.statusOpen)
+      .orderBy('createdAt', descending: true)
+      .limit(50)
+      .snapshots()
+      .map(
+        (snapshot) => snapshot.docs
+            .map(
+              (doc) => BusinessCustomerRequestItem(
+                id: doc.id,
+                data: doc.data(),
+                reference: doc.reference,
+              ),
+            )
+            .toList(),
+      );
+}
+
+Future<void> _updateBusinessCustomerRequestsSetting(
+  String businessId,
+  bool enabled,
+) {
+  return FirebaseFirestore.instance
+      .collection('businesses')
+      .doc(businessId)
+      .set({
+        'acceptingLeads': enabled,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+}
+
+class BusinessCustomerRequestContext {
+  const BusinessCustomerRequestContext({
+    required this.businessId,
+    required this.businessExists,
+    required this.businessData,
+    required this.services,
+  });
+
+  factory BusinessCustomerRequestContext.missing() {
+    return const BusinessCustomerRequestContext(
+      businessId: '',
+      businessExists: false,
+      businessData: {},
+      services: [],
+    );
+  }
+
+  final String businessId;
+  final bool businessExists;
+  final Map<String, dynamic> businessData;
+  final List<BusinessCustomerRequestService> services;
+
+  bool get customerRequestsEnabled => businessData['acceptingLeads'] != false;
+
+  bool get isActive =>
+      businessData['isActive'] != false &&
+      businessData['status'] != 'inactive' &&
+      businessData['isClaimed'] == true;
+
+  bool get hasBusinessLocation => _hasUsableCoordinatePair(
+    businessData['latitude'],
+    businessData['longitude'],
+  );
+
+  BusinessCustomerRequestService? matchingServiceFor(
     Map<String, dynamic> request,
   ) {
-    final businessData = business.data() ?? const {};
     for (final service in services) {
       if (ServiceRequestMarketplace.canCreateOffer(
         request: request,
         business: businessData,
-        service: service.data(),
-        businessId: business.id,
+        service: service.data,
+        businessId: businessId,
         customerBusinessId: request['customerBusinessId']?.toString(),
         now: DateTime.now(),
       )) {
@@ -427,11 +678,113 @@ class _BusinessOfferContext {
   }
 }
 
-class _MatchedRequest {
-  const _MatchedRequest({required this.doc, required this.service});
+bool _hasUsableCoordinatePair(Object? latitude, Object? longitude) {
+  final lat = latitude is num ? latitude.toDouble() : null;
+  final lng = longitude is num ? longitude.toDouble() : null;
+  if (lat == null || lng == null) return false;
+  if (!lat.isFinite || !lng.isFinite) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(lat.abs() < 0.000001 && lng.abs() < 0.000001);
+}
 
-  final QueryDocumentSnapshot<Map<String, dynamic>> doc;
-  final QueryDocumentSnapshot<Map<String, dynamic>> service;
+class BusinessCustomerRequestService {
+  const BusinessCustomerRequestService({required this.id, required this.data});
+
+  final String id;
+  final Map<String, dynamic> data;
+}
+
+class BusinessCustomerRequestItem {
+  const BusinessCustomerRequestItem({
+    required this.id,
+    required this.data,
+    this.reference,
+  });
+
+  final String id;
+  final Map<String, dynamic> data;
+  final DocumentReference<Map<String, dynamic>>? reference;
+}
+
+class _MatchedRequest {
+  const _MatchedRequest({required this.item, required this.service});
+
+  final BusinessCustomerRequestItem item;
+  final BusinessCustomerRequestService service;
+}
+
+class _CustomerRequestsToggleCard extends StatelessWidget {
+  const _CustomerRequestsToggleCard({
+    required this.enabled,
+    required this.updating,
+    required this.onChanged,
+    this.errorText,
+  });
+
+  final bool enabled;
+  final bool updating;
+  final ValueChanged<bool> onChanged;
+  final String? errorText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Customer requests',
+                  style: TextStyle(
+                    color: AppColors.charcoal,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (updating)
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.4),
+                )
+              else
+                Switch.adaptive(value: enabled, onChanged: onChanged),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            enabled
+                ? 'Show me relevant requests from people nearby.'
+                : 'Turn this on to see relevant requests from people nearby.',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (errorText != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              errorText!,
+              style: const TextStyle(
+                color: AppColors.error,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _StatusPill extends StatelessWidget {
@@ -455,6 +808,55 @@ class _StatusPill extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w900,
         ),
+      ),
+    );
+  }
+}
+
+class _InlineMessageState extends StatelessWidget {
+  const _InlineMessageState({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 30, color: AppColors.textMuted),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.charcoal,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

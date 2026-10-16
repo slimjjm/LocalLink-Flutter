@@ -7,6 +7,10 @@ const {
 
 const { getMessaging } =
   require("firebase-admin/messaging");
+const {
+  getPushTargets,
+  removeInvalidPushTargets,
+} = require("./device_tokens");
 
 const db = admin.firestore();
 
@@ -18,6 +22,7 @@ const NOTIFICATION_PREFERENCE_DEFAULTS = {
   activityUpdates: true,
   serviceBookingUpdates: true,
   reminders: true,
+  businessSetupReminders: true,
   localDiscovery: false,
   // Legacy key kept for older preference documents. New Community Help alert
   // pushes use nearbyCommunityAlerts.
@@ -38,6 +43,7 @@ async function userAllowsPush(userRef, preferenceKey) {
   const value = prefSnap.data()?.[preferenceKey];
   return typeof value === "boolean" ? value : fallback;
 }
+exports.userAllowsPush = userAllowsPush;
 
 // =================================================
 // PUSH HELPER
@@ -78,14 +84,11 @@ async function sendPushToUser(
     return;
   }
 
-  const rawTokens =
-    snap.data()?.fcmTokens || [];
-
-  const tokens = [
-    ...new Set(
-      rawTokens.filter(Boolean)
-    ),
-  ];
+  // Phase A compatibility: private device records are authoritative, while
+  // legacy public-profile tokens remain a server-only fallback until the
+  // copy/verify/cleanup migration has completed.
+  const targets = await getPushTargets(userRef, { includeLegacy: true });
+  const tokens = targets.map((target) => target.token);
 
   if (!tokens.length) {
     console.log(
@@ -174,7 +177,7 @@ async function sendPushToUser(
     }
   );
 
-  const badTokens = [];
+  const badTargets = [];
 
   response.responses.forEach(
     (resp, idx) => {
@@ -192,21 +195,14 @@ async function sendPushToUser(
           code ===
             "messaging/invalid-registration-token"
         ) {
-          badTokens.push(
-            token
-          );
+          badTargets.push(targets[idx]);
         }
       }
     }
   );
 
-  if (badTokens.length) {
-    await userRef.update({
-      fcmTokens:
-        admin.firestore.FieldValue.arrayRemove(
-          ...badTokens
-        ),
-    });
+  if (badTargets.length) {
+    await removeInvalidPushTargets({ admin, userRef, targets: badTargets });
   }
 }
 exports.sendPushToUser =

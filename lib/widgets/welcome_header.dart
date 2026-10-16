@@ -8,7 +8,9 @@ import '../screens/notifications_screen.dart';
 import 'header_icon_button.dart';
 
 class WelcomeHeader extends StatelessWidget {
-  const WelcomeHeader({super.key});
+  const WelcomeHeader({super.key, this.locality});
+
+  final String? locality;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -21,6 +23,13 @@ class WelcomeHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName?.trim() ?? '';
+    final firstName = displayName.isEmpty
+        ? ''
+        : displayName.split(RegExp(r'\s+')).first;
+    final greeting = firstName.isEmpty
+        ? _greeting()
+        : '${_greeting()}, $firstName';
 
     if (user == null) {
       return Row(
@@ -35,17 +44,7 @@ class WelcomeHeader extends StatelessWidget {
           ),
           const SizedBox(width: 13),
           Expanded(
-            child: Text(
-              _greeting(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 26,
-                height: 1.05,
-                fontWeight: FontWeight.w900,
-                color: AppColors.charcoal,
-              ),
-            ),
+            child: _GreetingCopy(greeting: greeting, locality: locality),
           ),
         ],
       );
@@ -72,17 +71,7 @@ class WelcomeHeader extends StatelessWidget {
         ),
         const SizedBox(width: 13),
         Expanded(
-          child: Text(
-            _greeting(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 26,
-              height: 1.05,
-              fontWeight: FontWeight.w900,
-              color: AppColors.charcoal,
-            ),
-          ),
+          child: _GreetingCopy(greeting: greeting, locality: locality),
         ),
         const SizedBox(width: 12),
         StreamBuilder<QuerySnapshot>(
@@ -120,6 +109,53 @@ class WelcomeHeader extends StatelessWidget {
               ],
             );
           },
+        ),
+      ],
+    );
+  }
+}
+
+String homeLocationSubtitle(String? locality) {
+  final place = locality?.trim() ?? '';
+  return place.isEmpty
+      ? 'Here’s what’s happening nearby.'
+      : 'Here’s what’s happening around $place.';
+}
+
+class _GreetingCopy extends StatelessWidget {
+  const _GreetingCopy({required this.greeting, required this.locality});
+
+  final String greeting;
+  final String? locality;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          greeting,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 24,
+            height: 1.05,
+            fontWeight: FontWeight.w900,
+            color: AppColors.charcoal,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          homeLocationSubtitle(locality),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 14,
+            height: 1.25,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textMuted,
+          ),
         ),
       ],
     );

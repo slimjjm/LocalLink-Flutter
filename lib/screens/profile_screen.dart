@@ -44,6 +44,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isBlocked = false;
   bool loadingBlock = true;
 
+  bool _isTemporaryFirestoreFailure(Object error) {
+    return error is FirebaseException &&
+        error.plugin == 'cloud_firestore' &&
+        (error.code == 'unavailable' ||
+            error.code == 'deadline-exceeded' ||
+            error.code == 'network-request-failed');
+  }
+
+  void _finishFollowLoading({bool? following}) {
+    if (!mounted) return;
+
+    setState(() {
+      if (following != null) {
+        isFollowing = following;
+      }
+      loadingFollow = false;
+    });
+  }
+
+  void _finishBlockLoading({bool? blocked}) {
+    if (!mounted) return;
+
+    setState(() {
+      if (blocked != null) {
+        isBlocked = blocked;
+      }
+      loadingBlock = false;
+    });
+  }
+
   Future<void> _changePhoto() async {
     final picker = ImagePicker();
 
@@ -98,47 +128,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final currentUser = FirebaseAuth.instance.currentUser;
 
     if (currentUser == null) {
+      _finishFollowLoading(following: false);
       return;
     }
 
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUser.uid)
-        .collection('following')
-        .doc(widget.userId)
-        .get();
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .collection('following')
+          .doc(widget.userId)
+          .get();
 
-    if (!mounted) return;
-
-    setState(() {
-      isFollowing = doc.exists;
-      loadingFollow = false;
-    });
+      _finishFollowLoading(following: doc.exists);
+    } on FirebaseException catch (error) {
+      if (!_isTemporaryFirestoreFailure(error)) {
+        debugPrint('Profile follow status lookup failed: ${error.code}');
+      }
+      _finishFollowLoading(following: false);
+    } catch (error) {
+      debugPrint('Profile follow status lookup failed: $error');
+      _finishFollowLoading(following: false);
+    }
   }
 
   Future<void> loadBlockStatus() async {
     final currentUser = FirebaseAuth.instance.currentUser;
 
     if (currentUser == null || currentUser.uid == widget.userId) {
-      if (mounted) {
-        setState(() {
-          loadingBlock = false;
-        });
-      }
+      _finishBlockLoading(blocked: false);
       return;
     }
 
-    final blocked = await trustSafetyService.isBlocked(
-      currentUserId: currentUser.uid,
-      blockedUserId: widget.userId,
-    );
+    try {
+      final blocked = await trustSafetyService.isBlocked(
+        currentUserId: currentUser.uid,
+        blockedUserId: widget.userId,
+      );
 
-    if (!mounted) return;
-
-    setState(() {
-      isBlocked = blocked;
-      loadingBlock = false;
-    });
+      _finishBlockLoading(blocked: blocked);
+    } on FirebaseException catch (error) {
+      if (!_isTemporaryFirestoreFailure(error)) {
+        debugPrint('Profile block status lookup failed: ${error.code}');
+      }
+      _finishBlockLoading(blocked: false);
+    } catch (error) {
+      debugPrint('Profile block status lookup failed: $error');
+      _finishBlockLoading(blocked: false);
+    }
   }
 
   Future<void> _reportProfile() async {
@@ -266,12 +303,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           FirebaseFirestore.instance
               .collection('opportunities')
               .where('createdBy', isEqualTo: widget.userId)
+              .where('discoveryVisibility', isEqualTo: 'public')
               .get(),
 
-          FirebaseFirestore.instance
-              .collectionGroup('attendees')
-              .where('userId', isEqualTo: widget.userId)
-              .get(),
+          FirebaseAuth.instance.currentUser?.uid == widget.userId
+              ? FirebaseFirestore.instance
+                    .collectionGroup('attendees')
+                    .where('userId', isEqualTo: widget.userId)
+                    .get()
+                    .then((snapshot) => snapshot.docs.length)
+              : Future<int>.value(0),
 
           FirebaseFirestore.instance
               .collection('users')
@@ -309,7 +350,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           final created = (snapshot.data![0] as QuerySnapshot).docs.length;
 
-          final attended = (snapshot.data![1] as QuerySnapshot).docs.length;
+          final attended = snapshot.data![1] as int;
 
           final createdDocs = (snapshot.data![0] as QuerySnapshot).docs;
 
@@ -462,7 +503,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             'bio': bioController.text.trim(),
                           }, SetOptions(merge: true));
 
-                      if (!mounted) return;
+                      if (!context.mounted) return;
 
                       setState(() {});
 
@@ -527,35 +568,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             loadingFollow = true;
                           });
 
-                          if (isFollowing) {
-                            await followService.unfollowUser(
-                              currentUserId: currentUser.uid,
-                              targetUserId: widget.userId,
-                            );
-                          } else {
-                            final currentUserDoc = await FirebaseFirestore
-                                .instance
-                                .collection('users')
-                                .doc(currentUser.uid)
-                                .get();
+                          try {
+                            if (isFollowing) {
+                              await followService.unfollowUser(
+                                currentUserId: currentUser.uid,
+                                targetUserId: widget.userId,
+                              );
+                            } else {
+                              final currentUserDoc = await FirebaseFirestore
+                                  .instance
+                                  .collection('users')
+                                  .doc(currentUser.uid)
+                                  .get();
 
-                            final currentUserData = currentUserDoc.data() ?? {};
+                              final currentUserData =
+                                  currentUserDoc.data() ?? {};
 
-                            await followService.followUser(
-                              currentUserId: currentUser.uid,
-                              currentUserName:
-                                  currentUserData['userName']?.toString() ??
-                                  currentUserData['name']?.toString() ??
-                                  currentUser.displayName ??
-                                  'User',
-                              currentPhotoUrl: currentUserData['photoUrl']
-                                  ?.toString(),
-                              targetUserId: widget.userId,
-                              targetUserName: widget.userName,
-                              targetPhotoUrl: widget.photoUrl,
-                            );
+                              await followService.followUser(
+                                currentUserId: currentUser.uid,
+                                currentUserName:
+                                    currentUserData['userName']?.toString() ??
+                                    currentUserData['name']?.toString() ??
+                                    currentUser.displayName ??
+                                    'User',
+                                currentPhotoUrl: currentUserData['photoUrl']
+                                    ?.toString(),
+                                targetUserId: widget.userId,
+                                targetUserName: widget.userName,
+                                targetPhotoUrl: widget.photoUrl,
+                              );
+                            }
+                            await loadFollowStatus();
+                          } on FirebaseException catch (error) {
+                            if (!_isTemporaryFirestoreFailure(error)) {
+                              debugPrint(
+                                'Profile follow action failed: ${error.code}',
+                              );
+                            }
+                            _finishFollowLoading(following: isFollowing);
+                          } catch (error) {
+                            debugPrint('Profile follow action failed: $error');
+                            _finishFollowLoading(following: isFollowing);
                           }
-                          await loadFollowStatus();
                         },
                       ),
                     );
@@ -613,7 +667,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           child: Column(
                             children: [
                               Text(
-                                attended.toString(),
+                                FirebaseAuth.instance.currentUser?.uid ==
+                                        widget.userId
+                                    ? attended.toString()
+                                    : 'Private',
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.bold,
@@ -726,7 +783,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: ListTile(
                     leading: const Icon(Icons.check_circle),
                     title: const Text('Opportunities Attended'),
-                    trailing: Text(attended.toString()),
+                    trailing: Text(
+                      FirebaseAuth.instance.currentUser?.uid == widget.userId
+                          ? attended.toString()
+                          : 'Private',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),

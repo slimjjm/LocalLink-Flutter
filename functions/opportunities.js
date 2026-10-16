@@ -4,7 +4,65 @@ const {
   onSchedule,
 } = require("firebase-functions/v2/scheduler");
 
-const db = admin.firestore();
+function timestampMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date ? date.getTime() : null;
+  }
+  if (value instanceof Date) return value.getTime();
+  return null;
+}
+
+function isCommunityChallenge(data) {
+  return data?.activityKind === "community_challenge";
+}
+
+function isLondonMidnight(value) {
+  const millis = timestampMillis(value);
+  if (!millis) return false;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(millis));
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+  return values.hour === "00" &&
+    values.minute === "00" &&
+    values.second === "00";
+}
+
+function opportunityExpiresMillis(data) {
+  if (isCommunityChallenge(data)) {
+    const closesAt = timestampMillis(data.challengeClosesAt);
+    if (closesAt) return closesAt;
+  }
+
+  const eventMillis = timestampMillis(data?.eventDate);
+  if (!eventMillis) return null;
+
+  if (isLondonMidnight(data.eventDate)) {
+    const nextDay = new Date(eventMillis);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    return nextDay.getTime();
+  }
+
+  return eventMillis;
+}
+
+function shouldExpireOpportunity(data, now = new Date()) {
+  if (!data || data.isActive !== true) return false;
+
+  const expiresAt = opportunityExpiresMillis(data);
+  if (!expiresAt) return false;
+
+  return expiresAt <= now.getTime();
+}
 
 exports.expireOldOpportunities =
   onSchedule(
@@ -13,6 +71,7 @@ exports.expireOldOpportunities =
       region: "us-central1",
     },
     async () => {
+      const db = admin.firestore();
 
       const snapshot =
         await db
@@ -37,15 +96,7 @@ exports.expireOldOpportunities =
           const data =
             doc.data();
 
-          const eventDate =
-            data.eventDate;
-
-          if (!eventDate) return;
-
-          const date =
-            eventDate.toDate();
-
-          if (date < now) {
+          if (shouldExpireOpportunity(data, now)) {
 
             batch.update(
               doc.ref,
@@ -68,3 +119,9 @@ exports.expireOldOpportunities =
       );
     }
   );
+
+exports._test = {
+  opportunityExpiresMillis,
+  shouldExpireOpportunity,
+  timestampMillis,
+};

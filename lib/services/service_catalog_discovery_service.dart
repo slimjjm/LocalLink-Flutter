@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import 'business_discovery_service.dart';
 import 'local_discovery_filters.dart';
 
 class ServiceCatalogItem {
@@ -28,7 +29,6 @@ class ServiceCatalogDiscoveryService {
     return db
         .collection('businesses')
         .where('isActive', isEqualTo: true)
-        .where('isClaimed', isEqualTo: true)
         .snapshots()
         .asyncMap(_loadServicesForBusinesses);
   }
@@ -40,7 +40,6 @@ class ServiceCatalogDiscoveryService {
     final businesses = await db
         .collection('businesses')
         .where('isActive', isEqualTo: true)
-        .where('isClaimed', isEqualTo: true)
         .get();
 
     return _loadServicesForBusinesses(businesses);
@@ -48,14 +47,7 @@ class ServiceCatalogDiscoveryService {
 
   @visibleForTesting
   static bool isBusinessDiscoverable(Map<String, dynamic> data) {
-    final businessIsActive = data['isActive'] != false;
-    final businessIsClaimed = data['isClaimed'] == true;
-    final paymentMethods = data['paymentMethods'];
-    final canTakeBookings =
-        data['chargesEnabled'] == true ||
-        (paymentMethods is List && paymentMethods.isNotEmpty);
-
-    return businessIsActive && businessIsClaimed && canTakeBookings;
+    return BusinessDiscoveryService.isPubliclyDiscoverable(data);
   }
 
   @visibleForTesting

@@ -79,11 +79,16 @@ class SceneDelegate: FlutterSceneDelegate {
       || path.hasPrefix("/availability/")
       || path.hasPrefix("/businesses/")
       || path.hasPrefix("/services/")
+      || path.hasPrefix("/service-requests/")
+      || path.hasPrefix("/invitations/organisation/")
+      || path == "/stripe-return"
+      || path == "/stripe-refresh"
   }
 
   private func isSupportedLocalLinkScheme(_ host: String?) -> Bool {
     switch host?.lowercased() {
-    case "community-help", "opportunity", "availability", "business":
+    case "community-help", "opportunity", "availability", "business",
+      "service-request", "organisation-invitation":
       return true
     default:
       return false

@@ -1,18 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/address_result.dart';
+import '../constants/business_categories.dart';
+import '../models/business_opening_hours.dart';
+import '../services/analytics_service.dart';
 import '../services/address_search_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/business_opening_hours_editor.dart';
 import 'business_home_screen.dart';
+
+const List<String> kBusinessOnboardingDefaultPaymentMethods = [];
+const bool kBusinessOnboardingDefaultStripeRequested = false;
 
 class BusinessOnboardingScreen extends StatefulWidget {
   final bool isAssisted;
+  final String initialCategory;
 
-  const BusinessOnboardingScreen({super.key, this.isAssisted = false});
+  const BusinessOnboardingScreen({
+    super.key,
+    this.isAssisted = false,
+    this.initialCategory = '',
+  });
 
   @override
   State<BusinessOnboardingScreen> createState() =>
@@ -27,6 +38,9 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
   final businessNameController = TextEditingController();
 
   final claimEmailController = TextEditingController();
+  final contactNameController = TextEditingController();
+  final contactEmailController = TextEditingController();
+  final contactPhoneController = TextEditingController();
 
   final addressController = TextEditingController();
   final addressService = AddressSearchService();
@@ -38,9 +52,24 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
   double? selectedLongitude;
 
   @override
+  void initState() {
+    super.initState();
+    final initialCategory = BusinessCategories.normalise(
+      widget.initialCategory,
+    );
+    if (BusinessCategories.isCanonical(initialCategory)) {
+      selectedCategory = initialCategory;
+    }
+    _prefillContactDetails();
+  }
+
+  @override
   void dispose() {
     businessNameController.dispose();
     claimEmailController.dispose();
+    contactNameController.dispose();
+    contactEmailController.dispose();
+    contactPhoneController.dispose();
     addressController.dispose();
     super.dispose();
   }
@@ -51,25 +80,11 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
   String? selectedCategory;
 
-  final categories = [
-    'Cleaner',
-    'Dog Walker',
-    'Hair Salon',
-    'Barber',
-    'Dog Groomer',
-    'Gardener',
-    'Nails',
-    'Personal Trainer',
-    'Mobile Valeting',
-    'Massage',
-  ];
-
   String serviceMode = 'premises';
 
   double serviceRadiusMiles = 10;
 
-  bool acceptsCash = true;
-  bool acceptsStripe = false;
+  Map<String, dynamic> openingHours = BusinessOpeningHours.defaultStructured();
 
   bool isSaving = false;
 
@@ -85,18 +100,63 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
         selectedCategory != null;
   }
 
-  List<String> get selectedPaymentMethods {
-    final methods = <String>[];
+  Future<void> _prefillContactDetails() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
 
-    if (acceptsCash) {
-      methods.add('cash');
+    Map<String, dynamic> profile = const {};
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      profile = snapshot.data() ?? const {};
+    } catch (_) {
+      profile = const {};
     }
 
-    if (acceptsStripe) {
-      methods.add('stripe');
-    }
+    if (!mounted) return;
 
-    return methods;
+    final name = _firstText([
+      profile['businessContactName'],
+      profile['displayName'],
+      profile['name'],
+      profile['userName'],
+      user.displayName,
+    ]);
+    final email = _firstText([
+      profile['businessEmail'],
+      profile['email'],
+      user.email,
+    ]);
+    final phone = _firstText([
+      profile['businessPhone'],
+      profile['phone'],
+      profile['phoneNumber'],
+    ]);
+
+    setState(() {
+      if (contactNameController.text.trim().isEmpty) {
+        contactNameController.text = name;
+      }
+      if (contactEmailController.text.trim().isEmpty) {
+        contactEmailController.text = email;
+      }
+      if (contactPhoneController.text.trim().isEmpty) {
+        contactPhoneController.text = phone;
+      }
+      if (widget.isAssisted && claimEmailController.text.trim().isEmpty) {
+        claimEmailController.text = email;
+      }
+    });
+  }
+
+  String _firstText(Iterable<Object?> values) {
+    for (final value in values) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isNotEmpty) return text;
+    }
+    return '';
   }
 
   Future<void> searchAddresses(String value) async {
@@ -164,13 +224,6 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
   Future<void> createBusiness() async {
     if (!formIsValid) return;
 
-    if (selectedPaymentMethods.isEmpty) {
-      setState(() {
-        bannerMessage = 'Choose at least one way customers can pay.';
-      });
-      return;
-    }
-
     final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
@@ -185,6 +238,16 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
       isSaving = true;
       bannerMessage = null;
     });
+    final creationAnalytics = <String, Object>{
+      'source': widget.isAssisted ? 'assisted' : 'self_service',
+    };
+    if (selectedCategory case final category?) {
+      creationAnalytics['category'] = category;
+    }
+    await LocalLinkAnalytics.instance.logEvent(
+      'business_creation_started',
+      creationAnalytics,
+    );
 
     try {
       final userRef = FirebaseFirestore.instance
@@ -194,8 +257,6 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
       final batch = FirebaseFirestore.instance.batch();
       final docRef = FirebaseFirestore.instance.collection('businesses').doc();
-
-      final claimCode = generateClaimCode();
 
       final data = {
         'businessName': businessNameController.text.trim(),
@@ -208,26 +269,27 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
         'category': selectedCategory,
 
+        'openingHoursStructured': openingHours,
+
+        'openingHours': BusinessOpeningHours.summary(openingHours),
+
         'createdBy': user.uid,
 
         'ownerId': widget.isAssisted ? '' : user.uid,
 
-        'claimEmail': widget.isAssisted
-            ? claimEmailController.text.trim()
-            : null,
-
         'isClaimed': !widget.isAssisted,
-
-        'claimCode': claimCode,
 
         'isActive': true,
 
         'acceptingLeads': true,
+        'contactName': contactNameController.text.trim(),
+        'email': contactEmailController.text.trim(),
+        'phone': contactPhoneController.text.trim(),
 
         'createdAt': FieldValue.serverTimestamp(),
 
-        'paymentMethods': selectedPaymentMethods,
-        'stripeRequested': acceptsStripe,
+        'paymentMethods': kBusinessOnboardingDefaultPaymentMethods,
+        'stripeRequested': kBusinessOnboardingDefaultStripeRequested,
 
         'stripeConnected': false,
 
@@ -262,9 +324,13 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
       final staffRef = docRef.collection('staff').doc(user.uid);
       final staffData = {
-        'name': 'Owner',
+        'name': contactNameController.text.trim().isNotEmpty
+            ? contactNameController.text.trim()
+            : 'Owner',
 
-        'email': user.email,
+        'email': contactEmailController.text.trim().isNotEmpty
+            ? contactEmailController.text.trim()
+            : user.email,
 
         'isActive': true,
 
@@ -280,6 +346,24 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
       batch.set(staffRef, staffData);
       await batch.commit();
+      if (widget.isAssisted) {
+        await FirebaseFunctions.instanceFor(
+          region: 'us-central1',
+        ).httpsCallable('registerBusinessClaim').call(<String, dynamic>{
+          'businessId': docRef.id,
+          'claimEmail': claimEmailController.text.trim(),
+        });
+      }
+      final completionAnalytics = <String, Object>{
+        'source': widget.isAssisted ? 'assisted' : 'self_service',
+      };
+      if (selectedCategory case final category?) {
+        completionAnalytics['category'] = category;
+      }
+      await LocalLinkAnalytics.instance.logEvent(
+        'business_creation_completed',
+        completionAnalytics,
+      );
 
       assert(() {
         debugPrint('CREATE BUSINESS write succeeded path=${docRef.path}');
@@ -288,11 +372,6 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
       }());
 
       if (!mounted) return;
-
-      if (acceptsStripe && !widget.isAssisted) {
-        await _startStripeOnboarding(docRef.id);
-        if (!mounted) return;
-      }
 
       Navigator.pushReplacement(
         context,
@@ -330,48 +409,6 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
       setState(() {
         isSaving = false;
       });
-    }
-  }
-
-  Future<void> _startStripeOnboarding(String businessId) async {
-    try {
-      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
-      await functions.httpsCallable('createConnectedAccount').call({
-        'businessId': businessId,
-      });
-      final linkResult = await functions
-          .httpsCallable('createAccountLink')
-          .call({'businessId': businessId});
-      final linkData = Map<String, dynamic>.from(linkResult.data as Map);
-      final url = linkData['url']?.toString();
-
-      if (url == null || url.isEmpty) {
-        throw Exception('Stripe onboarding link was empty.');
-      }
-
-      final opened = await launchUrl(
-        Uri.parse(url),
-        mode: LaunchMode.externalApplication,
-      );
-
-      if (!opened) {
-        throw Exception('Stripe onboarding link could not be opened.');
-      }
-    } catch (error) {
-      assert(() {
-        debugPrint('Stripe onboarding start failed: $error');
-        return true;
-      }());
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Business saved. You can finish card payment setup from Page details.',
-          ),
-        ),
-      );
     }
   }
 
@@ -501,7 +538,7 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
                     const SizedBox(height: 10),
 
                     const Text(
-                      'Start taking bookings, appear in nearby searches, and grow your customer base.',
+                      'Create a free local listing, appear in nearby searches, and start receiving customer enquiries.',
 
                       style: TextStyle(
                         color: Colors.white,
@@ -526,6 +563,30 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
                 controller: businessNameController,
                 hint: 'Business Name',
                 icon: Icons.storefront_outlined,
+              ),
+
+              const SizedBox(height: 16),
+
+              _ModernField(
+                controller: contactNameController,
+                hint: 'Contact Name',
+                icon: Icons.person_outline,
+              ),
+
+              const SizedBox(height: 16),
+
+              _ModernField(
+                controller: contactEmailController,
+                hint: 'Contact Email',
+                icon: Icons.email_outlined,
+              ),
+
+              const SizedBox(height: 16),
+
+              _ModernField(
+                controller: contactPhoneController,
+                hint: 'Contact Phone (optional)',
+                icon: Icons.phone_outlined,
               ),
 
               const SizedBox(height: 16),
@@ -602,7 +663,7 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
                 spacing: 10,
                 runSpacing: 10,
 
-                children: categories.map((category) {
+                children: BusinessCategories.values.map((category) {
                   final selected = selectedCategory == category;
 
                   return GestureDetector(
@@ -799,44 +860,10 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
 
               const SizedBox(height: 32),
 
-              // =====================================
-              // PAYMENTS
-              // =====================================
-              const _SectionTitle('How would you like customers to pay?'),
-
-              const SizedBox(height: 14),
-
-              _PaymentCard(
-                title: 'Cash Payments',
-
-                subtitle: 'Accept cash in person',
-
-                icon: Icons.payments_outlined,
-
-                selected: acceptsCash,
-
-                onTap: () {
-                  setState(() {
-                    acceptsCash = !acceptsCash;
-                  });
-                },
-              ),
-
-              const SizedBox(height: 12),
-
-              _PaymentCard(
-                title: 'Card Payments',
-
-                subtitle: 'Take secure Stripe payments after setup',
-
-                icon: Icons.credit_card_outlined,
-
-                selected: acceptsStripe,
-
-                onTap: () {
-                  setState(() {
-                    acceptsStripe = !acceptsStripe;
-                  });
+              BusinessOpeningHoursEditor(
+                initialHours: openingHours,
+                onChanged: (value) {
+                  openingHours = value;
                 },
               ),
 
@@ -892,10 +919,7 @@ class _BusinessOnboardingScreenState extends State<BusinessOnboardingScreen> {
                         '${serviceRadiusMiles.toInt()} miles',
                       ),
 
-                    _SummaryRow(
-                      'Payments',
-                      selectedPaymentMethods.join(', ').toUpperCase(),
-                    ),
+                    const _SummaryRow('Listing', 'FREE TO PUBLISH'),
                   ],
                 ),
               ),
@@ -1073,85 +1097,6 @@ class _SectionTitle extends StatelessWidget {
     );
   }
 }
-
-// =====================================================
-// PAYMENT CARD
-// =====================================================
-
-class _PaymentCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _PaymentCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-
-      child: Container(
-        padding: const EdgeInsets.all(18),
-
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.08)
-              : Colors.white,
-
-          borderRadius: BorderRadius.circular(22),
-
-          border: Border.all(
-            color: selected ? AppColors.primary : Colors.grey.shade200,
-          ),
-        ),
-
-        child: Row(
-          children: [
-            Icon(icon, color: selected ? AppColors.primary : Colors.black54),
-
-            const SizedBox(width: 16),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-
-                children: [
-                  Text(
-                    title,
-
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  Text(subtitle, style: TextStyle(color: Colors.grey.shade600)),
-                ],
-              ),
-            ),
-
-            Icon(
-              selected ? Icons.check_circle : Icons.circle_outlined,
-
-              color: selected ? AppColors.primary : Colors.grey,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// =====================================================
-// SUMMARY ROW
-// =====================================================
 
 class _SummaryRow extends StatelessWidget {
   final String label;

@@ -4,12 +4,99 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'login_screen.dart';
 import 'booking_success_screen.dart';
 import 'booking_summary_screen.dart';
 import 'booking_confirmation_wait_screen.dart';
+import '../config/stripe_config.dart';
+import '../models/address_result.dart';
+import '../services/address_search_service.dart';
+import '../services/analytics_service.dart';
+import '../services/auth_required_action.dart';
+import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
+import '../utils/helpers.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_form.dart';
+import '../widgets/local_link_states.dart';
+import '../widgets/local_link_surface_card.dart';
 
 const Duration kShortNoticeApprovalWindow = Duration(hours: 2);
+const String kBookingPreferenceDocumentId = 'booking';
+const String kBookingPreferenceLastAddressField = 'lastAddress';
+const String kStripePaymentReturnUrl = 'locallink://stripe-return';
+const String kStripePaymentAccountContextPlatform = 'platform';
+
+@visibleForTesting
+String savedGeneralBookingAddressFromPreference(Map<String, dynamic>? data) {
+  return data?[kBookingPreferenceLastAddressField]?.toString().trim() ?? '';
+}
+
+@visibleForTesting
+String savedBookingAddressFromPreference(Map<String, dynamic>? data) {
+  return data?['lastAddress']?.toString().trim() ?? '';
+}
+
+@visibleForTesting
+String preferredSavedBookingAddress({
+  required Map<String, dynamic>? generalPreference,
+  required Map<String, dynamic>? businessPreference,
+}) {
+  final generalAddress = savedGeneralBookingAddressFromPreference(
+    generalPreference,
+  );
+  if (generalAddress.isNotEmpty) return generalAddress;
+
+  return savedBookingAddressFromPreference(businessPreference);
+}
+
+@visibleForTesting
+SetupPaymentSheetParameters bookingPaymentSheetParametersFromBackend(
+  Map<String, dynamic> data, {
+  bool? enableApplePay,
+}) {
+  final clientSecret = data['clientSecret']?.toString().trim() ?? '';
+  if (!_looksLikePaymentIntentClientSecret(clientSecret)) {
+    throw const StripeConfigurationException(
+      'Booking payment setup did not return a valid PaymentIntent client secret.',
+    );
+  }
+
+  final shouldEnableApplePay =
+      enableApplePay ??
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS);
+
+  return SetupPaymentSheetParameters(
+    paymentIntentClientSecret: clientSecret,
+    merchantDisplayName: 'LocalLink',
+    returnURL: kStripePaymentReturnUrl,
+    applePay: shouldEnableApplePay
+        ? const PaymentSheetApplePay(merchantCountryCode: 'GB')
+        : null,
+  );
+}
+
+bool _looksLikePaymentIntentClientSecret(String value) {
+  return value.startsWith('pi_') && value.contains('_secret_');
+}
+
+@visibleForTesting
+String? stripeAccountIdForPaymentSheet(Map<String, dynamic> data) {
+  final context = data['stripeAccountContext']?.toString().trim();
+  final accountId = data['stripeAccountId']?.toString().trim() ?? '';
+
+  if (context == null ||
+      context.isEmpty ||
+      context == kStripePaymentAccountContextPlatform) {
+    return null;
+  }
+
+  return accountId.isEmpty ? null : accountId;
+}
+
+@visibleForTesting
+String bookingCustomerAddressForPayload(String address) {
+  return address.trim();
+}
 
 class BookingScreen extends StatefulWidget {
   final String businessId;
@@ -45,6 +132,11 @@ class _BookingScreenState extends State<BookingScreen> {
   final TextEditingController addressController = TextEditingController();
   final TextEditingController notesController = TextEditingController();
   DateTime selectedDate = DateTime.now();
+  final AddressSearchService _addressSearch = AddressSearchService();
+  List<AddressResult> _addressSuggestions = [];
+  String _savedBookingAddress = '';
+  bool _isSearchingAddress = false;
+  int _addressSearchRequest = 0;
 
   // 🔹 PAYMENT
   String selectedPaymentMethod = '';
@@ -57,6 +149,7 @@ class _BookingScreenState extends State<BookingScreen> {
       final date = availabilityStart.toDate().toLocal();
       selectedDate = DateTime(date.year, date.month, date.day);
     }
+    _loadSavedBookingAddress();
     if (isDirectAvailability) {
       _setDirectAvailabilitySlot();
       isLoadingSlots = false;
@@ -76,6 +169,83 @@ class _BookingScreenState extends State<BookingScreen> {
   // =====================================================
   // 🔹 LOAD SLOTS
   // =====================================================
+  Future<void> _loadSavedBookingAddress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return;
+
+    try {
+      final userRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+      final results = await Future.wait([
+        userRef
+            .collection('preferences')
+            .doc(kBookingPreferenceDocumentId)
+            .get(),
+        userRef.collection('businessPreferences').doc(widget.businessId).get(),
+      ]);
+
+      final lastAddress = preferredSavedBookingAddress(
+        generalPreference: results[0].data(),
+        businessPreference: results[1].data(),
+      );
+
+      if (!mounted || lastAddress.isEmpty) {
+        return;
+      }
+
+      setState(() => _savedBookingAddress = lastAddress);
+    } catch (error, stack) {
+      if (kDebugMode) {
+        debugPrint('Booking saved address lookup skipped: $error');
+        debugPrintStack(stackTrace: stack);
+      }
+    }
+  }
+
+  void _useSavedBookingAddress() {
+    if (_savedBookingAddress.isEmpty) return;
+    _addressSearchRequest++;
+    setState(() {
+      addressController.text = _savedBookingAddress;
+      _addressSuggestions = [];
+      _isSearchingAddress = false;
+    });
+  }
+
+  Future<void> _searchBookingAddresses(String value) async {
+    final query = value.trim();
+    final request = ++_addressSearchRequest;
+
+    if (query.length < 3) {
+      setState(() {
+        _addressSuggestions = [];
+        _isSearchingAddress = false;
+      });
+      return;
+    }
+
+    setState(() => _isSearchingAddress = true);
+
+    final results = await _addressSearch.search(query);
+
+    if (!mounted || request != _addressSearchRequest) return;
+
+    setState(() {
+      _addressSuggestions = results;
+      _isSearchingAddress = false;
+    });
+  }
+
+  void _selectBookingAddress(AddressResult suggestion) {
+    _addressSearchRequest++;
+    setState(() {
+      addressController.text = suggestion.description;
+      _addressSuggestions = [];
+      _isSearchingAddress = false;
+    });
+  }
+
   Future<void> loadSlots() async {
     if (isDirectAvailability) {
       _setDirectAvailabilitySlot();
@@ -401,6 +571,17 @@ class _BookingScreenState extends State<BookingScreen> {
     return widget.serviceData['availabilityType']?.toString().trim() ?? 'exact';
   }
 
+  String get _analyticsSource {
+    return hasAvailabilityContext ? 'availability_detail' : 'business_detail';
+  }
+
+  String get _analyticsBusinessCategory {
+    return (widget.serviceData['businessCategory'] ??
+            widget.serviceData['category'] ??
+            '')
+        .toString();
+  }
+
   void _setDirectAvailabilitySlot() {
     final start = widget.serviceData['availabilityStartTime'];
     final end = widget.serviceData['availabilityEndTime'];
@@ -622,10 +803,10 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   // =====================================================
-  // 🔹 CASH BOOKING
+  // 🔹 DIRECT PAYMENT BOOKING
   // =====================================================
 
-  Future<void> createCashBooking() async {
+  Future<void> createDirectPaymentBooking() async {
     try {
       final callable = FirebaseFunctions.instance.httpsCallable(
         isDirectAvailability
@@ -640,9 +821,11 @@ class _BookingScreenState extends State<BookingScreen> {
         'selectedStartMillis': (selectedSlot!['startTime'] as Timestamp)
             .toDate()
             .millisecondsSinceEpoch,
-        'paymentMethod': 'cash',
+        'paymentMethod': selectedPaymentMethod,
         'customerName': nameController.text.trim(),
-        'customerAddress': addressController.text.trim(),
+        'customerAddress': bookingCustomerAddressForPayload(
+          addressController.text,
+        ),
         'customerNotes': notesController.text.trim(),
       };
 
@@ -655,6 +838,12 @@ class _BookingScreenState extends State<BookingScreen> {
       }
 
       await callable.call(payload);
+
+      await LocalLinkAnalytics.instance.bookingCompleted(
+        source: _analyticsSource,
+        paymentMethod: selectedPaymentMethod,
+        businessCategory: _analyticsBusinessCategory,
+      );
 
       if (!mounted) return;
 
@@ -689,7 +878,17 @@ class _BookingScreenState extends State<BookingScreen> {
   // =====================================================
   Future<void> startStripeBooking() async {
     String? pendingBookingId;
+    final callableName = isDirectAvailability
+        ? 'createDirectAvailabilityPaymentIntent'
+        : 'createBookingPaymentIntent';
+    var stripeStage = 'starting';
     try {
+      _stripeBookingDebugLog(3, 'stripe_booking_started', {
+        'callable': callableName,
+        'isDirectAvailability': isDirectAvailability,
+        'businessId': widget.businessId,
+        'serviceId': widget.serviceId,
+      });
       final user = FirebaseAuth.instance.currentUser;
 
       if (user == null) {
@@ -700,11 +899,21 @@ class _BookingScreenState extends State<BookingScreen> {
         throw Exception("No slot selected");
       }
 
-      final callable = FirebaseFunctions.instance.httpsCallable(
-        isDirectAvailability
-            ? 'createDirectAvailabilityPaymentIntent'
-            : 'createBookingPaymentIntent',
-      );
+      final stripeConfig = await configureStripeForApp();
+      if (stripeConfig == null) {
+        throw const StripeConfigurationException(
+          'Stripe publishable key is not configured for this app build.',
+        );
+      }
+      _stripeBookingDebugLog(4, 'stripe_config_ready', {
+        'publishableKeyConfigured': stripeConfig.publishableKey.isNotEmpty,
+        'mode': stripeConfig.mode.name,
+      });
+
+      final callable = FirebaseFunctions.instance.httpsCallable(callableName);
+      _stripeBookingDebugLog(5, 'callable_selected', {
+        'callable': callableName,
+      });
 
       final payload = {
         'businessId': widget.businessId,
@@ -715,7 +924,9 @@ class _BookingScreenState extends State<BookingScreen> {
             .millisecondsSinceEpoch,
         'paymentMethod': 'stripe',
         'customerName': nameController.text.trim(),
-        'customerAddress': addressController.text.trim(),
+        'customerAddress': bookingCustomerAddressForPayload(
+          addressController.text,
+        ),
         'customerNotes': notesController.text.trim(),
       };
 
@@ -727,22 +938,65 @@ class _BookingScreenState extends State<BookingScreen> {
         });
       }
 
+      _stripeBookingDebugLog(6, 'callable_invocation_starting', {
+        'callable': callableName,
+        'hasAvailabilityPostId':
+            payload['availabilityPostId']?.toString().trim().isNotEmpty == true,
+        'hasStaffId': payload['staffId']?.toString().trim().isNotEmpty == true,
+        'hasSlotId': payload['slotId']?.toString().trim().isNotEmpty == true,
+      });
+      stripeStage = 'callable';
       final result = await callable.call(payload);
-      pendingBookingId = result.data['bookingId']?.toString();
+      final resultData = Map<String, dynamic>.from(result.data as Map);
+      pendingBookingId = resultData['bookingId']?.toString();
+      _stripeBookingDebugLog(7, 'callable_response_received', {
+        'callable': callableName,
+        'bookingId': pendingBookingId ?? 'missing',
+        'clientSecretPresent':
+            resultData['clientSecret']?.toString().trim().isNotEmpty == true,
+        'clientSecretLooksValid': _looksLikePaymentIntentClientSecret(
+          resultData['clientSecret']?.toString().trim() ?? '',
+        ),
+        'stripeAccountContext':
+            resultData['stripeAccountContext']?.toString().trim() ?? 'missing',
+        'stripeAccountIdPresent':
+            resultData['stripeAccountId']?.toString().trim().isNotEmpty == true,
+      });
 
-      final clientSecret = result.data['clientSecret'];
-
+      Stripe.stripeAccountId = stripeAccountIdForPaymentSheet(resultData);
+      _stripeBookingDebugLog(8, 'stripe_account_context_applied', {
+        'paymentSheetAccount': Stripe.stripeAccountId == null
+            ? 'platform'
+            : 'connected',
+      });
+      await Stripe.instance.applySettings();
+      _debugLogStripePaymentSheetSetup(resultData);
+      _stripeBookingDebugLog(9, 'initPaymentSheet_starting');
+      stripeStage = 'initPaymentSheet';
       await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: clientSecret,
-          merchantDisplayName: 'LocalLink',
+        paymentSheetParameters: bookingPaymentSheetParametersFromBackend(
+          resultData,
         ),
       );
+      _stripeBookingDebugLog(10, 'initPaymentSheet_succeeded');
 
+      _stripeBookingDebugLog(11, 'presentPaymentSheet_starting');
+      stripeStage = 'presentPaymentSheet';
       await Stripe.instance.presentPaymentSheet();
+      _stripeBookingDebugLog(12, 'presentPaymentSheet_succeeded');
+
+      await LocalLinkAnalytics.instance.bookingCompleted(
+        source: _analyticsSource,
+        paymentMethod: 'stripe',
+        businessCategory: _analyticsBusinessCategory,
+      );
 
       if (!mounted) return;
 
+      _stripeBookingDebugLog(13, 'post_payment_confirmation_wait_starting', {
+        'bookingId': pendingBookingId ?? 'missing',
+      });
+      stripeStage = 'postPaymentConfirmation';
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -756,21 +1010,115 @@ class _BookingScreenState extends State<BookingScreen> {
       );
     } catch (error, stack) {
       if (kDebugMode) {
-        debugPrint('Stripe booking failed before completion: $error');
+        if (error is StripeException &&
+            error.error.code == FailureCode.Canceled) {
+          _stripeBookingDebugLog(14, 'paymentSheet_cancelled', {
+            'bookingId': pendingBookingId ?? 'missing',
+            'stage': stripeStage,
+          });
+        } else if (error is StripeException) {
+          _stripeBookingDebugLog(15, 'stripe_exception_caught', {
+            'bookingId': pendingBookingId ?? 'missing',
+            'stage': stripeStage,
+          });
+        } else if (error is FirebaseFunctionsException) {
+          _stripeBookingDebugLog(16, 'firebase_functions_exception_caught', {
+            'callable': callableName,
+            'bookingId': pendingBookingId ?? 'missing',
+            'stage': stripeStage,
+            'code': error.code,
+            'message': error.message ?? 'none',
+          });
+        } else {
+          _stripeBookingDebugLog(17, 'unexpected_exception_caught', {
+            'bookingId': pendingBookingId ?? 'missing',
+            'stage': stripeStage,
+            'type': error.runtimeType.toString(),
+          });
+        }
+        _debugLogStripeBookingFailure(error);
         debugPrintStack(stackTrace: stack);
       }
       if (pendingBookingId != null && pendingBookingId.isNotEmpty) {
+        _stripeBookingDebugLog(18, 'pending_card_booking_release_starting', {
+          'bookingId': pendingBookingId,
+        });
         await _releasePendingCardBooking(pendingBookingId);
       }
+      if (error is StripeException &&
+          error.error.code == FailureCode.Canceled) {
+        await LocalLinkAnalytics.instance.bookingCancelled(
+          source: _analyticsSource,
+        );
+      }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _paymentErrorMessage(error),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_paymentErrorMessage(error))));
     }
+  }
+
+  void _debugLogStripePaymentSheetSetup(Map<String, dynamic> data) {
+    if (!kDebugMode) return;
+
+    final config = StripeEnvironmentConfig.maybeFromEnvironment();
+    final accountContext =
+        data['stripeAccountContext']?.toString().trim().isEmpty ?? true
+        ? 'missing'
+        : data['stripeAccountContext'].toString().trim();
+    final accountId = stripeAccountIdForPaymentSheet(data);
+    final clientSecret = data['clientSecret']?.toString().trim() ?? '';
+
+    debugPrint(
+      'Stripe booking PaymentSheet setup: '
+      'publishableKeyConfigured=${config?.publishableKey.isNotEmpty == true} '
+      'mode=${config?.mode.name ?? 'missing'} '
+      'clientSecretLooksValid=${_looksLikePaymentIntentClientSecret(clientSecret)} '
+      'stripeAccountContext=$accountContext '
+      'paymentSheetAccount=${accountId == null ? 'platform' : 'connected'}',
+    );
+  }
+
+  void _stripeBookingDebugLog(
+    int step,
+    String event, [
+    Map<String, Object?> fields = const {},
+  ]) {
+    if (!kDebugMode) return;
+    final details = fields.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(' ');
+    debugPrint(
+      details.isEmpty
+          ? '[StripeBooking] Flutter STEP $step event=$event'
+          : '[StripeBooking] Flutter STEP $step event=$event $details',
+    );
+  }
+
+  void _debugLogStripeBookingFailure(Object error) {
+    if (error is StripeException) {
+      final stripeError = error.error;
+      debugPrint(
+        '[StripeBooking] Flutter StripeException: '
+        'code=${stripeError.code.name} '
+        'localizedMessage=${stripeError.localizedMessage ?? 'none'} '
+        'message=${stripeError.message ?? 'none'}',
+      );
+      return;
+    }
+
+    if (error is FirebaseFunctionsException) {
+      debugPrint(
+        '[StripeBooking] Flutter FirebaseFunctionsException: '
+        'code=${error.code} message=${error.message ?? 'none'}',
+      );
+      return;
+    }
+
+    debugPrint(
+      '[StripeBooking] Flutter unexpected exception: '
+      'type=${error.runtimeType} message=$error',
+    );
   }
 
   Future<void> _releasePendingCardBooking(String bookingId) async {
@@ -778,9 +1126,18 @@ class _BookingScreenState extends State<BookingScreen> {
       await FirebaseFunctions.instance
           .httpsCallable('cancelPendingCardBooking')
           .call({'bookingId': bookingId});
+      _stripeBookingDebugLog(19, 'pending_card_booking_release_succeeded', {
+        'bookingId': bookingId,
+      });
     } catch (error, stack) {
       if (kDebugMode) {
-        debugPrint('Unable to release pending card booking $bookingId: $error');
+        _stripeBookingDebugLog(20, 'pending_card_booking_release_failed', {
+          'bookingId': bookingId,
+          'type': error.runtimeType.toString(),
+        });
+        debugPrint(
+          '[StripeBooking] Unable to release pending card booking: $error',
+        );
         debugPrintStack(stackTrace: stack);
       }
     }
@@ -792,8 +1149,7 @@ class _BookingScreenState extends State<BookingScreen> {
       if (code == FailureCode.Canceled) {
         return 'Payment was cancelled. The time has been released.';
       }
-      return error.error.localizedMessage ??
-          'We could not complete your payment. Please try again.';
+      return 'We could not complete your payment. Please try again.';
     }
 
     if (error is FirebaseFunctionsException) {
@@ -821,6 +1177,12 @@ class _BookingScreenState extends State<BookingScreen> {
 
   Future<void> handleBooking() async {
     if (isProcessingBooking) return;
+
+    _stripeBookingDebugLog(1, 'booking_button_pressed', {
+      'paymentMethod': selectedPaymentMethod,
+      'isDirectAvailability': isDirectAvailability,
+      'hasSelectedSlot': selectedSlot != null,
+    });
 
     final user = FirebaseAuth.instance.currentUser;
 
@@ -853,13 +1215,24 @@ class _BookingScreenState extends State<BookingScreen> {
     );
 
     if (reviewed != true) {
+      _stripeBookingDebugLog(2, 'booking_review_cancelled');
       return;
     }
 
     if (!mounted) return;
 
+    await LocalLinkAnalytics.instance.bookingStarted(
+      source: _analyticsSource,
+      paymentMethod: selectedPaymentMethod,
+      businessCategory: _analyticsBusinessCategory,
+    );
+
+    _stripeBookingDebugLog(2, 'availability_validation_starting');
     final stillAvailable = await _validateSelectedAvailability();
     if (!mounted) return;
+    _stripeBookingDebugLog(2, 'availability_validation_finished', {
+      'stillAvailable': stillAvailable,
+    });
 
     if (!stillAvailable) {
       await _showSlotUnavailableDialog();
@@ -875,7 +1248,7 @@ class _BookingScreenState extends State<BookingScreen> {
       if (selectedPaymentMethod == 'stripe') {
         await startStripeBooking();
       } else {
-        await createCashBooking();
+        await createDirectPaymentBooking();
       }
     } finally {
       if (mounted) {
@@ -913,13 +1286,9 @@ class _BookingScreenState extends State<BookingScreen> {
               const SizedBox(height: 20),
 
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(context);
-
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  );
+                  await AuthRequiredAction.run(context, action: () async {});
                 },
 
                 child: const Text("Continue"),
@@ -949,236 +1318,288 @@ class _BookingScreenState extends State<BookingScreen> {
     final duration = widget.serviceData['durationMinutes'];
 
     return Scaffold(
-      appBar: AppBar(title: Text(serviceName)),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              serviceName,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 8),
-            Text(duration == null ? price : '$price • $duration mins'),
-
-            const SizedBox(height: 20),
-
-            if (!isDirectAvailability || availabilityType == 'window') ...[
-              const Text(
-                'Choose a day',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              Row(
-                children: [
-                  Text(
-                    '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text(serviceName),
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.charcoal,
+        elevation: 0,
+      ),
+      body: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(
+          LocalLinkSpacing.lg,
+          LocalLinkSpacing.sm,
+          LocalLinkSpacing.lg,
+          LocalLinkSpacing.xl + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        children: [
+          LocalLinkSurfaceCard(
+            elevated: false,
+            color: AppColors.serviceGreen.withValues(alpha: 0.07),
+            padding: const EdgeInsets.all(LocalLinkSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  serviceName,
+                  style: LocalLinkTextStyles.screenTitle.copyWith(fontSize: 26),
+                ),
+                const SizedBox(height: LocalLinkSpacing.xs),
+                Text(
+                  widget.businessName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: LocalLinkTextStyles.bodyStrong.copyWith(
+                    color: AppColors.serviceGreen,
                   ),
-                  const Spacer(),
-                  TextButton(onPressed: pickDate, child: const Text('Change')),
-                ],
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            // TIME
-            const Text(
-              'Choose a time',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-
-            if (hasAvailabilityContext)
-              const Padding(
-                padding: EdgeInsets.only(top: 8, bottom: 8),
-                child: Text(
-                  'You chose this from the business\'s free time.',
-                  style: TextStyle(fontWeight: FontWeight.w600),
                 ),
-              ),
-
-            if (isDirectAvailability && selectedSlot != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
+                const SizedBox(height: LocalLinkSpacing.sm),
+                Wrap(
+                  spacing: LocalLinkSpacing.sm,
+                  runSpacing: LocalLinkSpacing.xs,
                   children: [
-                    const Icon(Icons.schedule, color: Colors.green),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${formatTime(selectedSlot!['startTime'])} • ${duration ?? 30}m',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    if (availabilityType == 'window')
-                      TextButton(
-                        onPressed: _pickDirectTime,
-                        child: const Text('Change'),
+                    _BookingMeta(icon: Icons.payments_outlined, label: price),
+                    if (duration != null)
+                      _BookingMeta(
+                        icon: Icons.timer_outlined,
+                        label: '$duration mins',
                       ),
                   ],
                 ),
-              ),
-            ] else if (isLoadingSlots)
-              const Center(child: CircularProgressIndicator()),
+              ],
+            ),
+          ),
 
-            if (!isDirectAvailability &&
-                !isLoadingSlots &&
-                filteredSlots.isEmpty)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("No appointments that day"),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: goToNextAvailableDate,
-                    child: const Text("Find another time"),
+          const SizedBox(height: LocalLinkSpacing.lg),
+
+          if (!isDirectAvailability || availabilityType == 'window') ...[
+            LocalLinkFormSection(
+              title: 'Choose a day',
+              children: [
+                LocalLinkDateTimeRow(
+                  label: 'Date',
+                  value:
+                      '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+                  onTap: pickDate,
+                ),
+              ],
+            ),
+            const SizedBox(height: LocalLinkSpacing.md),
+          ],
+
+          LocalLinkFormSection(
+            title: 'Choose a time',
+            helperText: hasAvailabilityContext
+                ? 'You chose this from the business\'s available time.'
+                : null,
+            children: [
+              if (isDirectAvailability && selectedSlot != null) ...[
+                LocalLinkSurfaceCard(
+                  elevated: false,
+                  color: AppColors.serviceGreen.withValues(alpha: 0.08),
+                  padding: const EdgeInsets.all(LocalLinkSpacing.sm),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule, color: AppColors.serviceGreen),
+                      const SizedBox(width: LocalLinkSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          '${formatTime(selectedSlot!['startTime'])} · ${duration ?? 30}m',
+                          style: LocalLinkTextStyles.bodyStrong,
+                        ),
+                      ),
+                      if (availabilityType == 'window')
+                        TextButton(
+                          onPressed: _pickDirectTime,
+                          child: const Text('Change'),
+                        ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ] else if (isLoadingSlots)
+                const LocalLinkLoadingState(label: 'Loading available times')
+              else if (filteredSlots.isEmpty)
+                LocalLinkEmptyState(
+                  icon: Icons.event_busy_outlined,
+                  title: 'No appointments that day',
+                  message: 'Try the next available date.',
+                  actionLabel: 'Find another time',
+                  onAction: goToNextAvailableDate,
+                )
+              else
+                Wrap(
+                  spacing: LocalLinkSpacing.xs,
+                  runSpacing: LocalLinkSpacing.xs,
+                  children: filteredSlots.map((slot) {
+                    final time = formatTime(slot['startTime']);
+                    final isSelected = selectedSlotId == slot['id'];
 
-            if (!isDirectAvailability &&
-                !isLoadingSlots &&
-                filteredSlots.isNotEmpty)
+                    return ChoiceChip(
+                      label: Text(
+                        '$time · ${slot['staffName']} · ${duration}m',
+                      ),
+                      selected: isSelected,
+                      onSelected: (_) {
+                        setState(() {
+                          selectedSlotId = slot['id'];
+                          selectedSlot = slot;
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+              if (selectedSlot != null && !isDirectAvailability) ...[
+                const SizedBox(height: LocalLinkSpacing.sm),
+                Text(
+                  'With ${selectedSlot!['staffName']}',
+                  style: LocalLinkTextStyles.metadata,
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: LocalLinkSpacing.md),
+
+          LocalLinkFormSection(
+            title: 'Your details',
+            children: [
+              LocalLinkFormField(
+                controller: nameController,
+                label: 'Your name',
+              ),
+              const SizedBox(height: LocalLinkSpacing.sm),
+              LocalLinkFormField(
+                controller: addressController,
+                label: 'Address',
+                maxLines: 2,
+                keyboardType: TextInputType.streetAddress,
+                onChanged: _searchBookingAddresses,
+              ),
+              if (_isSearchingAddress)
+                const Padding(
+                  padding: EdgeInsets.only(top: LocalLinkSpacing.xs),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              if (_addressSuggestions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: LocalLinkSpacing.xs),
+                  child: LocalLinkSurfaceCard(
+                    elevated: false,
+                    color: AppColors.elevatedSurface,
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: _addressSuggestions.map((suggestion) {
+                        return ListTile(
+                          leading: const Icon(Icons.place_outlined),
+                          title: Text(
+                            suggestion.description,
+                            style: LocalLinkTextStyles.bodyStrong,
+                          ),
+                          onTap: () => _selectBookingAddress(suggestion),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              if (_savedBookingAddress.isNotEmpty &&
+                  addressController.text.trim().isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: LocalLinkSpacing.xs),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _useSavedBookingAddress,
+                      icon: const Icon(Icons.history_outlined),
+                      label: const Text('Use saved address'),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: LocalLinkSpacing.sm),
+              LocalLinkFormField(
+                controller: notesController,
+                label: 'Notes for the business',
+                hintText: 'Access details, preferences or anything useful',
+                maxLines: 2,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: LocalLinkSpacing.md),
+
+          LocalLinkFormSection(
+            title: 'Payment',
+            helperText: 'Choose how you would like to pay.',
+            children: [
               Wrap(
-                spacing: 10,
-                children: filteredSlots.map((slot) {
-                  final time = formatTime(slot['startTime']);
-                  final isSelected = selectedSlotId == slot['id'];
+                spacing: LocalLinkSpacing.xs,
+                runSpacing: LocalLinkSpacing.xs,
+                children: widget.paymentMethods.map((method) {
+                  final normalised = method.toLowerCase().trim();
+                  final isSelected = selectedPaymentMethod == normalised;
 
                   return ChoiceChip(
-                    label: Text('$time • ${slot['staffName']} • ${duration}m'),
+                    label: Text(paymentMethodLabel(normalised)),
                     selected: isSelected,
+                    avatar: Icon(paymentMethodIcon(normalised), size: 18),
                     onSelected: (_) {
                       setState(() {
-                        selectedSlotId = slot['id'];
-                        selectedSlot = slot;
+                        selectedPaymentMethod = normalised;
                       });
                     },
                   );
                 }).toList(),
               ),
-            if (selectedSlot != null && !isDirectAvailability)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  'With ${selectedSlot!['staffName']}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+              if (selectedSlot != null &&
+                  _requiresBusinessApproval(selectedSlot!)) ...[
+                const SizedBox(height: LocalLinkSpacing.sm),
+                Text(
+                  'This starts soon, so the business will quickly confirm they can still fit you in.',
+                  style: LocalLinkTextStyles.secondary,
                 ),
-              ),
-            const Spacer(),
-            const SizedBox(height: 20),
-
-            const Text(
-              'Your details',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 10),
-
-            TextField(
-              controller: nameController,
-
-              decoration: const InputDecoration(
-                labelText: 'Your name',
-                border: OutlineInputBorder(),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: addressController,
-
-              decoration: const InputDecoration(
-                labelText: 'Address',
-                border: OutlineInputBorder(),
-              ),
-
-              maxLines: 2,
-            ),
-
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: notesController,
-              decoration: const InputDecoration(
-                labelText: 'Notes for the business',
-                hintText: 'Access details, preferences or anything useful',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
-            ),
-
-            const SizedBox(height: 20),
-            // PAYMENT
-            const Text(
-              'How would you like to pay?',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-
-            Wrap(
-              spacing: 10,
-              children: widget.paymentMethods.map((method) {
-                final isSelected =
-                    selectedPaymentMethod == method.toLowerCase().trim();
-
-                return ChoiceChip(
-                  label: Text(
-                    method.toLowerCase() == 'stripe' ? 'Card' : 'Cash',
-                  ),
-                  selected: isSelected,
-                  onSelected: (_) {
-                    setState(() {
-                      selectedPaymentMethod = method.toLowerCase().trim();
-                    });
-                  },
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 20),
-
-            if (selectedSlot != null &&
-                _requiresBusinessApproval(selectedSlot!)) ...[
-              const Text(
-                'This starts soon, so the business will quickly confirm they can still fit you in.',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 14),
+              ],
             ],
+          ),
 
-            SizedBox(
-              width: double.infinity,
+          const SizedBox(height: LocalLinkSpacing.xl),
 
-              child: ElevatedButton(
-                onPressed:
-                    (selectedSlot == null ||
-                        selectedPaymentMethod.isEmpty ||
-                        isProcessingBooking)
-                    ? null
-                    : handleBooking,
-
-                child: isProcessingBooking
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        selectedPaymentMethod == 'stripe'
-                            ? 'Pay Now'
-                            : 'Confirm Booking',
-                      ),
-              ),
-            ),
-          ],
-        ),
+          LocalLinkButton(
+            label: isProcessingBooking
+                ? 'Preparing booking...'
+                : selectedPaymentMethod == 'stripe'
+                ? 'Review and pay'
+                : 'Review booking',
+            icon: Icons.check_circle_outline_rounded,
+            isLoading: isProcessingBooking,
+            onPressed:
+                (selectedSlot == null ||
+                    selectedPaymentMethod.isEmpty ||
+                    isProcessingBooking)
+                ? null
+                : handleBooking,
+            expand: true,
+          ),
+        ],
       ),
+    );
+  }
+}
+
+class _BookingMeta extends StatelessWidget {
+  const _BookingMeta({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: AppColors.serviceGreen),
+        const SizedBox(width: LocalLinkSpacing.xxs),
+        Text(label, style: LocalLinkTextStyles.metadata),
+      ],
     );
   }
 }

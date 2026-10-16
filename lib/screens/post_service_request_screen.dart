@@ -1,21 +1,35 @@
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/address_result.dart';
+import '../services/analytics_service.dart';
 import '../services/address_search_service.dart';
+import '../services/auth_required_action.dart';
 import '../services/booking_messaging_service.dart';
 import '../services/community_help_share_service.dart';
 import '../services/community_help_lifecycle.dart';
+import '../services/community_help_location.dart';
+import '../services/community_help_following_service.dart';
+import '../services/community_help_ownership.dart';
+import '../services/local_discovery_filters.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
+import '../widgets/community_help_own_reports.dart';
+import '../widgets/local_link_button.dart';
+import '../widgets/local_link_image.dart';
+import '../widgets/local_link_section_header.dart';
+import '../widgets/local_link_surface_card.dart';
 import 'booking_conversation_screen.dart';
-import 'business_list_screen.dart';
+import 'listing_claim_request_screen.dart';
 
 enum _CommunityHelpType { lostFound, freeItem }
 
@@ -29,10 +43,54 @@ const _lostFoundCategories = [
   'Other',
 ];
 
+bool _isPetCategory(String category) => category.trim().toLowerCase() == 'pet';
+
+class CommunityHelpInitialDraft {
+  const CommunityHelpInitialDraft({
+    required this.type,
+    required this.mode,
+    this.itemCategory = '',
+    this.petType = '',
+  });
+
+  const CommunityHelpInitialDraft.missingPet({this.petType = ''})
+    : type = 'lost_found',
+      mode = 'lost',
+      itemCategory = 'Pet';
+
+  final String type;
+  final String mode;
+  final String itemCategory;
+  final String petType;
+}
+
+Color _communityAccent({required String mode, required String type}) {
+  if (type == 'free_item') return AppColors.communityTeal;
+  if (mode == 'found') return AppColors.serviceGreen;
+  return AppColors.lost;
+}
+
+IconData _communityFallbackIcon({
+  required String mode,
+  required String type,
+  required String category,
+}) {
+  if (type == 'free_item') return Icons.card_giftcard_outlined;
+  if (_isPetCategory(category)) return Icons.pets_outlined;
+  return mode == 'lost' ? Icons.search_outlined : Icons.inventory_2_outlined;
+}
+
 class PostServiceRequestScreen extends StatefulWidget {
-  const PostServiceRequestScreen({super.key, this.initialPostId});
+  const PostServiceRequestScreen({
+    super.key,
+    this.initialPostId,
+    this.initialDraft,
+    this.initialFocusNearby = false,
+  });
 
   final String? initialPostId;
+  final CommunityHelpInitialDraft? initialDraft;
+  final bool initialFocusNearby;
 
   @override
   State<PostServiceRequestScreen> createState() =>
@@ -40,7 +98,9 @@ class PostServiceRequestScreen extends StatefulWidget {
 }
 
 class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
+  final _nearbySectionKey = GlobalKey();
   final titleController = TextEditingController();
+  final petTypeController = TextEditingController();
   final descriptionController = TextEditingController();
   final locationController = TextEditingController();
   final timingController = TextEditingController();
@@ -57,6 +117,8 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   String lostFoundMode = 'lost';
   String freeItemMode = 'wanted';
   String itemCategory = _lostFoundCategories.first;
+  DateTime? observedAt;
+  bool observedDateOnly = false;
   double? selectedLatitude;
   double? selectedLongitude;
   String? selectedPlaceId;
@@ -69,6 +131,7 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   @override
   void dispose() {
     titleController.dispose();
+    petTypeController.dispose();
     descriptionController.dispose();
     locationController.dispose();
     timingController.dispose();
@@ -81,21 +144,57 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     super.initState();
 
     final postId = widget.initialPostId?.trim();
-    if (postId == null || postId.isEmpty) return;
+    if (postId == null || postId.isEmpty) {
+      final draft = widget.initialDraft;
+      if (draft != null) _applyInitialDraft(draft);
+      if (widget.initialFocusNearby) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final nearbyContext = _nearbySectionKey.currentContext;
+          if (nearbyContext != null) {
+            Scrollable.ensureVisible(
+              nearbyContext,
+              duration: const Duration(milliseconds: 250),
+              alignment: 0.05,
+            );
+          }
+        });
+      }
+      return;
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openInitialPost(postId);
     });
   }
 
-  void _selectType(_CommunityHelpType type) {
+  void _applyInitialDraft(CommunityHelpInitialDraft draft) {
+    final type = draft.type.trim();
+    final mode = draft.mode.trim();
+    helpType = type == 'free_item'
+        ? _CommunityHelpType.freeItem
+        : _CommunityHelpType.lostFound;
+    lostFoundMode = mode == 'found' ? 'found' : 'lost';
+    freeItemMode = mode == 'wanted' ? 'wanted' : 'offering';
+    if (_lostFoundCategories.contains(draft.itemCategory)) {
+      itemCategory = draft.itemCategory;
+    }
+    if (_isPetCategory(itemCategory) && draft.petType.trim().isNotEmpty) {
+      petTypeController.text = draft.petType.trim();
+    }
+  }
+
+  void _startLostFoundReport(String mode) {
     setState(() {
-      helpType = type;
+      helpType = _CommunityHelpType.lostFound;
+      lostFoundMode = mode;
       titleController.clear();
+      petTypeController.clear();
       descriptionController.clear();
       locationController.clear();
       timingController.clear();
       collectionController.clear();
+      observedAt = null;
+      observedDateOnly = false;
       selectedImage = null;
       locationSuggestions = [];
       selectedLatitude = null;
@@ -107,19 +206,8 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   }
 
   void _setLostFoundMode(String value) {
-    setState(() {
-      lostFoundMode = value;
-      titleController.clear();
-      descriptionController.clear();
-      locationController.clear();
-      timingController.clear();
-      selectedImage = null;
-      locationSuggestions = [];
-      selectedLatitude = null;
-      selectedLongitude = null;
-      selectedPlaceId = null;
-      locationSource = 'manual';
-    });
+    // Correcting the report type should keep the details already entered.
+    setState(() => lostFoundMode = value);
   }
 
   Future<void> _searchLocations(String query) async {
@@ -155,12 +243,17 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
       return;
     }
 
+    var publicArea = 'Selected area';
+    try {
+      publicArea = await addressService.getPublicAreaLabel(suggestion.placeId);
+    } catch (_) {}
+    if (!mounted) return;
     setState(() {
       selectedLatitude = _softCoordinate(coords['lat']!);
       selectedLongitude = _softCoordinate(coords['lng']!);
-      selectedPlaceId = suggestion.placeId;
-      locationSource = 'place_search';
-      locationController.text = suggestion.description;
+      selectedPlaceId = null;
+      locationSource = 'place_search_approximate';
+      locationController.text = publicArea;
       locationSuggestions = [];
     });
   }
@@ -213,6 +306,50 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     });
   }
 
+  Future<void> _pickObservedAt() async {
+    final now = DateTime.now();
+    final current = observedAt ?? now;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current.isAfter(now) ? now : current,
+      firstDate: CommunityHelpLifecycle.firstSelectableObservedDate(now),
+      lastDate: CommunityHelpLifecycle.latestSelectableObservedAt(now),
+      helpText: lostFoundMode == 'found'
+          ? 'When did you find it?'
+          : 'When was it last seen?',
+    );
+    if (!mounted || date == null) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current.isAfter(now) ? now : current),
+      helpText: lostFoundMode == 'found' ? 'Time found' : 'Time last seen',
+    );
+    if (!mounted) return;
+
+    final selected = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time?.hour ?? 0,
+      time?.minute ?? 0,
+    );
+    final normalised = CommunityHelpLifecycle.normaliseObservedAt(
+      selected,
+      now,
+    );
+    final dateOnly = time == null;
+
+    setState(() {
+      observedAt = normalised;
+      observedDateOnly = dateOnly;
+      timingController.text = CommunityHelpLifecycle.observedAtText({
+        'observedAt': observedAt,
+        if (dateOnly) 'observedDateOnly': true,
+      }, now);
+    });
+  }
+
   Future<String?> _uploadImage(String userId) async {
     if (selectedImage == null) return null;
 
@@ -260,9 +397,15 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
 
     final type = helpType;
     final title = titleController.text.trim();
+    final petType = petTypeController.text.trim();
     final description = descriptionController.text.trim();
     final location = locationController.text.trim();
-    final timing = timingController.text.trim();
+    final timing = _isLostFound
+        ? CommunityHelpLifecycle.observedAtText({
+            'observedAt': observedAt,
+            if (observedDateOnly) 'observedDateOnly': true,
+          }, DateTime.now())
+        : timingController.text.trim();
     final collection = collectionController.text.trim();
 
     if (type == null) {
@@ -275,6 +418,22 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     if (title.isEmpty || description.isEmpty || location.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add the item, details and public area.')),
+      );
+      return;
+    }
+
+    if (_isLostFound &&
+        itemCategory == CommunityHelpLifecycle.petCategory &&
+        petType.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add the pet type, such as dog or cat.')),
+      );
+      return;
+    }
+
+    if (_isLostFound && observedAt == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add when this was last seen or found.')),
       );
       return;
     }
@@ -321,11 +480,10 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
         'mode': mode,
         'title': title,
         'description': description,
-        'location': location,
-        'publicLocation': location,
+        'location': CommunityHelpLocation.safeInputLabel(location),
+        'publicLocation': CommunityHelpLocation.safeInputLabel(location),
         'locationPrecision': 'approximate',
         'locationSource': locationSource,
-        'placeId': selectedPlaceId,
         'approxLatitude': selectedLatitude,
         'approxLongitude': selectedLongitude,
         'discoveryRadiusMiles':
@@ -336,9 +494,17 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
             ),
         'timing': timing,
         'eventDateText': timing,
+        if (_isLostFound && observedDateOnly) 'observedDateOnly': true,
+        if (_isLostFound && observedAt != null)
+          'observedAt': Timestamp.fromDate(observedAt!),
+        if (_isLostFound && lostFoundMode == 'lost' && observedAt != null)
+          'lastSeenAt': Timestamp.fromDate(observedAt!),
+        if (_isLostFound && lostFoundMode == 'found' && observedAt != null)
+          'foundAt': Timestamp.fromDate(observedAt!),
         'itemCategory': category,
+        if (category == CommunityHelpLifecycle.petCategory) 'petType': petType,
         'keywords': CommunityHelpLifecycle.keywordsFor(
-          '$title $description $category $location',
+          '$title $petType $description $category $location',
         ),
         'collectionDetails': _isFreeItem ? collection : '',
         'photoUrl': photoUrl,
@@ -378,7 +544,7 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   }
 
   double _softCoordinate(double value) {
-    return double.parse(value.toStringAsFixed(3));
+    return double.parse(value.toStringAsFixed(2));
   }
 
   Future<String> _publicLabelFor(dynamic position) async {
@@ -390,7 +556,7 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
 
       for (final place in placemarks) {
         final label =
-            [place.name, place.thoroughfare, place.subLocality, place.locality]
+            [place.subLocality, place.locality, place.subAdministrativeArea]
                 .whereType<String>()
                 .map((value) => value.trim())
                 .firstWhere((value) => value.isNotEmpty, orElse: () => '');
@@ -415,15 +581,6 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     return RegExp(r'^\d+[a-zA-Z]?\b').hasMatch(label.trim());
   }
 
-  void _openFindService() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const BusinessListScreen(useCurrentLocation: true),
-      ),
-    );
-  }
-
   Future<void> _markResolved(DocumentSnapshot<Map<String, dynamic>> doc) async {
     final data = doc.data() ?? {};
     final type = data['type'] as String? ?? 'lost_found';
@@ -436,6 +593,7 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
       freeItemWanted: mode == CommunityHelpLifecycle.wantedMode,
     );
     final closingUpdate = await _askForClosingUpdate(reason);
+    if (!mounted) return;
 
     await doc.reference.update({
       'status': CommunityHelpLifecycle.resolvedStatus,
@@ -449,6 +607,7 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     });
 
     if (!mounted) return;
+    Navigator.of(context).maybePop();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Great news — marked as ${_resolvedToastLabel(reason)}.'),
@@ -457,37 +616,11 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   }
 
   Future<String?> _askForClosingUpdate(String reason) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
+    return showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Mark as ${_resolvedToastLabel(reason)}'),
-          content: TextField(
-            controller: controller,
-            maxLength: 160,
-            minLines: 2,
-            maxLines: 4,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText: 'Optional update for people keeping a lookout',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, ''),
-              child: const Text('Skip'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      builder: (context) =>
+          _ClosingUpdateDialog(title: 'Mark as ${_resolvedToastLabel(reason)}'),
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _renewPost(DocumentSnapshot<Map<String, dynamic>> doc) async {
@@ -549,7 +682,8 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
     }
 
     final data = doc.data() ?? {};
-    if (data['createdBy'] == user.uid) return;
+    final ownerId = resolveCommunityHelpOwnerId(data);
+    if (ownerId == null || ownerId == user.uid) return;
 
     late final String conversationId;
     try {
@@ -559,6 +693,16 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
             text: message,
             sightingPhotoUrl: sightingPhotoUrl,
           );
+      await LocalLinkAnalytics.instance.messageStarted(
+        source: 'community_help_detail',
+        type: sightingPhotoUrl == null ? 'community_help_reply' : 'sighting',
+      );
+      if (sightingPhotoUrl != null) {
+        await LocalLinkAnalytics.instance.logEvent(
+          'community_help_sighting_started',
+          {'source': 'community_help_detail'},
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -576,6 +720,28 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
           viewerType: 'customer',
         ),
       ),
+    );
+  }
+
+  Future<void> _claimMissingPet(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? {};
+    final rawTitle = data['title']?.toString().trim() ?? '';
+    final title = rawTitle.isEmpty ? 'Missing pet' : rawTitle;
+    return AuthRequiredAction.run(
+      context,
+      action: () async {
+        if (!mounted) return;
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ListingClaimRequestScreen(
+              listingType: 'community_help_missing_pet',
+              listingId: doc.id,
+              listingTitle: title,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -719,36 +885,10 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   Future<void> _publishPublicUpdate(
     DocumentSnapshot<Map<String, dynamic>> doc,
   ) async {
-    final controller = TextEditingController();
     final text = await showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Share an update'),
-          content: TextField(
-            controller: controller,
-            maxLength: 240,
-            minLines: 2,
-            maxLines: 4,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              hintText: 'Short public update for people keeping a lookout',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Post update'),
-            ),
-          ],
-        );
-      },
+      builder: (_) => const _PublicUpdateDialog(),
     );
-    controller.dispose();
 
     if (text == null || text.isEmpty) return;
 
@@ -761,10 +901,11 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Update shared with followers.')),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
+      final message = communityHelpPublicUpdateFailureMessage(error);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Updates can be sent every 30 minutes.')),
+        SnackBar(content: Text(message)),
       );
     }
   }
@@ -785,6 +926,23 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
         const SnackBar(
           content: Text('Sharing could not be started. Please try again.'),
         ),
+      );
+    }
+  }
+
+  Future<void> _copyCommunityHelpLink(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) async {
+    try {
+      await CommunityHelpShareService.copyPostLink(doc.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Link copied')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link could not be copied.')),
       );
     }
   }
@@ -818,6 +976,12 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   }
 
   void _openPostDetail(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? {};
+    LocalLinkAnalytics.instance.discoveryView(
+      eventName: 'community_help_view',
+      source: widget.initialPostId == doc.id ? 'shared_link' : 'browse',
+      category: data['category']?.toString() ?? data['type']?.toString() ?? '',
+    );
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -828,7 +992,9 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
         onResolve: () => _markResolved(doc),
         onRenew: () => _renewPost(doc),
         onShare: (shareContext) => _shareCommunityHelpPost(doc, shareContext),
+        onCopyLink: () => _copyCommunityHelpLink(doc),
         onPublishUpdate: () => _publishPublicUpdate(doc),
+        onClaimMissingPet: () => _claimMissingPet(doc),
       ),
     );
   }
@@ -847,64 +1013,28 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
         children: [
-          const Text(
-            'Community help',
-            style: TextStyle(
-              color: AppColors.charcoal,
-              fontSize: 26,
-              height: 1.05,
-              fontWeight: FontWeight.w900,
-            ),
+          const LocalLinkSectionHeader(
+            title: 'Lost & Found',
+            subtitle: 'Help neighbours find missing pets and lost property.',
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'For lost/found posts and free neighbour-to-neighbour items only.',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 15,
-              height: 1.35,
-              fontWeight: FontWeight.w600,
-            ),
+          const SizedBox(height: LocalLinkSpacing.md),
+          _ReportChoicePanel(
+            onReportLost: () => _startLostFoundReport('lost'),
+            onReportFound: () => _startLostFoundReport('found'),
           ),
-          const SizedBox(height: 18),
-          _PaidWorkNotice(onFindService: _openFindService),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: _HelpTypeCard(
-                  selected: _isLostFound,
-                  icon: Icons.manage_search_outlined,
-                  title: 'Lost / Found',
-                  subtitle: 'Pets, keys, property or found items.',
-                  onTap: () => _selectType(_CommunityHelpType.lostFound),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _HelpTypeCard(
-                  selected: _isFreeItem,
-                  icon: Icons.card_giftcard_outlined,
-                  title: 'Free items',
-                  subtitle: 'Wanted or offered for free.',
-                  onTap: () => _selectType(_CommunityHelpType.freeItem),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          if (helpType == null)
-            const _CommunityPrompt()
-          else
+          if (helpType != null) ...[
+            const SizedBox(height: LocalLinkSpacing.lg),
             _CommunityHelpForm(
               isLostFound: _isLostFound,
               lostFoundMode: lostFoundMode,
               freeItemMode: freeItemMode,
               itemCategory: itemCategory,
               titleController: titleController,
+              petTypeController: petTypeController,
               descriptionController: descriptionController,
               locationController: locationController,
               timingController: timingController,
+              observedAt: observedAt,
               collectionController: collectionController,
               selectedImage: selectedImage,
               locationSuggestions: locationSuggestions,
@@ -917,16 +1047,26 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
                 setState(() => freeItemMode = value);
               },
               onItemCategoryChanged: (value) {
-                setState(() => itemCategory = value);
+                setState(() {
+                  itemCategory = value;
+                  if (!_isPetCategory(value)) petTypeController.clear();
+                });
               },
               onLocationChanged: _searchLocations,
               onLocationSelected: _selectLocationSuggestion,
               onUseCurrentLocation: _useCurrentLocation,
+              onPickObservedAt: _pickObservedAt,
               onPickImage: _pickImage,
               onPublish: _publish,
             ),
+          ],
           const SizedBox(height: 28),
-          _LostFoundDiscoveryList(onOpenPost: _openPostDetail),
+          KeyedSubtree(
+            key: _nearbySectionKey,
+            child: _LostFoundDiscoveryList(onOpenPost: _openPostDetail),
+          ),
+          const SizedBox(height: 26),
+          _FollowingCommunityPostsList(onOpenPost: _openPostDetail),
           const SizedBox(height: 26),
           _MyCommunityPostsList(onOpenPost: _openPostDetail),
         ],
@@ -935,127 +1075,35 @@ class _PostServiceRequestScreenState extends State<PostServiceRequestScreen> {
   }
 }
 
-class _PaidWorkNotice extends StatelessWidget {
-  const _PaidWorkNotice({required this.onFindService});
-
-  final VoidCallback onFindService;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.serviceGreen.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: AppColors.serviceGreen.withValues(alpha: 0.22),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.design_services_outlined,
-            color: AppColors.serviceGreen,
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Need paid help, like a cleaner or gardener?',
-              style: TextStyle(
-                color: AppColors.charcoal,
-                fontWeight: FontWeight.w800,
-                height: 1.25,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: onFindService,
-            child: const Text('Find a service'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HelpTypeCard extends StatelessWidget {
-  const _HelpTypeCard({
-    required this.selected,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
+class _ReportChoicePanel extends StatelessWidget {
+  const _ReportChoicePanel({
+    required this.onReportLost,
+    required this.onReportFound,
   });
 
-  final bool selected;
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback onReportLost;
+  final VoidCallback onReportFound;
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.primary : AppColors.charcoal;
-
-    return Material(
-      color: AppColors.card,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 136),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: selected
-                  ? AppColors.primary
-                  : AppColors.border.withValues(alpha: 0.86),
-              width: selected ? 1.6 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppColors.charcoal,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                subtitle,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.5,
-                  height: 1.25,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        LocalLinkButton(
+          label: 'Report something lost',
+          icon: Icons.search_outlined,
+          onPressed: onReportLost,
+          expand: true,
         ),
-      ),
-    );
-  }
-}
-
-class _CommunityPrompt extends StatelessWidget {
-  const _CommunityPrompt();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Text(
-      'Choose Lost / Found or Free items to continue.',
-      style: TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w700),
+        const SizedBox(height: LocalLinkSpacing.sm),
+        LocalLinkButton(
+          label: 'Report something found',
+          icon: Icons.inventory_2_outlined,
+          onPressed: onReportFound,
+          variant: LocalLinkButtonVariant.secondary,
+          expand: true,
+        ),
+      ],
     );
   }
 }
@@ -1067,9 +1115,11 @@ class _CommunityHelpForm extends StatelessWidget {
     required this.freeItemMode,
     required this.itemCategory,
     required this.titleController,
+    required this.petTypeController,
     required this.descriptionController,
     required this.locationController,
     required this.timingController,
+    required this.observedAt,
     required this.collectionController,
     required this.selectedImage,
     required this.locationSuggestions,
@@ -1082,6 +1132,7 @@ class _CommunityHelpForm extends StatelessWidget {
     required this.onLocationChanged,
     required this.onLocationSelected,
     required this.onUseCurrentLocation,
+    required this.onPickObservedAt,
     required this.onPickImage,
     required this.onPublish,
   });
@@ -1091,9 +1142,11 @@ class _CommunityHelpForm extends StatelessWidget {
   final String freeItemMode;
   final String itemCategory;
   final TextEditingController titleController;
+  final TextEditingController petTypeController;
   final TextEditingController descriptionController;
   final TextEditingController locationController;
   final TextEditingController timingController;
+  final DateTime? observedAt;
   final TextEditingController collectionController;
   final File? selectedImage;
   final List<AddressResult> locationSuggestions;
@@ -1106,26 +1159,34 @@ class _CommunityHelpForm extends StatelessWidget {
   final ValueChanged<String> onLocationChanged;
   final ValueChanged<AddressResult> onLocationSelected;
   final VoidCallback onUseCurrentLocation;
+  final VoidCallback onPickObservedAt;
   final VoidCallback onPickImage;
   final VoidCallback onPublish;
 
   @override
   Widget build(BuildContext context) {
     final isFound = isLostFound && lostFoundMode == 'found';
+    final isPet = isLostFound && _isPetCategory(itemCategory);
     final titleLabel = isFound
-        ? 'What did you find?'
+        ? (isPet ? 'Pet name or short description' : 'What did you find?')
+        : isPet
+        ? 'Pet name'
         : isLostFound
         ? 'What have you lost?'
         : 'Item';
     final titleHint = isFound
-        ? 'Keys, glasses, child\'s scooter...'
+        ? (isPet ? 'Unknown cat, friendly dog...' : 'Keys, phone, bag...')
+        : isPet
+        ? 'Woody'
         : isLostFound
-        ? 'Black cat, house keys, child\'s scooter...'
+        ? 'House keys, phone, bag...'
         : 'Moving boxes, children\'s bike, garden chairs...';
     final descriptionHint = isFound
         ? 'Describe the item without sharing every identifying detail.'
+        : isPet
+        ? 'Type, colour, markings, collar or anything people should look for.'
         : isLostFound
-        ? 'Add identifying info, markings, colour or anything people should look for.'
+        ? 'Add identifying info or anything people should look for.'
         : 'Describe condition, size and anything helpful.';
     final locationLabel = isFound
         ? 'Where did you find it?'
@@ -1189,6 +1250,18 @@ class _CommunityHelpForm extends StatelessWidget {
               if (value != null) onItemCategoryChanged(value);
             },
           ),
+          if (isPet) ...[
+            const SizedBox(height: 18),
+            const _QuestionLabel('Pet type'),
+            TextField(
+              controller: petTypeController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                hintText: 'Dog, cat, rabbit...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 18),
         _QuestionLabel(titleLabel),
@@ -1262,14 +1335,21 @@ class _CommunityHelpForm extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         _QuestionLabel(timingLabel),
-        TextField(
-          controller: timingController,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Today, yesterday evening, this weekend...',
-            border: OutlineInputBorder(),
+        if (isLostFound)
+          _ObservedAtPicker(
+            value: observedAt,
+            mode: lostFoundMode,
+            onTap: onPickObservedAt,
+          )
+        else
+          TextField(
+            controller: timingController,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'Today, yesterday evening, this weekend...',
+              border: OutlineInputBorder(),
+            ),
           ),
-        ),
         if (!isLostFound) ...[
           const SizedBox(height: 18),
           const _QuestionLabel('Collection / delivery'),
@@ -1309,28 +1389,12 @@ class _CommunityHelpForm extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 22),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: isSaving ? null : onPublish,
-            icon: isSaving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.send_outlined),
-            label: Text(isSaving ? 'Sharing...' : 'Share with the community'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: AppColors.buttonText,
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              textStyle: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
+        LocalLinkButton(
+          label: isSaving ? 'Sharing...' : 'Share with the community',
+          icon: Icons.send_outlined,
+          isLoading: isSaving,
+          expand: true,
+          onPressed: isSaving ? null : onPublish,
         ),
       ],
     );
@@ -1429,6 +1493,59 @@ class _FoundSafetyNotice extends StatelessWidget {
   }
 }
 
+class _ObservedAtPicker extends StatelessWidget {
+  const _ObservedAtPicker({
+    required this.value,
+    required this.mode,
+    required this.onTap,
+  });
+
+  final DateTime? value;
+  final String mode;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = value == null
+        ? (mode == 'found'
+              ? 'Choose date and time found'
+              : 'Choose date and time last seen')
+        : CommunityHelpLifecycle.observedAtText({
+            'observedAt': value,
+          }, DateTime.now());
+
+    return LocalLinkSurfaceCard(
+      onTap: onTap,
+      elevated: false,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
+      child: Row(
+        children: [
+          const LocalLinkIconBadge(
+            icon: Icons.schedule_outlined,
+            color: AppColors.communityTeal,
+            size: 40,
+          ),
+          const SizedBox(width: LocalLinkSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: LocalLinkTextStyles.bodyStrong),
+                const SizedBox(height: LocalLinkSpacing.xxs),
+                const Text(
+                  'This keeps the alert accurate as time passes.',
+                  style: LocalLinkTextStyles.metadata,
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: AppColors.textMuted),
+        ],
+      ),
+    );
+  }
+}
+
 class _ModeChip extends StatelessWidget {
   const _ModeChip({
     required this.label,
@@ -1464,48 +1581,96 @@ class _ImagePickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.card,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          height: selectedImage == null ? 96 : 184,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: selectedImage == null
-              ? const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.add_photo_alternate_outlined, size: 28),
-                    SizedBox(width: 10),
-                    Text(
-                      'Add photo optional',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+    return LocalLinkSurfaceCard(
+      onTap: onTap,
+      elevated: false,
+      padding: EdgeInsets.zero,
+      radius: LocalLinkRadius.md,
+      child: SizedBox(
+        height: selectedImage == null ? 112 : 204,
+        width: double.infinity,
+        child: selectedImage == null
+            ? const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  LocalLinkIconBadge(
+                    icon: Icons.add_photo_alternate_outlined,
+                    color: AppColors.communityTeal,
+                  ),
+                  SizedBox(height: LocalLinkSpacing.sm),
+                  Text(
+                    'Add a helpful photo',
+                    style: LocalLinkTextStyles.bodyStrong,
+                  ),
+                  SizedBox(height: LocalLinkSpacing.xxs),
+                  Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: LocalLinkSpacing.md,
                     ),
-                  ],
-                )
-              : ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.file(selectedImage!, fit: BoxFit.cover),
-                ),
-        ),
+                    child: Text(
+                      'Optional, but especially useful for missing pets.',
+                      textAlign: TextAlign.center,
+                      style: LocalLinkTextStyles.metadata,
+                    ),
+                  ),
+                ],
+              )
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(LocalLinkRadius.md),
+                child: Image.file(selectedImage!, fit: BoxFit.cover),
+              ),
       ),
     );
   }
 }
 
-class _LostFoundDiscoveryList extends StatelessWidget {
+class _LostFoundDiscoveryList extends StatefulWidget {
   const _LostFoundDiscoveryList({required this.onOpenPost});
 
   final ValueChanged<DocumentSnapshot<Map<String, dynamic>>> onOpenPost;
 
   @override
+  State<_LostFoundDiscoveryList> createState() =>
+      _LostFoundDiscoveryListState();
+}
+
+class _LostFoundDiscoveryListState extends State<_LostFoundDiscoveryList> {
+  Position? _userPosition;
+  bool _locationLookupComplete = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocation();
+  }
+
+  Future<void> _loadLocation() async {
+    final position = await LocationService().getCurrentLocation();
+    if (!mounted) return;
+    setState(() {
+      _userPosition = position;
+      _locationLookupComplete = true;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!_locationLookupComplete) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: LocalLinkSpacing.lg),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_userPosition == null) {
+      return const _EmptyCommunityHelpState(
+        icon: Icons.location_on_outlined,
+        title: 'Set your location to see missing pets near you',
+        message:
+            'LocalLink only shows missing pets and lost property when it can check they are nearby.',
+      );
+    }
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('communityHelpPosts')
@@ -1516,7 +1681,13 @@ class _LostFoundDiscoveryList extends StatelessWidget {
       builder: (context, snapshot) {
         final now = DateTime.now();
         final docs = (snapshot.data?.docs.toList() ?? []).where((doc) {
-          return CommunityHelpLifecycle.isActiveForDiscovery(doc.data(), now);
+          final data = doc.data();
+          return CommunityHelpLifecycle.isActiveForDiscovery(data, now) &&
+              LocalDiscoveryFilters.isCommunityHelpGeographicallyEligible(
+                data,
+                userLatitude: _userPosition?.latitude,
+                userLongitude: _userPosition?.longitude,
+              );
         }).toList();
         docs.sort((a, b) {
           final aData = a.data();
@@ -1543,7 +1714,7 @@ class _LostFoundDiscoveryList extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Active Lost & Found nearby',
+              'Nearby',
               style: TextStyle(
                 color: AppColors.charcoal,
                 fontSize: 19,
@@ -1555,11 +1726,86 @@ class _LostFoundDiscoveryList extends StatelessWidget {
               const Center(child: CircularProgressIndicator())
             else if (docs.isEmpty)
               const Text(
-                'No active lost or found posts yet.',
+                'No active lost or found reports nearby right now.',
                 style: TextStyle(
                   color: AppColors.textMuted,
                   fontWeight: FontWeight.w700,
                 ),
+              )
+            else
+              ...docs
+                  .take(12)
+                  .map(
+                    (doc) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _LostFoundCard(
+                        post: doc,
+                        onTap: () => widget.onOpenPost(doc),
+                      ),
+                    ),
+                  ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _FollowingCommunityPostsList extends StatelessWidget {
+  const _FollowingCommunityPostsList({required this.onOpenPost});
+
+  final ValueChanged<DocumentSnapshot<Map<String, dynamic>>> onOpenPost;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.isAnonymous) return const SizedBox.shrink();
+
+    return StreamBuilder<List<DocumentSnapshot<Map<String, dynamic>>>>(
+      stream: CommunityHelpFollowingService().watchFollowing(user.uid),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.toList() ?? [];
+        docs.sort((a, b) {
+          final aUpdated = CommunityHelpLifecycle.asDateTime(
+            a.data()?['updatedAt'] ?? a.data()?['createdAt'],
+          );
+          final bUpdated = CommunityHelpLifecycle.asDateTime(
+            b.data()?['updatedAt'] ?? b.data()?['createdAt'],
+          );
+          if (aUpdated != null && bUpdated != null) {
+            return bUpdated.compareTo(aUpdated);
+          }
+          return 0;
+        });
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Following',
+              style: TextStyle(
+                color: AppColors.charcoal,
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Reports you're actively keeping a lookout for.",
+              style: LocalLinkTextStyles.metadata,
+            ),
+            const SizedBox(height: 10),
+            if (snapshot.connectionState == ConnectionState.waiting)
+              const Center(child: CircularProgressIndicator())
+            else if (snapshot.hasError)
+              const Text(
+                "We couldn't load the reports you're following.",
+                style: LocalLinkTextStyles.metadata,
+              )
+            else if (docs.isEmpty)
+              const Text(
+                'Tap “Keep a lookout” on a report to follow its updates.',
+                style: LocalLinkTextStyles.metadata,
               )
             else
               ...docs
@@ -1580,6 +1826,51 @@ class _LostFoundDiscoveryList extends StatelessWidget {
   }
 }
 
+class _EmptyCommunityHelpState extends StatelessWidget {
+  const _EmptyCommunityHelpState({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: LocalLinkSpacing.lg),
+      child: LocalLinkSurfaceCard(
+        child: Column(
+          children: [
+            Icon(icon, color: AppColors.primary, size: 28),
+            const SizedBox(height: LocalLinkSpacing.sm),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.charcoal,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: LocalLinkSpacing.xs),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MyCommunityPostsList extends StatelessWidget {
   const _MyCommunityPostsList({required this.onOpenPost});
 
@@ -1588,57 +1879,12 @@ class _MyCommunityPostsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || user.isAnonymous) return const SizedBox.shrink();
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('communityHelpPosts')
-          .where('createdBy', isEqualTo: user.uid)
-          .limit(30)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs.toList() ?? [];
-        if (docs.isEmpty) return const SizedBox.shrink();
-
-        docs.sort((a, b) {
-          final aCreated = CommunityHelpLifecycle.asDateTime(
-            a.data()['createdAt'],
-          );
-          final bCreated = CommunityHelpLifecycle.asDateTime(
-            b.data()['createdAt'],
-          );
-          if (aCreated != null && bCreated != null) {
-            return bCreated.compareTo(aCreated);
-          }
-          return 0;
-        });
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'My Community Posts',
-              style: TextStyle(
-                color: AppColors.charcoal,
-                fontSize: 19,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 10),
-            ...docs
-                .take(6)
-                .map(
-                  (doc) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _LostFoundCard(
-                      post: doc,
-                      onTap: () => onOpenPost(doc),
-                    ),
-                  ),
-                ),
-          ],
-        );
-      },
+    return CommunityHelpOwnReports(
+      userId: user == null || user.isAnonymous ? null : user.uid,
+      reportBuilder: (doc) => _LostFoundCard(
+        post: doc,
+        onTap: () => onOpenPost(doc),
+      ),
     );
   }
 }
@@ -1653,99 +1899,164 @@ class _LostFoundCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = post.data() ?? {};
     final mode = data['mode'] as String? ?? 'lost';
+    final type = data['type'] as String? ?? 'lost_found';
     final isLost = mode == 'lost';
     final title = data['title'] as String? ?? 'Untitled';
-    final location =
-        data['publicLocation'] as String? ?? data['location'] as String? ?? '';
-    final timing =
-        data['eventDateText'] as String? ?? data['timing'] as String? ?? '';
+    final location = CommunityHelpLocation.publicLabel(data);
     final category = data['itemCategory'] as String? ?? 'Item';
+    final itemLabel = data['petType'] as String? ?? category;
+    final timing = CommunityHelpLifecycle.observedAtText(data, DateTime.now());
     final photoUrl = data['photoUrl'] as String?;
     final lookoutCount = (data['lookoutCount'] as num?)?.toInt() ?? 0;
     final status = CommunityHelpLifecycle.friendlyStatus(data, DateTime.now());
+    final isResolved = CommunityHelpLifecycle.isResolved(data);
+    final isPet = _isPetCategory(category);
+    final isMissingPet = isLost && isPet;
+    final accent = _communityAccent(mode: mode, type: type);
+    final statusLabel = status == 'Expired' || isResolved
+        ? status.toUpperCase()
+        : type == 'free_item'
+        ? status.toUpperCase()
+        : isLost
+        ? 'MISSING'
+        : 'FOUND';
 
-    return Material(
-      color: AppColors.card,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+    if (isMissingPet) {
+      return LocalLinkSurfaceCard(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              _PostThumb(photoUrl: photoUrl, mode: mode),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        _StatusPill(label: isLost ? 'LOST' : 'FOUND'),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            category,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (status == 'Expired') ...[
-                          const SizedBox(width: 8),
-                          const _StatusPill(label: 'EXPIRED'),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.charcoal,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      [
-                        location,
-                        timing,
-                      ].where((value) => value.isNotEmpty).join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (isLost && lookoutCount > 0) ...[
-                      const SizedBox(height: 5),
-                      Text(
-                        '$lookoutCount people keeping a lookout',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.serviceGreen,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
+        elevated: false,
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PostHeroImage(
+              photoUrl: photoUrl,
+              mode: mode,
+              type: type,
+              category: category,
+              aspectRatio: 16 / 10,
+            ),
+            Padding(
+              padding: const EdgeInsets.all(LocalLinkSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: LocalLinkSpacing.xs,
+                    runSpacing: LocalLinkSpacing.xs,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _StatusPill(label: statusLabel),
+                      Text(itemLabel, style: LocalLinkTextStyles.metadata),
+                      if (status == 'Expired' && statusLabel != 'EXPIRED')
+                        const _StatusPill(label: 'EXPIRED'),
                     ],
+                  ),
+                  const SizedBox(height: LocalLinkSpacing.xs),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: LocalLinkTextStyles.sectionTitle,
+                  ),
+                  if (location.isNotEmpty) ...[
+                    const SizedBox(height: LocalLinkSpacing.xs),
+                    _DetailLine(
+                      icon: Icons.place_outlined,
+                      label: 'Last seen near',
+                      value: location,
+                      accent: accent,
+                    ),
+                  ],
+                  if (timing.isNotEmpty) ...[
+                    const SizedBox(height: LocalLinkSpacing.xs),
+                    _DetailLine(
+                      icon: Icons.schedule_outlined,
+                      label: 'Time last seen',
+                      value: timing,
+                      accent: accent,
+                    ),
+                  ],
+                  if (lookoutCount > 0) ...[
+                    const SizedBox(height: LocalLinkSpacing.sm),
+                    Text(
+                      '$lookoutCount people keeping a lookout',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: LocalLinkTextStyles.label.copyWith(
+                        color: AppColors.serviceGreen,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return LocalLinkSurfaceCard(
+      onTap: onTap,
+      elevated: false,
+      padding: const EdgeInsets.all(LocalLinkSpacing.sm),
+      child: Row(
+        children: [
+          _PostThumb(
+            photoUrl: photoUrl,
+            mode: mode,
+            type: type,
+            category: category,
+          ),
+          const SizedBox(width: LocalLinkSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: LocalLinkSpacing.xs,
+                  runSpacing: LocalLinkSpacing.xxs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _StatusPill(label: statusLabel),
+                    Text(itemLabel, style: LocalLinkTextStyles.metadata),
+                    if (status == 'Expired' && statusLabel != 'EXPIRED')
+                      const _StatusPill(label: 'EXPIRED'),
                   ],
                 ),
-              ),
-              const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            ],
+                const SizedBox(height: LocalLinkSpacing.xxs),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: LocalLinkTextStyles.cardTitle,
+                ),
+                const SizedBox(height: LocalLinkSpacing.xxs),
+                Text(
+                  [
+                    location,
+                    timing,
+                  ].where((value) => value.isNotEmpty).join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: LocalLinkTextStyles.metadata,
+                ),
+                if (isLost && lookoutCount > 0) ...[
+                  const SizedBox(height: LocalLinkSpacing.xxs),
+                  Text(
+                    '$lookoutCount people keeping a lookout',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: LocalLinkTextStyles.label.copyWith(
+                      color: AppColors.serviceGreen,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
+          const Icon(Icons.chevron_right, color: AppColors.textMuted),
+        ],
       ),
     );
   }
@@ -1758,7 +2069,9 @@ class _LostFoundDetailSheet extends StatelessWidget {
     required this.onResolve,
     required this.onRenew,
     required this.onShare,
+    required this.onCopyLink,
     required this.onPublishUpdate,
+    required this.onClaimMissingPet,
   });
 
   final DocumentSnapshot<Map<String, dynamic>> post;
@@ -1766,26 +2079,32 @@ class _LostFoundDetailSheet extends StatelessWidget {
   final VoidCallback onResolve;
   final VoidCallback onRenew;
   final ValueChanged<BuildContext> onShare;
+  final VoidCallback onCopyLink;
   final VoidCallback onPublishUpdate;
+  final VoidCallback onClaimMissingPet;
 
   @override
   Widget build(BuildContext context) {
     final data = post.data() ?? {};
     final userId = FirebaseAuth.instance.currentUser?.uid;
-    final isOwner = data['createdBy'] == userId;
+    final ownerId = resolveCommunityHelpOwnerId(data);
+    final isOwner = ownerId != null && ownerId == userId;
     final mode = data['mode'] as String? ?? 'lost';
     final type = data['type'] as String? ?? 'lost_found';
     final isLost = mode == 'lost';
     final title = data['title'] as String? ?? 'Untitled';
     final description = data['description'] as String? ?? '';
-    final location =
-        data['publicLocation'] as String? ?? data['location'] as String? ?? '';
-    final timing =
-        data['eventDateText'] as String? ?? data['timing'] as String? ?? '';
+    final location = CommunityHelpLocation.publicLabel(data);
     final category = data['itemCategory'] as String? ?? 'Item';
+    final itemLabel = data['petType'] as String? ?? category;
     final photoUrl = data['photoUrl'] as String?;
     final lookoutCount = (data['lookoutCount'] as num?)?.toInt() ?? 0;
+    final isPet = _isPetCategory(category);
+    final isCommunityAddedPet = isCommunityAddedMissingPet(data);
+    final isClaimableCommunityAddedPet = canClaimCommunityAddedMissingPet(data);
+    final claimStatus = data['claimStatus']?.toString() ?? '';
     final now = DateTime.now();
+    final timing = CommunityHelpLifecycle.observedAtText(data, now);
     final isExpired = CommunityHelpLifecycle.isExpired(data, now);
     final isResolved = CommunityHelpLifecycle.isResolved(data);
     final isActive = CommunityHelpLifecycle.isActiveForDiscovery(data, now);
@@ -1796,6 +2115,29 @@ class _LostFoundDetailSheet extends StatelessWidget {
       itemCategory: category,
     );
     final responseLabel = CommunityHelpLifecycle.responseActionLabel(data);
+    final accent = _communityAccent(mode: mode, type: type);
+    final statusLabel = type == 'free_item'
+        ? friendlyStatus.toUpperCase()
+        : isExpired || isResolved
+        ? friendlyStatus.toUpperCase()
+        : isLost
+        ? 'MISSING'
+        : 'FOUND';
+    final shareLabel = isResolved
+        ? isLost && isPet
+              ? 'Share reunited update'
+              : 'Share resolved update'
+        : 'Share alert';
+    final locationLabel = isLost
+        ? 'Last seen near'
+        : type == 'free_item'
+        ? 'Area'
+        : 'Found near';
+    final timingLabel = isLost
+        ? 'Time last seen'
+        : type == 'free_item'
+        ? 'Timing'
+        : 'Time found';
     final shouldShowDescription =
         description.trim().isNotEmpty &&
         description.trim().toLowerCase() != title.trim().toLowerCase() &&
@@ -1822,42 +2164,77 @@ class _LostFoundDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            _PostHeroImage(photoUrl: photoUrl, mode: mode),
+            _PostHeroImage(
+              photoUrl: photoUrl,
+              mode: mode,
+              type: type,
+              category: category,
+              aspectRatio: isPet ? 4 / 3 : 16 / 10,
+            ),
             const SizedBox(height: 16),
-            Row(
+            Wrap(
+              spacing: LocalLinkSpacing.xs,
+              runSpacing: LocalLinkSpacing.xs,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                _StatusPill(label: isLost ? 'LOST' : 'FOUND'),
-                const SizedBox(width: 8),
-                Text(
-                  friendlyStatus,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+                _StatusPill(label: statusLabel),
+                if (isCommunityAddedPet)
+                  const _StatusPill(label: 'COMMUNITY-ADDED'),
+                Text(friendlyStatus, style: LocalLinkTextStyles.metadata),
               ],
             ),
+            if (isCommunityAddedPet) ...[
+              const SizedBox(height: 12),
+              _LifecycleMessage(
+                icon: Icons.verified_user_outlined,
+                text: claimStatus == 'pending'
+                    ? 'Ownership claim pending. A LocalLink moderator will review it.'
+                    : ownerId == null
+                    ? 'Community-added missing pet. This post was added by LocalLink from community information.'
+                    : 'This missing pet post has been claimed by the owner.',
+              ),
+            ],
             const SizedBox(height: 10),
             Text(
               title,
-              style: const TextStyle(
-                color: AppColors.charcoal,
-                fontSize: 24,
-                height: 1.08,
-                fontWeight: FontWeight.w900,
-              ),
+              style: LocalLinkTextStyles.screenTitle.copyWith(fontSize: 26),
             ),
-            const SizedBox(height: 8),
-            Text(
-              [
-                category,
-                location,
-                timing,
-              ].where((value) => value.isNotEmpty).join(' · '),
-              style: const TextStyle(
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w800,
-                height: 1.3,
+            const SizedBox(height: LocalLinkSpacing.sm),
+            LocalLinkSurfaceCard(
+              elevated: false,
+              color: AppColors.elevatedSurface,
+              padding: const EdgeInsets.all(LocalLinkSpacing.md),
+              child: Column(
+                children: [
+                  _DetailLine(
+                    icon: isPet
+                        ? Icons.pets_outlined
+                        : Icons.inventory_2_outlined,
+                    label: type == 'free_item'
+                        ? 'Post type'
+                        : 'What to look for',
+                    value: itemLabel,
+                    accent: accent,
+                  ),
+                  if (location.isNotEmpty) ...[
+                    const SizedBox(height: LocalLinkSpacing.sm),
+                    _DetailLine(
+                      icon: Icons.place_outlined,
+                      label: locationLabel,
+                      value: location,
+                      accent: accent,
+                    ),
+                  ],
+                  if (timing.isNotEmpty) ...[
+                    const SizedBox(height: LocalLinkSpacing.sm),
+                    _DetailLine(
+                      icon: Icons.schedule_outlined,
+                      label: timingLabel,
+                      value: timing,
+                      accent: accent,
+                    ),
+                  ],
+                ],
               ),
             ),
             if (isLost && lookoutCount > 0) ...[
@@ -1892,47 +2269,30 @@ class _LostFoundDetailSheet extends StatelessWidget {
             const SizedBox(height: 22),
             if (isOwner) ...[
               if (isExpired)
-                ElevatedButton.icon(
+                LocalLinkButton(
+                  label: 'Keep this active',
+                  icon: Icons.refresh_outlined,
                   onPressed: onRenew,
-                  icon: const Icon(Icons.refresh_outlined),
-                  label: const Text('Keep this active'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: AppColors.buttonText,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  expand: true,
                 ),
               if (isActive)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: OutlinedButton.icon(
+                  child: LocalLinkButton(
+                    label: 'Post an update',
+                    icon: Icons.campaign_outlined,
                     onPressed: onPublishUpdate,
-                    icon: const Icon(Icons.campaign_outlined),
-                    label: const Text('Post an update'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                    variant: LocalLinkButtonVariant.secondary,
+                    expand: true,
                   ),
                 ),
               if (isActive)
-                ElevatedButton.icon(
+                LocalLinkButton(
+                  label: resolveLabel,
+                  icon: Icons.check_circle_outline,
                   onPressed: onResolve,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: Text(resolveLabel),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.success,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+                  variant: LocalLinkButtonVariant.primary,
+                  expand: true,
                 ),
               if (isResolved)
                 const _LifecycleMessage(
@@ -1943,21 +2303,35 @@ class _LostFoundDetailSheet extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (isLost) _FollowUpdatesButton(postId: post.id),
-                  if (isLost) const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: onContact,
-                    icon: const Icon(Icons.lock_outline),
-                    label: Text(responseLabel),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: AppColors.buttonText,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                  if (isClaimableCommunityAddedPet)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: LocalLinkButton(
+                        label: 'Is this your pet? Claim this post',
+                        icon: Icons.verified_user_outlined,
+                        onPressed: onClaimMissingPet,
+                        expand: true,
                       ),
                     ),
-                  ),
+                  if (ownerId != null)
+                    LocalLinkButton(
+                      label: isLost && isPet
+                          ? 'I may have seen this pet'
+                          : responseLabel,
+                      icon: Icons.lock_outline,
+                      onPressed: onContact,
+                      expand: true,
+                    )
+                  else if (isCommunityAddedPet)
+                    const _LifecycleMessage(
+                      icon: Icons.privacy_tip_outlined,
+                      text:
+                          'Private sightings will open once the owner has claimed this post.',
+                    ),
+                  if (isLost) ...[
+                    const SizedBox(height: LocalLinkSpacing.sm),
+                    _FollowUpdatesButton(postId: post.id),
+                  ],
                 ],
               )
             else
@@ -1966,16 +2340,20 @@ class _LostFoundDetailSheet extends StatelessWidget {
                 text: 'This post is no longer active.',
               ),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
+            LocalLinkButton(
+              label: shareLabel,
+              icon: Icons.ios_share_outlined,
               onPressed: () => onShare(context),
-              icon: const Icon(Icons.ios_share_outlined),
-              label: const Text('Share alert'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
+              variant: LocalLinkButtonVariant.secondary,
+              expand: true,
+            ),
+            const SizedBox(height: 10),
+            LocalLinkButton(
+              label: 'Copy link',
+              icon: Icons.link_outlined,
+              onPressed: onCopyLink,
+              variant: LocalLinkButtonVariant.secondary,
+              expand: true,
             ),
             const SizedBox(height: 22),
             _PublicUpdatesList(postId: post.id),
@@ -1996,75 +2374,198 @@ class _LifecycleMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
-      ),
+    return LocalLinkSurfaceCard(
+      elevated: false,
+      color: AppColors.elevatedSurface,
+      padding: const EdgeInsets.all(LocalLinkSpacing.md),
       child: Row(
         children: [
           Icon(icon, color: AppColors.textMuted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
+          const SizedBox(width: LocalLinkSpacing.sm),
+          Expanded(child: Text(text, style: LocalLinkTextStyles.metadata)),
         ],
       ),
     );
   }
 }
 
-class _PostHeroImage extends StatelessWidget {
-  const _PostHeroImage({required this.photoUrl, required this.mode});
+// Classify the existing callable failure without changing retry or cooldown policy.
+String communityHelpPublicUpdateFailureMessage(Object error) {
+  return error is FirebaseFunctionsException && error.code == 'resource-exhausted'
+      ? 'Updates can be sent every 30 minutes.'
+      : "We couldn't share your update. Please try again.";
+}
 
-  final String? photoUrl;
-  final String mode;
+class _PublicUpdateDialog extends StatefulWidget {
+  const _PublicUpdateDialog();
+
+  @override
+  State<_PublicUpdateDialog> createState() => _PublicUpdateDialogState();
+}
+
+class _PublicUpdateDialogState extends State<_PublicUpdateDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final image = photoUrl?.trim();
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: AspectRatio(
-        aspectRatio: 16 / 10,
-        child: image != null && image.isNotEmpty
-            ? Image.network(
-                image,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return _PostHeroPlaceholder(mode: mode);
-                },
-              )
-            : _PostHeroPlaceholder(mode: mode),
+    return AlertDialog(
+      title: const Text('Share an update'),
+      content: TextField(
+        controller: _controller,
+        maxLength: 240,
+        minLines: 2,
+        maxLines: 4,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          hintText: 'Short public update for people keeping a lookout',
+        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('Post update'),
+        ),
+      ],
     );
   }
 }
 
-class _PostHeroPlaceholder extends StatelessWidget {
-  const _PostHeroPlaceholder({required this.mode});
+class _ClosingUpdateDialog extends StatefulWidget {
+  const _ClosingUpdateDialog({required this.title});
 
-  final String mode;
+  final String title;
+
+  @override
+  State<_ClosingUpdateDialog> createState() => _ClosingUpdateDialogState();
+}
+
+class _ClosingUpdateDialogState extends State<_ClosingUpdateDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: AppColors.primary.withValues(alpha: 0.1),
-      alignment: Alignment.center,
-      child: Icon(
-        mode == 'lost' ? Icons.search_outlined : Icons.inventory_2_outlined,
-        color: AppColors.primary,
-        size: 42,
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        maxLength: 160,
+        minLines: 2,
+        maxLines: 4,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          hintText: 'Optional update for people keeping a lookout',
+        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, ''),
+          child: const Text('Skip'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailLine extends StatelessWidget {
+  const _DetailLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: accent, size: 20),
+        const SizedBox(width: LocalLinkSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: LocalLinkTextStyles.status.copyWith(
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: LocalLinkSpacing.xxs),
+              Text(
+                value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: LocalLinkTextStyles.bodyStrong,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PostHeroImage extends StatelessWidget {
+  const _PostHeroImage({
+    required this.photoUrl,
+    required this.mode,
+    required this.type,
+    required this.category,
+    required this.aspectRatio,
+  });
+
+  final String? photoUrl;
+  final String mode;
+  final String type;
+  final String category;
+  final double aspectRatio;
+
+  @override
+  Widget build(BuildContext context) {
+    return LocalLinkImage(
+      imageUrl: photoUrl,
+      aspectRatio: aspectRatio,
+      fallbackIcon: _communityFallbackIcon(
+        mode: mode,
+        type: type,
+        category: category,
+      ),
+      accentColor: _communityAccent(mode: mode, type: type),
+      semanticLabel: _isPetCategory(category)
+          ? 'Community Help pet photo'
+          : 'Community Help image',
     );
   }
 }
@@ -2097,7 +2598,17 @@ class _FollowUpdatesButtonState extends State<_FollowUpdatesButton> {
       builder: (context, snapshot) {
         final isFollowing = snapshot.data?.exists == true;
 
-        return OutlinedButton.icon(
+        return LocalLinkButton(
+          label: _isSaving
+              ? 'Saving...'
+              : isFollowing
+              ? "You're keeping a lookout"
+              : 'Keep a lookout',
+          icon: isFollowing
+              ? Icons.notifications_active_outlined
+              : Icons.notifications_none_outlined,
+          variant: LocalLinkButtonVariant.secondary,
+          expand: true,
           onPressed: _isSaving
               ? null
               : () async {
@@ -2108,29 +2619,15 @@ class _FollowUpdatesButtonState extends State<_FollowUpdatesButton> {
                       await service.unfollowCommunityHelpPost(widget.postId);
                     } else {
                       await service.followCommunityHelpPost(widget.postId);
+                      await LocalLinkAnalytics.instance.logEvent(
+                        'community_help_followed',
+                        {'source': 'community_help_detail'},
+                      );
                     }
                   } finally {
                     if (mounted) setState(() => _isSaving = false);
                   }
                 },
-          icon: Icon(
-            isFollowing
-                ? Icons.notifications_active_outlined
-                : Icons.notifications_none_outlined,
-          ),
-          label: Text(
-            _isSaving
-                ? 'Saving...'
-                : isFollowing
-                ? 'Following updates'
-                : 'Keep a lookout',
-          ),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
         );
       },
     );
@@ -2159,28 +2656,19 @@ class _PublicUpdatesList extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _QuestionLabel('Updates'),
+            const LocalLinkSectionHeader(title: 'Updates'),
             ...docs.map((doc) {
               final data = doc.data();
               final text = data['text'] as String? ?? '';
               if (text.isEmpty) return const SizedBox.shrink();
 
-              return Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Text(
-                  text,
-                  style: const TextStyle(
-                    color: AppColors.charcoal,
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                  ),
+              return Padding(
+                padding: const EdgeInsets.only(bottom: LocalLinkSpacing.xs),
+                child: LocalLinkSurfaceCard(
+                  elevated: false,
+                  color: AppColors.elevatedSurface,
+                  padding: const EdgeInsets.all(LocalLinkSpacing.md),
+                  child: Text(text, style: LocalLinkTextStyles.body),
                 ),
               );
             }),
@@ -2228,15 +2716,7 @@ class _PossibleMatches extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Possible matches',
-              style: TextStyle(
-                color: AppColors.charcoal,
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 8),
+            const LocalLinkSectionHeader(title: 'Possible matches'),
             ...matches.map(
               (match) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -2260,8 +2740,7 @@ class _CompactMatchCard extends StatelessWidget {
     final data = post.data();
     final mode = data['mode'] as String? ?? 'lost';
     final title = data['title'] as String? ?? 'Untitled';
-    final location =
-        data['publicLocation'] as String? ?? data['location'] as String? ?? '';
+    final location = CommunityHelpLocation.publicLabel(data);
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -2292,31 +2771,35 @@ class _CompactMatchCard extends StatelessWidget {
 }
 
 class _PostThumb extends StatelessWidget {
-  const _PostThumb({required this.photoUrl, required this.mode});
+  const _PostThumb({
+    required this.photoUrl,
+    required this.mode,
+    required this.type,
+    required this.category,
+  });
 
   final String? photoUrl;
   final String mode;
+  final String type;
+  final String category;
 
   @override
   Widget build(BuildContext context) {
-    final image = photoUrl;
-    if (image != null && image.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(image, width: 58, height: 58, fit: BoxFit.cover),
-      );
-    }
-
-    return Container(
-      width: 58,
+    return SizedBox(
+      width: 64,
       height: 58,
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(
-        mode == 'lost' ? Icons.search_outlined : Icons.inventory_2_outlined,
-        color: AppColors.primary,
+      child: LocalLinkImage(
+        imageUrl: photoUrl,
+        aspectRatio: 1,
+        fallbackIcon: _communityFallbackIcon(
+          mode: mode,
+          type: type,
+          category: category,
+        ),
+        accentColor: _communityAccent(mode: mode, type: type),
+        semanticLabel: _isPetCategory(category)
+            ? 'Community Help pet thumbnail'
+            : 'Community Help thumbnail',
       ),
     );
   }
@@ -2329,23 +2812,32 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLost = label == 'LOST';
+    final color = switch (label) {
+      'MISSING' || 'LOST' => AppColors.lost,
+      'FOUND' ||
+      'AVAILABLE' ||
+      'REUNITED' ||
+      'RETURNED' ||
+      'COLLECTED' ||
+      'RESOLVED' => AppColors.success,
+      'NO LONGER NEEDED' => AppColors.textMuted,
+      'EXPIRED' => AppColors.textMuted,
+      _ => AppColors.communityTeal,
+    };
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LocalLinkSpacing.xs,
+        vertical: LocalLinkSpacing.xxs,
+      ),
       decoration: BoxDecoration(
-        color: (isLost ? AppColors.error : AppColors.serviceGreen).withValues(
-          alpha: 0.12,
-        ),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.xs),
+        border: Border.all(color: color.withValues(alpha: 0.20)),
       ),
       child: Text(
         label,
-        style: TextStyle(
-          color: isLost ? AppColors.error : AppColors.serviceGreen,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0,
-        ),
+        style: LocalLinkTextStyles.status.copyWith(color: color),
       ),
     );
   }

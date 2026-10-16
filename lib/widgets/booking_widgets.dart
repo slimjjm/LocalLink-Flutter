@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../utils/helpers.dart';
+
 String safeText(dynamic value, String fallback) {
   if (value == null) {
     return fallback;
@@ -270,8 +272,24 @@ class PaymentMethodSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (paymentMethods.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Row(
+          children: [
+            Icon(Icons.payment_outlined),
+            SizedBox(width: 8),
+            Text(
+              'Payment: To be arranged',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (paymentMethods.length <= 1) {
-      final method = paymentMethods.isEmpty ? 'cash' : paymentMethods.first;
+      final method = paymentMethods.first;
 
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
@@ -280,7 +298,7 @@ class PaymentMethodSelector extends StatelessWidget {
             const Icon(Icons.payment),
             const SizedBox(width: 8),
             Text(
-              method == 'stripe' ? 'Payment: Card' : 'Payment: Cash',
+              'Payment: ${paymentMethodLabel(method)}',
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ],
@@ -301,7 +319,7 @@ class PaymentMethodSelector extends StatelessWidget {
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
                 selected: isSelected,
-                label: Text(method == 'stripe' ? 'Card' : 'Cash'),
+                label: Text(paymentMethodLabel(method)),
                 selectedColor: Colors.orange,
                 labelStyle: TextStyle(
                   color: isSelected ? Colors.white : Colors.black,

@@ -5,7 +5,9 @@ import 'package:geolocator/geolocator.dart';
 import '../screens/availability_detail_screen.dart';
 import '../screens/business_detail_screen.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import '../utils/helpers.dart';
+import 'local_link_image.dart';
 import 'local_link_surface_card.dart';
 
 class MarketplaceBusinessCard extends StatelessWidget {
@@ -63,18 +65,7 @@ class MarketplaceBusinessCard extends StatelessWidget {
         final reviewCount = businessData['reviewCount'];
         final milesAway = _milesAway(businessData);
         final visiblePosts = availabilityPosts.take(8).toList();
-        final photoUrls = List<String>.from(
-          businessData['photoURLs'] ?? businessData['galleryUrls'] ?? [],
-        );
-        final bannerUrl =
-            (businessData['bannerImageUrl'] ?? businessData['bannerUrl'])
-                ?.toString()
-                .trim();
-        final coverUrl = bannerUrl?.isNotEmpty == true
-            ? bannerUrl
-            : photoUrls.isNotEmpty
-            ? photoUrls.first
-            : null;
+        final coverUrl = businessCoverImageUrl(businessData);
         final hasTodayAvailability = availabilityPosts.any((post) {
           final value = post.data()['availabilityAt'];
           if (value is! Timestamp) return false;
@@ -88,7 +79,7 @@ class MarketplaceBusinessCard extends StatelessWidget {
 
         return LocalLinkSurfaceCard(
           padding: EdgeInsets.zero,
-          radius: 24,
+          radius: LocalLinkRadius.lg,
           onTap: () {
             Navigator.push(
               context,
@@ -102,62 +93,18 @@ class MarketplaceBusinessCard extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
+                  top: Radius.circular(LocalLinkRadius.lg),
                 ),
                 child: SizedBox(
                   height: 96,
                   width: double.infinity,
-                  child: coverUrl == null
-                      ? Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                AppColors.serviceGreen.withValues(alpha: 0.9),
-                                AppColors.charcoal.withValues(alpha: 0.84),
-                              ],
-                            ),
-                          ),
-                          child: const Align(
-                            alignment: Alignment.centerRight,
-                            child: Padding(
-                              padding: EdgeInsets.only(right: 22),
-                              child: Icon(
-                                Icons.storefront_outlined,
-                                color: Colors.white,
-                                size: 42,
-                              ),
-                            ),
-                          ),
-                        )
-                      : Image.network(
-                          coverUrl,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              color: AppColors.serviceGreen.withValues(
-                                alpha: 0.08,
-                              ),
-                              child: const Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.serviceGreen,
-                                ),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: AppColors.serviceGreen.withValues(
-                                alpha: 0.10,
-                              ),
-                              child: const Icon(
-                                Icons.storefront_outlined,
-                                color: AppColors.serviceGreen,
-                              ),
-                            );
-                          },
-                        ),
+                  child: LocalLinkImage(
+                    imageUrl: coverUrl,
+                    aspectRatio: 3.4,
+                    fallbackIcon: Icons.storefront_outlined,
+                    accentColor: AppColors.serviceGreen,
+                    semanticLabel: businessName,
+                  ),
                 ),
               ),
               Padding(
@@ -170,7 +117,7 @@ class MarketplaceBusinessCard extends StatelessWidget {
                       height: 58,
                       decoration: BoxDecoration(
                         color: AppColors.serviceGreen.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(LocalLinkRadius.md),
                       ),
                       child: const Icon(
                         Icons.storefront_outlined,
@@ -186,10 +133,8 @@ class MarketplaceBusinessCard extends StatelessWidget {
                             businessName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.charcoal,
+                            style: LocalLinkTextStyles.cardTitle.copyWith(
                               fontSize: 18,
-                              fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -232,24 +177,23 @@ class MarketplaceBusinessCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: AppColors.serviceGreen.withValues(alpha: 0.11),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(
+                          LocalLinkRadius.pill,
+                        ),
                       ),
                       child: Text(
                         hasTodayAvailability ? 'Free Today' : 'Time Available',
-                        style: const TextStyle(
+                        style: LocalLinkTextStyles.status.copyWith(
                           color: AppColors.serviceGreen,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
                     const Spacer(),
                     if (availabilityPosts.length > visiblePosts.length)
-                      const Text(
+                      Text(
                         'View All',
-                        style: TextStyle(
+                        style: LocalLinkTextStyles.label.copyWith(
                           color: AppColors.serviceGreen,
-                          fontWeight: FontWeight.w900,
                         ),
                       ),
                   ],
@@ -409,9 +353,9 @@ class _AvailabilityTile extends StatelessWidget {
       width: 196,
       child: Material(
         color: AppColors.serviceGreen.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.md),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(LocalLinkRadius.md),
           onTap: () {
             Navigator.push(
               context,
@@ -425,7 +369,7 @@ class _AvailabilityTile extends StatelessWidget {
             );
           },
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(LocalLinkSpacing.sm),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -433,10 +377,7 @@ class _AvailabilityTile extends StatelessWidget {
                   serviceName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.charcoal,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: LocalLinkTextStyles.bodyStrong,
                 ),
                 const SizedBox(height: 5),
                 if (badges.isNotEmpty) ...[
@@ -445,10 +386,8 @@ class _AvailabilityTile extends StatelessWidget {
                 ],
                 Text(
                   _timeLabel(context),
-                  style: const TextStyle(
+                  style: LocalLinkTextStyles.status.copyWith(
                     color: AppColors.serviceGreen,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -457,12 +396,7 @@ class _AvailabilityTile extends StatelessWidget {
                     description,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      height: 1.25,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: LocalLinkTextStyles.metadata.copyWith(fontSize: 12),
                   ),
                 ),
                 StreamBuilder<int>(
@@ -478,9 +412,8 @@ class _AvailabilityTile extends StatelessWidget {
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: LocalLinkTextStyles.status.copyWith(
                         color: AppColors.textMuted,
-                        fontSize: 10,
                         fontWeight: FontWeight.w700,
                       ),
                     );
@@ -489,10 +422,7 @@ class _AvailabilityTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   formatPrice(data['price']),
-                  style: const TextStyle(
-                    color: AppColors.charcoal,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: LocalLinkTextStyles.bodyStrong,
                 ),
               ],
             ),
@@ -521,22 +451,20 @@ class _AvailabilityBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.88),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(data.icon, size: 12, color: AppColors.serviceGreen),
-          const SizedBox(width: 3),
+          const SizedBox(width: LocalLinkSpacing.xxs),
           Flexible(
             child: Text(
               data.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: LocalLinkTextStyles.status.copyWith(
                 color: AppColors.serviceGreen,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
               ),
             ),
           ),
@@ -558,15 +486,8 @@ class _Meta extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 14, color: AppColors.textMuted),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        const SizedBox(width: LocalLinkSpacing.xxs),
+        Text(label, style: LocalLinkTextStyles.metadata.copyWith(fontSize: 12)),
       ],
     );
   }

@@ -1,12 +1,36 @@
+import '../services/community_help_location.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../screens/opportunity_detail_screen.dart';
+import '../screens/organisation_detail_screen.dart';
+import '../services/organisation_discovery_service.dart';
 import '../screens/post_service_request_screen.dart';
 import '../services/location_service.dart';
+import '../services/local_discovery_filters.dart';
 import '../theme/app_colors.dart';
+
+@visibleForTesting
+bool isPublicMapActivity(Map<String, dynamic> data, {required DateTime now}) {
+  return LocalDiscoveryFilters.isActivityDiscoverable(data, now: now);
+}
+
+@visibleForTesting
+bool isPublicMapCommunityHelp(
+  Map<String, dynamic> data, {
+  required DateTime now,
+  required num? userLatitude,
+  required num? userLongitude,
+}) {
+  return LocalDiscoveryFilters.isCommunityHelpDiscoverable(data, now: now) &&
+      LocalDiscoveryFilters.isCommunityHelpGeographicallyEligible(
+        data,
+        userLatitude: userLatitude,
+        userLongitude: userLongitude,
+      );
+}
 
 class OpportunityMapView extends StatefulWidget {
   const OpportunityMapView({super.key});
@@ -30,6 +54,7 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
   Stream<QuerySnapshot<Map<String, dynamic>>> get _opportunityStream {
     return FirebaseFirestore.instance
         .collection('opportunities')
+        .where('discoveryVisibility', isEqualTo: 'public')
         .where('isActive', isEqualTo: true)
         .snapshots();
   }
@@ -99,6 +124,12 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
   }
 
   LatLng? _latLngFromData(Map<String, dynamic> data) {
+    if (data['type'] == 'lost_found' || data['type'] == 'free_item') {
+      final coordinates = CommunityHelpLocation.coordinates(data);
+      return coordinates == null
+          ? null
+          : LatLng(coordinates.latitude, coordinates.longitude);
+    }
     final latitude =
         _readDouble(data, 'latitude') ?? _readDouble(data, 'approxLatitude');
     final longitude =
@@ -111,52 +142,47 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
     return LatLng(latitude, longitude);
   }
 
-  bool _isActiveCommunityHelp(Map<String, dynamic> data) {
-    final status = data['status']?.toString() ?? 'active';
-    final expiresAt = data['expiresAt'];
-
-    if (data['isActive'] == false ||
-        status == 'resolved' ||
-        status == 'expired' ||
-        data['resolvedAt'] != null) {
-      return false;
-    }
-
-    if (expiresAt is Timestamp) {
-      return expiresAt.toDate().isAfter(DateTime.now());
-    }
-
-    return true;
-  }
-
-  bool _isFutureOpportunity(Map<String, dynamic> data) {
-    final eventDate = data['eventDate'];
-
-    if (eventDate is Timestamp) {
-      return eventDate.toDate().isAfter(DateTime.now());
-    }
-
-    return true;
-  }
-
   List<_MapItem> _mappableItems({
     required QuerySnapshot<Map<String, dynamic>> opportunities,
+    required List<OrganisationDiscoveryRecord> organisations,
     required QuerySnapshot<Map<String, dynamic>> communityHelpPosts,
   }) {
     final items = <_MapItem>[];
+    final now = DateTime.now();
 
     for (final doc in opportunities.docs) {
       final data = doc.data();
-      if (_latLngFromData(data) == null || !_isFutureOpportunity(data)) {
+      if (_latLngFromData(data) == null ||
+          !isPublicMapActivity(data, now: now)) {
         continue;
       }
 
       items.add(_MapItem(id: doc.id, kind: _MapItemKind.activity, data: data));
     }
 
+    for (final candidate in OrganisationDiscoveryService.nearbyCandidates(
+      records: organisations,
+      userLatitude: _currentPosition?.latitude,
+      userLongitude: _currentPosition?.longitude,
+    )) {
+      items.add(
+        _MapItem(
+          id: candidate.record.id,
+          kind: _MapItemKind.organisation,
+          data: candidate.record.data,
+        ),
+      );
+    }
+
     for (final doc in communityHelpPosts.docs) {
       final data = doc.data();
-      if (_latLngFromData(data) == null || !_isActiveCommunityHelp(data)) {
+      if (_latLngFromData(data) == null ||
+          !isPublicMapCommunityHelp(
+            data,
+            now: now,
+            userLatitude: _currentPosition?.latitude,
+            userLongitude: _currentPosition?.longitude,
+          )) {
         continue;
       }
 
@@ -177,6 +203,8 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
           ? mode == 'lost'
                 ? BitmapDescriptor.hueRed
                 : BitmapDescriptor.hueGreen
+          : item.kind == _MapItemKind.organisation
+          ? BitmapDescriptor.hueViolet
           : BitmapDescriptor.hueAzure;
 
       return Marker(
@@ -304,107 +332,127 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _communityHelpStream,
-          builder: (context, communitySnapshot) {
-            if (communitySnapshot.hasError) {
+        return StreamBuilder<List<OrganisationDiscoveryRecord>>(
+          stream: OrganisationDiscoveryService.watchActiveOrganisations(),
+          builder: (context, organisationSnapshot) {
+            if (organisationSnapshot.hasError) {
               return const _MapMessage(
                 icon: Icons.error_outline_rounded,
-                title: 'Map could not load',
-                message: 'Something went wrong loading nearby help posts.',
+                title: 'Map could not load organisations',
+                message: 'Please try again in a moment.',
               );
             }
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _communityHelpStream,
+              builder: (context, communitySnapshot) {
+                if (communitySnapshot.hasError) {
+                  return const _MapMessage(
+                    icon: Icons.error_outline_rounded,
+                    title: 'Map could not load',
+                    message: 'Something went wrong loading nearby help posts.',
+                  );
+                }
 
-            if (!communitySnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+                if (!communitySnapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-            final items = _mappableItems(
-              opportunities: snapshot.data!,
-              communityHelpPosts: communitySnapshot.data!,
-            );
-            if (_markers.length != items.length ||
-                !_markers
-                    .map((marker) => marker.markerId.value)
-                    .toSet()
-                    .containsAll(items.map((item) => item.key))) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _refreshMarkers(items);
-              });
-            }
-            final selectedItem = _selectedItemFrom(items);
+                final items = _mappableItems(
+                  opportunities: snapshot.data!,
+                  organisations: organisationSnapshot.data ?? const [],
+                  communityHelpPosts: communitySnapshot.data!,
+                );
+                if (_markers.length != items.length ||
+                    !_markers
+                        .map((marker) => marker.markerId.value)
+                        .toSet()
+                        .containsAll(items.map((item) => item.key))) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _refreshMarkers(items);
+                  });
+                }
+                final selectedItem = _selectedItemFrom(items);
 
-            return Stack(
-              children: [
-                GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                    target: _initialCenter(items),
-                    zoom: _currentPosition == null && items.isEmpty
-                        ? 5.5
-                        : _currentPosition == null
-                        ? 12
-                        : 13,
-                  ),
-                  markers: _markers,
-                  myLocationEnabled: _currentPosition != null,
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapToolbarEnabled: false,
-                  mapType: MapType.normal,
-                  compassEnabled: false,
-                  buildingsEnabled: true,
-                  trafficEnabled: false,
-                  indoorViewEnabled: false,
-                  onMapCreated: (controller) {
-                    _mapController = controller;
-                  },
-                  onCameraMove: (_) {
-                    if (!_showSearchThisArea) {
-                      setState(() {
-                        _showSearchThisArea = true;
-                      });
-                    }
-                  },
-                  onTap: (_) {
-                    setState(() {
-                      _selectedItemKey = null;
-                    });
-                  },
-                ),
+                return Stack(
+                  children: [
+                    GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: _initialCenter(items),
+                        zoom: _currentPosition == null && items.isEmpty
+                            ? 5.5
+                            : _currentPosition == null
+                            ? 12
+                            : 13,
+                      ),
+                      markers: _markers,
+                      myLocationEnabled: _currentPosition != null,
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: false,
+                      mapToolbarEnabled: false,
+                      mapType: MapType.normal,
+                      compassEnabled: false,
+                      buildingsEnabled: true,
+                      trafficEnabled: false,
+                      indoorViewEnabled: false,
+                      onMapCreated: (controller) {
+                        _mapController = controller;
+                      },
+                      onCameraMove: (_) {
+                        if (!_showSearchThisArea) {
+                          setState(() {
+                            _showSearchThisArea = true;
+                          });
+                        }
+                      },
+                      onTap: (_) {
+                        setState(() {
+                          _selectedItemKey = null;
+                        });
+                      },
+                    ),
 
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  child: SafeArea(child: _MapSearchBar(onTap: _searchThisArea)),
-                ),
-
-                if (_showSearchThisArea)
-                  Positioned(
-                    top: 86,
-                    left: 0,
-                    right: 0,
-                    child: SafeArea(
-                      child: Center(
-                        child: _SearchThisAreaButton(onTap: _searchThisArea),
+                    Positioned(
+                      top: 16,
+                      left: 16,
+                      right: 16,
+                      child: SafeArea(
+                        child: _MapSearchBar(onTap: _searchThisArea),
                       ),
                     ),
-                  ),
 
-                Positioned(
-                  right: 16,
-                  bottom: 184,
-                  child: SafeArea(
-                    child: _MapLocationButton(onTap: _centerOnCurrentLocation),
-                  ),
-                ),
+                    if (_showSearchThisArea)
+                      Positioned(
+                        top: 86,
+                        left: 0,
+                        right: 0,
+                        child: SafeArea(
+                          child: Center(
+                            child: _SearchThisAreaButton(
+                              onTap: _searchThisArea,
+                            ),
+                          ),
+                        ),
+                      ),
 
-                _MapBottomSheet(
-                  items: items,
-                  selectedItem: selectedItem,
-                  onSelect: (item) => _selectItem(item, animateCamera: true),
-                ),
-              ],
+                    Positioned(
+                      right: 16,
+                      bottom: 184,
+                      child: SafeArea(
+                        child: _MapLocationButton(
+                          onTap: _centerOnCurrentLocation,
+                        ),
+                      ),
+                    ),
+
+                    _MapBottomSheet(
+                      items: items,
+                      selectedItem: selectedItem,
+                      onSelect: (item) =>
+                          _selectItem(item, animateCamera: true),
+                    ),
+                  ],
+                );
+              },
             );
           },
         );
@@ -413,7 +461,7 @@ class _OpportunityMapViewState extends State<OpportunityMapView> {
   }
 }
 
-enum _MapItemKind { activity, communityHelp }
+enum _MapItemKind { activity, communityHelp, organisation }
 
 class _MapItem {
   const _MapItem({required this.id, required this.kind, required this.data});
@@ -562,6 +610,8 @@ class _MapBottomSheet extends StatelessWidget {
                     ? '${items.length} nearby map items'
                     : selectedItem!.kind == _MapItemKind.communityHelp
                     ? 'Selected help post'
+                    : selectedItem!.kind == _MapItemKind.organisation
+                    ? 'Selected organisation'
                     : 'Selected activity',
                 style: const TextStyle(
                   fontSize: 20,
@@ -584,6 +634,7 @@ class _MapBottomSheet extends StatelessWidget {
                 return _MapOpportunityCard(
                   opportunityId: item.id,
                   data: item.data,
+                  isOrganisation: item.kind == _MapItemKind.organisation,
                   selected: selectedItem?.key == item.key,
                   onSelect: () => onSelect(item),
                 );
@@ -722,11 +773,13 @@ class _MapOpportunityCard extends StatelessWidget {
   final String opportunityId;
   final Map<String, dynamic> data;
   final bool selected;
+  final bool isOrganisation;
   final VoidCallback onSelect;
 
   const _MapOpportunityCard({
     required this.opportunityId,
     required this.data,
+    this.isOrganisation = false,
     required this.selected,
     required this.onSelect,
   });
@@ -747,7 +800,9 @@ class _MapOpportunityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = data['title']?.toString() ?? 'Activity';
+    final title =
+        (isOrganisation ? data['name'] : data['title'])?.toString() ??
+        (isOrganisation ? 'Organisation' : 'Activity');
     final description = data['description']?.toString() ?? '';
     final category = data['category']?.toString() ?? 'Local';
     final location = data['location']?.toString() ?? 'Location to be confirmed';
@@ -787,16 +842,20 @@ class _MapOpportunityCard extends StatelessWidget {
               Row(
                 children: [
                   _CategoryPill(category: category),
-                  const Spacer(),
-                  _MiniStat(
-                    icon: Icons.people_alt_rounded,
-                    text: '$attendeeCount',
-                  ),
-                  const SizedBox(width: 10),
-                  _MiniStat(
-                    icon: Icons.mode_comment_outlined,
-                    text: '$commentCount',
-                  ),
+                  if (isOrganisation)
+                    const _CategoryPill(category: 'Organisation'),
+                  if (!isOrganisation) ...[
+                    const Spacer(),
+                    _MiniStat(
+                      icon: Icons.people_alt_rounded,
+                      text: '$attendeeCount',
+                    ),
+                    const SizedBox(width: 10),
+                    _MiniStat(
+                      icon: Icons.mode_comment_outlined,
+                      text: '$commentCount',
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 14),
@@ -824,11 +883,17 @@ class _MapOpportunityCard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 16),
-              _SheetInfoRow(icon: Icons.calendar_month_rounded, text: dateText),
-              const SizedBox(height: 8),
+              if (!isOrganisation) ...[
+                _SheetInfoRow(
+                  icon: Icons.calendar_month_rounded,
+                  text: dateText,
+                ),
+                const SizedBox(height: 8),
+              ],
               _SheetInfoRow(icon: Icons.place_rounded, text: location),
               const SizedBox(height: 8),
-              _SheetInfoRow(icon: Icons.person_rounded, text: organiserName),
+              if (!isOrganisation)
+                _SheetInfoRow(icon: Icons.person_rounded, text: organiserName),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -837,10 +902,14 @@ class _MapOpportunityCard extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => OpportunityDetailScreen(
-                          opportunityId: opportunityId,
-                          opportunity: data,
-                        ),
+                        builder: (_) => isOrganisation
+                            ? OrganisationDetailScreen(
+                                organisationId: opportunityId,
+                              )
+                            : OpportunityDetailScreen(
+                                opportunityId: opportunityId,
+                                opportunity: data,
+                              ),
                       ),
                     );
                   },
@@ -853,8 +922,8 @@ class _MapOpportunityCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  child: const Text(
-                    'View activity',
+                  child: Text(
+                    isOrganisation ? 'View organisation' : 'View activity',
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),

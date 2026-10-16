@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
+import '../services/analytics_service.dart';
+import '../services/booking_visibility_service.dart';
 import '../widgets/booking_status_chip.dart';
 
 class BusinessBookingsScreen extends StatelessWidget {
@@ -49,7 +52,10 @@ class BusinessBookingsScreen extends StatelessWidget {
             );
           }
 
-          final docs = snapshot.data?.docs ?? [];
+          final docs = (snapshot.data?.docs ?? []).where((doc) {
+            final booking = doc.data() as Map<String, dynamic>;
+            return isOperationalBusinessBooking(booking);
+          }).toList();
 
           if (docs.isEmpty) {
             return const Center(child: Text('No bookings yet'));
@@ -70,6 +76,10 @@ class BusinessBookingsScreen extends StatelessWidget {
               final serviceName = booking['serviceName'] ?? 'Service';
 
               final status = booking['status'] ?? 'unknown';
+              final displayStatus = bookingDisplayStatus(
+                booking,
+                DateTime.now(),
+              );
 
               final paymentMethod = booking['paymentMethod'] ?? 'unknown';
 
@@ -129,7 +139,7 @@ class BusinessBookingsScreen extends StatelessWidget {
                           // =========================
                           Flexible(
                             child: BookingStatusChip(
-                              status: status,
+                              status: displayStatus,
                               compact: true,
                             ),
                           ),
@@ -164,50 +174,54 @@ class BusinessBookingsScreen extends StatelessWidget {
                       // =========================
                       // ACTION BUTTONS
                       // =========================
-                      if (status == 'confirmed')
+                      if (canCompleteBookingFromUi(booking) ||
+                          canCancelBookingFromUi(booking, DateTime.now()))
                         Row(
                           children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.check_circle),
+                            if (canCompleteBookingFromUi(booking)) ...[
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.check_circle),
 
-                                label: const Text('Complete'),
+                                  label: const Text('Complete'),
 
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                  ),
+
+                                  onPressed: () async {
+                                    await FirebaseFunctions.instance
+                                        .httpsCallable('completeBooking')
+                                        .call({'bookingId': doc.id});
+                                  },
                                 ),
-
-                                onPressed: () async {
-                                  await FirebaseFirestore.instance
-                                      .collection('bookings')
-                                      .doc(doc.id)
-                                      .update({'status': 'completed'});
-                                },
                               ),
-                            ),
 
-                            const SizedBox(width: 10),
+                              const SizedBox(width: 10),
+                            ],
 
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.cancel),
+                            if (canCancelBookingFromUi(booking, DateTime.now()))
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.cancel),
 
-                                label: const Text('Cancel'),
+                                  label: const Text('Cancel'),
 
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                  ),
+
+                                  onPressed: () async {
+                                    await FirebaseFunctions.instance
+                                        .httpsCallable('cancelBooking')
+                                        .call({'bookingId': doc.id});
+                                    await LocalLinkAnalytics.instance
+                                        .bookingCancelled(
+                                          source: 'business_bookings',
+                                        );
+                                  },
                                 ),
-
-                                onPressed: () async {
-                                  await FirebaseFirestore.instance
-                                      .collection('bookings')
-                                      .doc(doc.id)
-                                      .update({
-                                        'status': 'cancelled_by_business',
-                                      });
-                                },
                               ),
-                            ),
                           ],
                         ),
 

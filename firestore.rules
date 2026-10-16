@@ -6,6 +6,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function registeredUser() {
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     function uid() {
       return request.auth.uid;
     }
@@ -14,25 +19,85 @@ service cloud.firestore {
       return signedIn() && uid() == userId;
     }
 
+    function isRegisteredOwner(userId) {
+      return registeredUser() && uid() == userId;
+    }
+
     function isApprovedAdminEmail() {
-      return signedIn()
+      return registeredUser()
+        && 'email' in request.auth.token
         && request.auth.token.email in [
           'jae19882011@hotmail.co.uk',
           'founder@locallinkapp.co.uk'
         ];
     }
 
+    function hasAdminProfileFlag() {
+      return registeredUser()
+        && (
+          (
+            exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            && 'isAdmin' in get(/databases/$(database)/documents/users/$(uid())/private/account).data
+            && get(/databases/$(database)/documents/users/$(uid())/private/account).data.isAdmin == true
+          )
+          || (
+            !exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            &&
+            exists(/databases/$(database)/documents/users/$(uid()))
+            && 'isAdmin' in get(/databases/$(database)/documents/users/$(uid())).data
+            && get(/databases/$(database)/documents/users/$(uid())).data.isAdmin == true
+          )
+        );
+    }
+
     function isAdmin() {
-      return isApprovedAdminEmail()
-        && exists(/databases/$(database)/documents/adminEmails/$(request.auth.token.email));
+      return hasAdminProfileFlag()
+        || (
+          isApprovedAdminEmail()
+          && exists(/databases/$(database)/documents/adminEmails/$(request.auth.token.email))
+          && get(/databases/$(database)/documents/adminEmails/$(request.auth.token.email)).data.enabled != false
+        );
     }
 
     function isNotBanned() {
       return signedIn()
         && (
-          !exists(/databases/$(database)/documents/users/$(uid()))
-          || !('isBanned' in get(/databases/$(database)/documents/users/$(uid())).data)
-          || get(/databases/$(database)/documents/users/$(uid())).data.isBanned != true
+          (
+            exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            && (
+              !('isBanned' in get(/databases/$(database)/documents/users/$(uid())/private/account).data)
+              || get(/databases/$(database)/documents/users/$(uid())/private/account).data.isBanned != true
+            )
+          )
+          || (
+            !exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            && (
+              !exists(/databases/$(database)/documents/users/$(uid()))
+              || !('isBanned' in get(/databases/$(database)/documents/users/$(uid())).data)
+              || get(/databases/$(database)/documents/users/$(uid())).data.isBanned != true
+            )
+          )
+        );
+    }
+
+    function isRegisteredNotBanned() {
+      return registeredUser()
+        && (
+          (
+            exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            && (
+              !('isBanned' in get(/databases/$(database)/documents/users/$(uid())/private/account).data)
+              || get(/databases/$(database)/documents/users/$(uid())/private/account).data.isBanned != true
+            )
+          )
+          || (
+            !exists(/databases/$(database)/documents/users/$(uid())/private/account)
+            && (
+              !exists(/databases/$(database)/documents/users/$(uid()))
+              || !('isBanned' in get(/databases/$(database)/documents/users/$(uid())).data)
+              || get(/databases/$(database)/documents/users/$(uid())).data.isBanned != true
+            )
+          )
         );
     }
 
@@ -62,11 +127,7 @@ service cloud.firestore {
       let data = business(businessId).data;
 
       return isBusinessOwner(businessId)
-        || (
-          signedIn()
-          && 'createdBy' in data
-          && data.createdBy == uid()
-        );
+        || canCreatorManageBusinessData(data);
     }
 
     function isBusinessOwnerOrCreatorAfter(businessId) {
@@ -80,7 +141,20 @@ service cloud.firestore {
           || ('claimedBy' in data && data.claimedBy == uid())
           || ('ownerIds' in data && data.ownerIds is list && uid() in data.ownerIds)
           || ('adminUserIds' in data && data.adminUserIds is list && uid() in data.adminUserIds)
-          || ('createdBy' in data && data.createdBy == uid())
+          || canCreatorManageBusinessData(data)
+        );
+    }
+
+    function canCreatorManageBusinessData(data) {
+      return signedIn()
+        && 'createdBy' in data
+        && data.createdBy == uid()
+        && !(
+          data.createdByModerator == true
+          && (
+            data.isClaimed == true
+            || data.listingOwnershipStatus == 'claimed'
+          )
         );
     }
 
@@ -107,6 +181,305 @@ service cloud.firestore {
         || isActiveBusinessStaff(businessId);
     }
 
+    function isClaimedBusinessData(data) {
+      return data.isClaimed == true
+        || data.listingOwnershipStatus == 'claimed'
+        || data.claimStatus == 'approved';
+    }
+
+    function canHostCommunityChallengeForBusiness(businessId) {
+      let data = business(businessId).data;
+
+      return isClaimedBusinessData(data)
+        && isBusinessOwnerOrCreator(businessId);
+    }
+
+    function opportunity(opportunityId) {
+      return get(/databases/$(database)/documents/opportunities/$(opportunityId));
+    }
+
+    function isOpportunityManager(opportunityId) {
+      let data = opportunity(opportunityId).data;
+
+      return signedIn()
+        && (
+          isAdmin()
+          || (
+            ('organisationId' in data)
+            && data.organisationId is string
+            && isOrganisationManager(data.organisationId)
+          )
+          || (
+            ('organisationId' in data)
+            && data.organisationId is string
+            && ('groupId' in data)
+            && data.groupId is string
+            && isGroupLeader(data.organisationId, data.groupId)
+          )
+          || (
+            'createdBy' in data
+            && data.createdBy == uid()
+            && !(
+              ('createdByModerator' in data && data.createdByModerator == true)
+              && ('listingOwnershipStatus' in data && data.listingOwnershipStatus == 'claimed')
+            )
+          )
+          || ('organiserId' in data && data.organiserId == uid())
+          || ('ownerId' in data && data.ownerId == uid())
+          || ('ownerIds' in data && data.ownerIds is list && uid() in data.ownerIds)
+          || ('adminUserIds' in data && data.adminUserIds is list && uid() in data.adminUserIds)
+        );
+    }
+
+    function organisation(organisationId) {
+      return get(/databases/$(database)/documents/organisations/$(organisationId));
+    }
+
+    function isOrganisationOwnerOrAdmin(organisationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(organisationId))
+        && organisation(organisationId).data.listingOwnershipStatus == 'claimed'
+        && (
+          organisation(organisationId).data.ownerId == uid()
+          || (
+            'adminUserIds' in organisation(organisationId).data
+            && organisation(organisationId).data.adminUserIds is list
+            && uid() in organisation(organisationId).data.adminUserIds
+          )
+        );
+    }
+
+    function organisationMember(organisationId, userId) {
+      return get(/databases/$(database)/documents/organisations/$(organisationId)/members/$(userId));
+    }
+
+    function isActiveOrganisationRole(organisationId, role) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(organisationId)/members/$(uid()))
+        && organisationMember(organisationId, uid()).data.status == 'active'
+        && organisationMember(organisationId, uid()).data.role == role;
+    }
+
+    function isOrganisationManager(organisationId) {
+      return isOrganisationOwnerOrAdmin(organisationId)
+        || isActiveOrganisationRole(organisationId, 'owner')
+        || isActiveOrganisationRole(organisationId, 'organisation_admin')
+        || isActiveOrganisationRole(organisationId, 'secretary');
+    }
+
+    function validDerivedOrganisationMembership(organisationId, userId) {
+      let path = /databases/$(database)/documents/organisations/$(organisationId)/members/$(userId);
+      let existed = exists(path);
+      let old = existed ? get(path).data : {};
+      let oldIds = ('groupIds' in old && old.groupIds is list) ? old.groupIds : [];
+      let data = request.resource.data;
+      let ids = data.groupIds;
+      let joining = ids.size() >= oldIds.size();
+      let groupId = joining
+        ? (ids.size() > oldIds.size() ? ids[oldIds.size()] : ids[ids.size() - 1])
+        : (('membershipGroupId' in data) ? data.membershipGroupId : oldIds[oldIds.size() - 1]);
+      let memberPath = /databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId)/members/$(userId);
+      return isRegisteredNotBanned()
+        && data.userId == userId
+        && data.role == (existed ? old.role : 'member')
+        && (existed ? data.diff(old).affectedKeys().hasOnly(['userId', 'userName', 'status', 'groupIds', 'createdAt', 'updatedAt', 'membershipGroupId'])
+            : data.keys().hasOnly(['userId', 'userName', 'role', 'status', 'groupIds', 'createdAt', 'updatedAt', 'membershipGroupId']))
+        && (
+          (joining && ids.size() > 0 && ids.size() <= oldIds.size() + 1
+            && (ids == oldIds || ids == oldIds.concat([groupId]))
+            && data.status == 'active'
+            && (!existed || old.role == 'member' || old.status == 'active')
+            && (isRegisteredOwner(userId) || isOrganisationOrGroupManager(organisationId, groupId))
+            && existsAfter(memberPath) && getAfter(memberPath).data.status == 'active'
+            && getAfter(memberPath).data.userId == userId)
+          || (!joining && existed && ids.size() == oldIds.size() - 1
+            && ids.toSet().hasOnly(oldIds.toSet()) && data.status == old.status
+            && (isRegisteredOwner(userId)
+              || (isOrganisationOrGroupManager(organisationId, groupId)
+                && existsAfter(memberPath) && getAfter(memberPath).data.status in ['left', 'removed'])))
+        );
+    }
+
+    function isOrganisationMember(organisationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(organisationId)/members/$(uid()))
+        && organisationMember(organisationId, uid()).data.status == 'active';
+    }
+
+    function isOrganisationDataOwnerOrAdmin(data) {
+      return signedIn()
+        && data.listingOwnershipStatus == 'claimed'
+        && (
+          data.ownerId == uid()
+          || (
+            'adminUserIds' in data
+            && data.adminUserIds is list
+            && uid() in data.adminUserIds
+          )
+        );
+    }
+
+    function group(organisationId, groupId) {
+      return get(/databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId));
+    }
+
+    function isGroupLeader(organisationId, groupId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId))
+        && (
+          'leaderUserIds' in group(organisationId, groupId).data
+          && group(organisationId, groupId).data.leaderUserIds is list
+          && uid() in group(organisationId, groupId).data.leaderUserIds
+        );
+    }
+
+    function isOrganisationOrGroupManager(organisationId, groupId) {
+      return isOrganisationManager(organisationId)
+        || isGroupLeader(organisationId, groupId);
+    }
+
+    function isGroupMember(organisationId, groupId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId)/members/$(uid()))
+        && get(/databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId)/members/$(uid())).data.status == 'active';
+    }
+
+    function hasExplicitDiscoveryPrivacy(data) {
+      return data.get('isPubliclyDiscoverable', true) != true
+        || data.get('isPrivate', false) != false
+        || data.get('private', false) != false
+        || !(data.get('visibility', '') in ['', 'public']);
+    }
+
+    function opportunityAudienceScope(data) {
+      return data.get('activityAudienceScope', '') in ['everyone', 'organisation', 'group']
+        ? data.activityAudienceScope
+        : (data.get('activityAudienceScope', '') != '' ? 'restricted'
+          : (data.get('isPubliclyDiscoverable', false) == true && !hasExplicitDiscoveryPrivacy(data) ? 'everyone'
+            : (data.get('organisationId', '') != '' ? (data.get('groupId', '') != '' ? 'group' : 'organisation')
+              : (data.get('groupId', '') != '' || hasExplicitDiscoveryPrivacy(data) ? 'restricted' : 'everyone'))));
+    }
+
+    function publicActivityData(data) {
+      return opportunityAudienceScope(data) == 'everyone' && !hasExplicitDiscoveryPrivacy(data);
+    }
+
+    function validActivityDiscoveryWrite() {
+      let data = request.resource.data;
+      let indexed = 'discoveryVisibility' in data;
+      let changedPrivacy = request.method == 'update' && data.diff(resource.data).affectedKeys().hasAny([
+        'activityAudienceScope', 'organisationId', 'groupId', 'isPubliclyDiscoverable', 'visibility', 'isPrivate', 'private'
+      ]);
+      return indexed
+        ? data.discoveryVisibility == (publicActivityData(data) ? 'public' : 'restricted')
+        : (request.method == 'create' || !changedPrivacy);
+    }
+
+    function validGroupDiscoveryWrite() {
+      let data = request.resource.data;
+      let indexed = 'discoveryVisibility' in data;
+      let public = data.get('visibility', '') == 'public' && !hasExplicitDiscoveryPrivacy(data);
+      return indexed
+        ? data.discoveryVisibility == (public ? 'public' : 'restricted')
+        : (request.method == 'create' || !data.diff(resource.data).affectedKeys().hasAny([
+          'visibility', 'isPubliclyDiscoverable', 'isPrivate', 'private'
+        ]));
+    }
+
+    function canReadOpportunityData(data) {
+      let scope = opportunityAudienceScope(data);
+      return signedIn() && (
+        (data.isActive == true && (
+          publicActivityData(data)
+          || (scope == 'organisation' && data.get('organisationId', '') != ''
+            && (isOrganisationManager(data.organisationId) || isOrganisationMember(data.organisationId)))
+          || (scope == 'group' && data.get('organisationId', '') != '' && data.get('groupId', '') != ''
+            && (isOrganisationManager(data.organisationId) || isGroupLeader(data.organisationId, data.groupId)
+              || isGroupMember(data.organisationId, data.groupId)))
+        ))
+        || data.get('createdBy', '') == uid() || data.get('organiserId', '') == uid() || isAdmin()
+        || (data.get('organisationId', '') != '' && isOrganisationManager(data.organisationId))
+        || (data.get('organisationId', '') != '' && data.get('groupId', '') != ''
+          && isGroupLeader(data.organisationId, data.groupId))
+      );
+    }
+
+    function canListOpportunityData(data) {
+      return signedIn() && (
+        (data.isActive == true && data.discoveryVisibility == 'public')
+        || data.createdBy == uid() || data.organiserId == uid() || isAdmin()
+        || (data.organisationId is string && isOrganisationManager(data.organisationId))
+        || (data.isActive == true && data.organisationId is string && data.activityAudienceScope == 'organisation'
+          && isOrganisationMember(data.organisationId))
+        || (data.organisationId is string && data.groupId is string
+          && isGroupLeader(data.organisationId, data.groupId))
+        || (data.isActive == true && data.activityAudienceScope == 'group'
+          && data.organisationId is string && data.groupId is string
+          && isGroupMember(data.organisationId, data.groupId))
+      );
+    }
+
+    function canReadOrganisationAnnouncementData(organisationId, data) {
+      return signedIn()
+        && (
+          isOrganisationManager(organisationId)
+          || (
+            data.targetType == 'organisation'
+            && isOrganisationMember(organisationId)
+          )
+          || (
+            data.targetType == 'group'
+            && data.targetGroupId is string
+            && (
+              isGroupLeader(organisationId, data.targetGroupId)
+              || isGroupMember(organisationId, data.targetGroupId)
+            )
+          )
+          || isAdmin()
+        );
+    }
+
+    function canReadOrganisationAnnouncement(organisationId) {
+      return canReadOrganisationAnnouncementData(organisationId, resource.data);
+    }
+
+    function organisationAnnouncement(organisationId, announcementId) {
+      return get(/databases/$(database)/documents/organisations/$(organisationId)/announcements/$(announcementId));
+    }
+
+    function isOpportunityApprovedFollower(opportunityId) {
+      let followerPath = /databases/$(database)/documents/opportunities/$(opportunityId)/followers/$(uid());
+
+      return signedIn()
+        && exists(followerPath)
+        && get(followerPath).data.status == 'approved';
+    }
+
+    function isYouthOpportunityData(data) {
+      return data.followerAccess == 'approval_required'
+        || data.audience in ['Children', 'Teenagers', 'Families']
+        || (
+          'audienceValues' in data
+          && data.audienceValues is list
+          && data.audienceValues.hasAny(['Children', 'Teenagers', 'Families', 'Babies & Toddlers'])
+        )
+        || data.category in ['Children & Family', 'Family'];
+    }
+
+    function canReadOpportunityAnnouncement(opportunityId) {
+      let data = opportunity(opportunityId).data;
+
+      return signedIn()
+        && (
+          isOpportunityManager(opportunityId)
+          || isOpportunityApprovedFollower(opportunityId)
+          || (
+            data.isActive == true
+            && !isYouthOpportunityData(data)
+          )
+        );
+    }
+
     function validPageProfileUpdate(businessId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
 
@@ -115,6 +488,8 @@ service cloud.firestore {
           'businessName',
           'address',
           'category',
+          'openingHours',
+          'openingHoursStructured',
           'serviceMode',
           'serviceRadiusMiles',
           'acceptingLeads',
@@ -127,7 +502,7 @@ service cloud.firestore {
     function validUserCreate(userId) {
       let data = request.resource.data;
 
-      return isOwner(userId)
+      return isRegisteredOwner(userId)
         && data.keys().hasOnly([
           'name',
           'userName',
@@ -139,21 +514,19 @@ service cloud.firestore {
           'ratingTotal',
           'averageRating',
           'createdAt',
-          'updatedAt',
-          'fcmTokens'
+          'updatedAt'
         ])
         && (!('reviewCount' in data) || data.reviewCount == 0)
         && (!('ratingTotal' in data) || data.ratingTotal == 0)
-        && (!('averageRating' in data) || data.averageRating == 0.0 || data.averageRating == 0)
-        && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 50));
+        && (!('averageRating' in data) || data.averageRating == 0.0 || data.averageRating == 0);
     }
 
     function validUserProfileUpdate(userId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let data = request.resource.data;
 
-      return isOwner(userId)
-        && isNotBanned()
+      return isRegisteredOwner(userId)
+        && isRegisteredNotBanned()
         && changed.hasOnly([
           'name',
           'userName',
@@ -161,10 +534,23 @@ service cloud.firestore {
           'photoUrl',
           'photoURL',
           'bio',
-          'updatedAt',
-          'fcmTokens'
-        ])
-        && (!('fcmTokens' in data) || (data.fcmTokens is list && data.fcmTokens.size() <= 50));
+          'updatedAt'
+        ]);
+    }
+
+    function noPrivateUserFieldsChanged() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return !changed.hasAny([
+        'fcmTokens', 'deviceTokens', 'pushTokens', 'notificationTokens',
+        'email', 'phone', 'phoneNumber',
+        'isAdmin', 'isBanned', 'bannedAt', 'bannedBy',
+        'moderationStatus', 'moderationReasonCode', 'adminNotes', 'internalNotes',
+        'roles', 'permissions', 'claims',
+        'isVerified', 'verified', 'verification', 'verificationStatus',
+        'subscription', 'subscriptionStatus', 'paymentStatus',
+        'customerId', 'stripeStatus', 'stripeCustomerId', 'stripeSubscriptionId'
+      ]);
     }
 
     function noSecuritySensitiveFieldsChanged() {
@@ -208,15 +594,576 @@ service cloud.firestore {
         'ownerIds',
         'adminUserIds',
         'claimedBy',
+        'createdByModerator',
+        'moderatorUserId',
+        'moderationStatus',
+        'removedAt',
+        'removedBy',
+        'removalReasonCode',
+        'removalReasonPublicText',
+        'moderatorNote',
+        'listingOwnershipStatus',
+        'claimedByUserId',
+        'claimedAt',
+        'claimStatus',
+        'sourceUrl',
+        'sourceName',
+        'moderatorNotes',
         'createdBy',
         'creatorId',
         'customerId',
         'userId',
         'businessId',
+        'organisationId',
+        'organisationName',
+        'organisationCategory',
+        'organisationSubcategories',
+        'groupId',
+        'groupName',
+        'groupLeaderUserIds',
         'staffId',
         'reviewerId',
         'reporterUserId'
       ]);
+    }
+
+    function hasModeratorListingFields(data) {
+      return data.keys().hasAny([
+        'createdByModerator',
+        'moderatorUserId',
+        'listingOwnershipStatus',
+        'claimedByUserId',
+        'claimedAt',
+        'claimStatus',
+        'sourceUrl',
+        'sourceName',
+        'moderatorNotes'
+      ]);
+    }
+
+    function validModeratorSeededListingCreate() {
+      return isAdmin()
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.createdByModerator == true
+        && !('moderatorUserId' in request.resource.data)
+        && request.resource.data.listingOwnershipStatus == 'unclaimed'
+        && request.resource.data.claimStatus == 'unclaimed'
+        && request.resource.data.claimedByUserId == null
+        && request.resource.data.claimedAt == null;
+    }
+
+    function validSelfServiceOrganisationCreate() {
+      return isRegisteredNotBanned()
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'description',
+          'category',
+          'subcategories',
+          'area',
+          'publicLocation',
+          'location',
+          'latitude',
+          'longitude',
+          'phone',
+          'email',
+          'website',
+          'imageUrl',
+          'capabilities',
+          'ownerId',
+          'adminUserIds',
+          'createdBy',
+          'createdByModerator',
+          'claimStatus',
+          'listingOwnershipStatus',
+          'isActive',
+          'selfServiceCreated',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.category is string
+        && request.resource.data.location is string
+        && request.resource.data.publicLocation is string
+        && request.resource.data.subcategories is list
+        && (
+          !('capabilities' in request.resource.data)
+          || validOrganisationCapabilities(request.resource.data.capabilities)
+        )
+        && (!('latitude' in request.resource.data) || request.resource.data.latitude is number)
+        && (!('longitude' in request.resource.data) || request.resource.data.longitude is number)
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.ownerId == uid()
+        && request.resource.data.adminUserIds is list
+        && request.resource.data.adminUserIds.hasAll([uid()])
+        && request.resource.data.createdByModerator == false
+        && request.resource.data.listingOwnershipStatus == 'claimed'
+        && request.resource.data.claimStatus == 'approved'
+        && request.resource.data.isActive == true;
+    }
+
+    function validOrganisationCapabilities(data) {
+      return data is map
+        && data.keys().hasOnly(['groups', 'sessions', 'fixtures'])
+        && (!('groups' in data) || data.groups is bool)
+        && (!('sessions' in data) || data.sessions is bool)
+        && (!('fixtures' in data) || data.fixtures is bool);
+    }
+
+    function validListingClaimCreate() {
+      return isRegisteredNotBanned()
+        && request.resource.data.claimantUserId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.listingType in [
+          'business',
+          'opportunity',
+          'organisation',
+          'community_help_missing_pet'
+        ]
+        && request.resource.data.listingId is string
+        && request.resource.data.claimantName is string
+        && request.resource.data.relationship is string
+        && request.resource.data.keys().hasOnly([
+          'listingType',
+          'listingId',
+          'listingTitle',
+          'claimantUserId',
+          'claimantEmail',
+          'claimantName',
+          'relationship',
+          'businessEmail',
+          'businessPhone',
+          'website',
+          'evidence',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ]);
+    }
+
+    function validOrganisationOwnerUpdate(organisationId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return isOrganisationManager(organisationId)
+        && changed.hasOnly([
+          'name',
+          'description',
+          'category',
+          'subcategories',
+          'publicLocation',
+          'location',
+          'phone',
+          'email',
+          'website',
+          'imageUrl',
+          'capabilities',
+          'updatedAt'
+        ])
+        && (
+          !changed.hasAny(['capabilities'])
+          || validOrganisationCapabilities(request.resource.data.capabilities)
+        );
+    }
+
+    function validOrganisationLinkedOpportunityCreate() {
+      let scope = request.resource.data.activityAudienceScope;
+
+      return isRegisteredNotBanned()
+        && request.resource.data.createdBy == uid()
+        && !hasModeratorListingFields(request.resource.data)
+        && ('organisationId' in request.resource.data)
+        && request.resource.data.organisationId is string
+        && (
+          !('activityKind' in request.resource.data)
+          || request.resource.data.activityKind != 'community_challenge'
+          || validCommunityChallengePayload()
+        )
+        && validActivityAudienceVisibility()
+        && (
+          (
+            isOrganisationManager(request.resource.data.organisationId)
+            && (
+              !('activityAudienceScope' in request.resource.data)
+              || scope in ['everyone', 'organisation', 'group']
+            )
+          )
+          || (
+            scope == 'group'
+            &&
+            ('groupId' in request.resource.data)
+            && request.resource.data.groupId is string
+            && isGroupLeader(
+              request.resource.data.organisationId,
+              request.resource.data.groupId
+            )
+          )
+        );
+    }
+
+    function validActivityAudienceVisibility() {
+      let scope = request.resource.data.activityAudienceScope;
+
+      return !('activityAudienceScope' in request.resource.data)
+        || (
+          scope == 'everyone'
+          && request.resource.data.isPubliclyDiscoverable == true
+        )
+        || (
+          scope in ['organisation', 'group']
+          && request.resource.data.isPubliclyDiscoverable == false
+        );
+    }
+
+    function validStandaloneOpportunityCreate() {
+      return isRegisteredNotBanned()
+        && request.resource.data.createdBy == uid()
+        && !hasModeratorListingFields(request.resource.data)
+        && !('organisationId' in request.resource.data)
+        && (
+          !('activityKind' in request.resource.data)
+          || request.resource.data.activityKind != 'community_challenge'
+        );
+    }
+
+    function validCommunityChallengePayload() {
+      return request.resource.data.activityKind == 'community_challenge'
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.challengeClosesAt is timestamp
+        && request.resource.data.challengeClosesAt > request.time
+        && request.resource.data.allowPhotoEntries is bool
+        && (!('supportedByBusinessId' in request.resource.data) || request.resource.data.supportedByBusinessId is string)
+        && (!('supportedByBusinessName' in request.resource.data) || request.resource.data.supportedByBusinessName is string)
+        && (!('supportedByBusinessImageUrl' in request.resource.data) || request.resource.data.supportedByBusinessImageUrl is string)
+        && (!('supportedByBusinessPrizeText' in request.resource.data) || request.resource.data.supportedByBusinessPrizeText is string)
+        && (!('prizeDescription' in request.resource.data) || request.resource.data.prizeDescription is string);
+    }
+
+    function validStandaloneCommunityChallengeCreate() {
+      return isRegisteredNotBanned()
+        && isAdmin()
+        && !hasModeratorListingFields(request.resource.data)
+        && !('organisationId' in request.resource.data)
+        && !('businessId' in request.resource.data)
+        && validCommunityChallengePayload();
+    }
+
+    function validBusinessHostedCommunityChallengeCreate() {
+      return isRegisteredNotBanned()
+        && !hasModeratorListingFields(request.resource.data)
+        && !('organisationId' in request.resource.data)
+        && ('businessId' in request.resource.data)
+        && request.resource.data.businessId is string
+        && request.resource.data.businessName is string
+        && request.resource.data.hostedByType == 'business'
+        && validCommunityChallengePayload()
+        && canHostCommunityChallengeForBusiness(request.resource.data.businessId);
+    }
+
+    function isOpenCommunityChallenge(opportunityId) {
+      let data = opportunity(opportunityId).data;
+
+      return data.activityKind == 'community_challenge'
+        && data.isActive == true
+        && (!('challengeClosesAt' in data) || data.challengeClosesAt > request.time);
+    }
+
+    function validChallengeCommentCreate(opportunityId, commentId) {
+      return !('isChallengeEntry' in request.resource.data)
+        || request.resource.data.isChallengeEntry != true
+        || (
+          isOpenCommunityChallenge(opportunityId)
+          && existsAfter(
+            /databases/$(database)/documents/opportunities/$(opportunityId)/entries/$(uid())
+          )
+          && getAfter(
+            /databases/$(database)/documents/opportunities/$(opportunityId)/entries/$(uid())
+          ).data.commentId == commentId
+        );
+    }
+
+    function validOpportunityCommentCreate(opportunityId, commentId) {
+      let comment = request.resource.data;
+
+      return isRegisteredNotBanned()
+        && comment.userId == uid()
+        && comment.keys().hasOnly([
+          'userId',
+          'userName',
+          'text',
+          'createdAt',
+          'imageUrl',
+          'imagePath',
+          'isChallengeEntry'
+        ])
+        && comment.userId is string
+        && comment.userName is string
+        && comment.text is string
+        && comment.createdAt is timestamp
+        && (!('imageUrl' in comment) || comment.imageUrl is string)
+        && (!('imagePath' in comment) || comment.imagePath is string)
+        && (!('isChallengeEntry' in comment) || comment.isChallengeEntry == true)
+        && validChallengeCommentCreate(opportunityId, commentId);
+    }
+
+    function validChallengeEntryCreate(opportunityId, userId) {
+      let entry = request.resource.data;
+      let commentPath =
+        /databases/$(database)/documents/opportunities/$(opportunityId)/comments/$(entry.commentId);
+
+      return isRegisteredOwner(userId)
+        && isRegisteredNotBanned()
+        && isOpenCommunityChallenge(opportunityId)
+        && !exists(/databases/$(database)/documents/opportunities/$(opportunityId)/entries/$(userId))
+        && entry.keys().hasOnly([
+          'userId',
+          'commentId',
+          'imageUrl',
+          'imagePath',
+          'caption',
+          'createdAt',
+          'eligible',
+          'status'
+        ])
+        && entry.userId == userId
+        && entry.commentId is string
+        && entry.eligible == true
+        && entry.status == 'active'
+        && existsAfter(commentPath)
+        && getAfter(commentPath).data.userId == userId
+        && getAfter(commentPath).data.isChallengeEntry == true;
+    }
+
+    function validOrganisationLinkedOpportunityUpdate() {
+      let data = resource.data;
+      let currentScope = 'activityAudienceScope' in data ? data.activityAudienceScope : 'everyone';
+
+      return isRegisteredNotBanned()
+        && ('organisationId' in data)
+        && data.organisationId is string
+        && (
+          isOrganisationManager(data.organisationId)
+          || (
+            ('groupId' in data)
+            && data.groupId is string
+            && isGroupLeader(data.organisationId, data.groupId)
+          )
+        )
+        && request.resource.data.organisationId == data.organisationId
+        && (
+          !('groupId' in data)
+          || request.resource.data.groupId == data.groupId
+        )
+        && (
+          !('activityAudienceScope' in data)
+          || request.resource.data.activityAudienceScope == currentScope
+        )
+        && (
+          !('isPubliclyDiscoverable' in data)
+          || request.resource.data.isPubliclyDiscoverable == data.isPubliclyDiscoverable
+        )
+        && noSecuritySensitiveFieldsChanged();
+    }
+
+    function validClaimantCancelClaim() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return registeredUser()
+        && resource.data.claimantUserId == uid()
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'cancelled'
+        && changed.hasOnly(['status', 'cancelledAt', 'updatedAt']);
+    }
+
+    function communityHelpOperationalOwnerId(data) {
+      return ('communityAdded' in data && data.communityAdded == true)
+        ? (
+          data.claimStatus == 'approved' && data.ownerId is string
+            ? data.ownerId
+            : ''
+        )
+        : data.createdBy;
+    }
+
+    function validCommunityHelpOwnerResolve() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly([
+          'status',
+          'resolvedReason',
+          'isActive',
+          'resolvedAt',
+          'resolvedBy',
+          'expiryReminderStatus',
+          'closingUpdate'
+        ])
+        && request.resource.data.status == 'resolved'
+        && request.resource.data.resolvedReason in [
+          'found',
+          'reunited',
+          'returned',
+          'collected',
+          'no_longer_needed'
+        ]
+        && request.resource.data.isActive == false
+        && request.resource.data.resolvedAt == request.time
+        && request.resource.data.resolvedBy == uid()
+        && request.resource.data.expiryReminderStatus == 'cancelled'
+        && (
+          !('closingUpdate' in request.resource.data)
+          || request.resource.data.closingUpdate is string
+        );
+    }
+
+    function validCommunityHelpOwnerRenewal() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly([
+          'status',
+          'isActive',
+          'expiresAt',
+          'expiryReminderAt',
+          'expiryReminderStatus',
+          'lastRenewedAt',
+          'renewalCount'
+        ])
+        && request.resource.data.status == 'active'
+        && request.resource.data.isActive == true
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiryReminderAt is timestamp
+        && request.resource.data.expiryReminderAt < request.resource.data.expiresAt
+        && request.resource.data.expiryReminderStatus == 'pending'
+        && request.resource.data.lastRenewedAt == request.time
+        && resource.data.renewalCount is int
+        && request.resource.data.renewalCount == resource.data.renewalCount + 1;
+    }
+
+    function validGroupCreate(organisationId) {
+      return isOrganisationManager(organisationId)
+        && request.resource.data.name is string
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.updatedBy == uid()
+        && request.resource.data.leaderUserIds is list
+        && request.resource.data.memberCount == 0
+        && request.resource.data.membershipMode in ['open', 'approval_required', 'invite_only']
+        && request.resource.data.visibility in ['public', 'private']
+        && request.resource.data.isActive == true;
+    }
+
+    function validGroupUpdate(organisationId, groupId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return isOrganisationManager(organisationId)
+        && changed.hasOnly([
+          'name',
+          'description',
+          'displayType',
+          'category',
+          'subcategory',
+          'ageLabel',
+          'imageUrl',
+          'isActive',
+          'visibility',
+          'discoveryVisibility',
+          'membershipMode',
+          'updatedBy',
+          'updatedAt'
+        ]);
+    }
+
+    function validGroupLeaderUpdate(organisationId, groupId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return isGroupLeader(organisationId, groupId)
+        && request.resource.data.leaderUserIds == resource.data.leaderUserIds
+        && request.resource.data.membershipMode == resource.data.membershipMode
+        && changed.hasOnly([
+          'name',
+          'description',
+          'category',
+          'subcategory',
+          'ageLabel',
+          'imageUrl',
+          'visibility',
+          'discoveryVisibility',
+          'updatedBy',
+          'updatedAt'
+        ]);
+    }
+
+    function validGroupMemberCountAdjustment(organisationId, groupId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let memberPath = /databases/$(database)/documents/organisations/$(organisationId)/groups/$(groupId)/members/$(uid());
+
+      return registeredUser()
+        && changed.hasOnly(['memberCount', 'updatedAt'])
+        && request.resource.data.memberCount is int
+        && resource.data.memberCount is int
+        && request.resource.data.memberCount >= 0
+        && (
+          request.resource.data.memberCount == resource.data.memberCount + 1
+          || request.resource.data.memberCount == resource.data.memberCount - 1
+        )
+        && (
+          (
+            group(organisationId, groupId).data.membershipMode == 'open'
+            && request.resource.data.memberCount == resource.data.memberCount + 1
+            && !exists(memberPath)
+            && existsAfter(memberPath)
+            && getAfter(memberPath).data.userId == uid()
+            && getAfter(memberPath).data.role == 'member'
+            && getAfter(memberPath).data.status == 'active'
+          )
+          || (
+            request.resource.data.memberCount == resource.data.memberCount - 1
+            && exists(memberPath)
+            && existsAfter(memberPath)
+            && getAfter(memberPath).data.userId == uid()
+            && getAfter(memberPath).data.status in ['left', 'removed']
+          )
+          || isOrganisationOrGroupManager(organisationId, groupId)
+        );
+    }
+
+    function validOpenGroupMemberCreate(organisationId, groupId, userId) {
+      return isRegisteredOwner(userId)
+        && isRegisteredNotBanned()
+        && group(organisationId, groupId).data.membershipMode == 'open'
+        && group(organisationId, groupId).data.visibility == 'public'
+        && !hasExplicitDiscoveryPrivacy(group(organisationId, groupId).data)
+        && request.resource.data.userId == userId
+        && request.resource.data.role == 'member'
+        && request.resource.data.status == 'active';
+    }
+
+    function validMemberLeave(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return isRegisteredOwner(userId)
+        && request.resource.data.status in ['removed', 'left']
+        && changed.hasOnly(['status', 'updatedAt']);
+    }
+
+    function validManagerMemberWrite(organisationId, groupId) {
+      return isOrganisationOrGroupManager(organisationId, groupId)
+        && request.resource.data.role == 'member'
+        && request.resource.data.status in ['active', 'removed'];
+    }
+
+    function validJoinRequestCreate(organisationId, groupId, requesterId) {
+      return isRegisteredOwner(requesterId)
+        && isRegisteredNotBanned()
+        && group(organisationId, groupId).data.membershipMode == 'approval_required'
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending';
+    }
+
+    function validJoinRequestReview(organisationId, groupId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return isOrganisationOrGroupManager(organisationId, groupId)
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'declined']
+        && changed.hasOnly(['status', 'reviewedBy', 'reviewedAt', 'updatedAt']);
     }
 
     function validNotificationReadUpdate() {
@@ -237,6 +1184,7 @@ service cloud.firestore {
           'activityUpdates',
           'serviceBookingUpdates',
           'reminders',
+          'businessSetupReminders',
           'localDiscovery',
           'communityAlertsNearby',
           'updatedAt'
@@ -248,21 +1196,37 @@ service cloud.firestore {
         && (!('activityUpdates' in data) || data.activityUpdates is bool)
         && (!('serviceBookingUpdates' in data) || data.serviceBookingUpdates is bool)
         && (!('reminders' in data) || data.reminders is bool)
+        && (!('businessSetupReminders' in data) || data.businessSetupReminders is bool)
         && (!('localDiscovery' in data) || data.localDiscovery is bool)
         && (!('communityAlertsNearby' in data) || data.communityAlertsNearby is bool);
     }
 
-    function validCommunityAlertSubscription(userId) {
-      return isOwner(userId)
+    function validCommunityAlertSubscriptionPayload(userId) {
+      return isRegisteredOwner(userId)
         && request.resource.data.userId == userId
         && request.resource.data.communityAlertsEnabled is bool
         && request.resource.data.isActive is bool
-        && request.resource.data.subscriptionType in ['localArea', 'chosenArea', 'temporaryArea']
+        && request.resource.data.subscriptionType == 'chosenArea'
         && request.resource.data.approxLatitude is number
+        && request.resource.data.approxLatitude >= -90
+        && request.resource.data.approxLatitude <= 90
         && request.resource.data.approxLongitude is number
+        && request.resource.data.approxLongitude >= -180
+        && request.resource.data.approxLongitude <= 180
         && request.resource.data.placeLabel is string
         && request.resource.data.maxRadiusMiles in [1, 3, 5, 10]
         && request.resource.data.enabledCategories is list
+        && request.resource.data.enabledCategories.hasOnly([
+          'missingDogs',
+          'missingCats',
+          'otherMissingPets',
+          'importantLostItems',
+          'otherLostItems'
+        ]);
+    }
+
+    function validCommunityAlertSubscriptionCreate(userId) {
+      return validCommunityAlertSubscriptionPayload(userId)
         && request.resource.data.keys().hasOnly([
           'userId',
           'communityAlertsEnabled',
@@ -275,18 +1239,31 @@ service cloud.firestore {
           'maxRadiusMiles',
           'isActive',
           'createdAt',
-          'updatedAt',
-          'expiresAt',
-          'firstSeenAt',
-          'establishedAt',
-          'lastSeenAt',
-          'leftAt'
+          'updatedAt'
         ])
-        && (!('expiresAt' in request.resource.data) || request.resource.data.expiresAt is timestamp)
-        && (!('firstSeenAt' in request.resource.data) || request.resource.data.firstSeenAt is timestamp)
-        && (!('establishedAt' in request.resource.data) || request.resource.data.establishedAt is timestamp)
-        && (!('lastSeenAt' in request.resource.data) || request.resource.data.lastSeenAt is timestamp)
-        && (!('leftAt' in request.resource.data) || request.resource.data.leftAt is timestamp);
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function validCommunityAlertSubscriptionUpdate(userId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return validCommunityAlertSubscriptionPayload(userId)
+        && request.resource.data.userId == resource.data.userId
+        && changed.hasOnly([
+          'communityAlertsEnabled',
+          'enabledCategories',
+          'categoryPreferences',
+          'subscriptionType',
+          'approxLatitude',
+          'approxLongitude',
+          'placeLabel',
+          'maxRadiusMiles',
+          'isActive',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.updatedAt == request.time;
     }
 
     function validBusinessProfileUpdate(businessId) {
@@ -298,18 +1275,32 @@ service cloud.firestore {
           'name',
           'description',
           'address',
+          'latitude',
+          'longitude',
+          'locationAddress',
           'category',
           'serviceMode',
           'serviceRadiusMiles',
           'acceptingLeads',
           'paymentMethods',
           'stripeRequested',
+          'openingHours',
+          'openingHoursStructured',
           'photoURLs',
           'phone',
           'email',
           'website',
           'updatedAt'
         ])
+        && (!changed.hasAny(['address', 'latitude', 'longitude', 'locationAddress']) || (
+          request.resource.data.locationAddress == request.resource.data.address
+          && request.resource.data.latitude is number && request.resource.data.longitude is number
+          && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90
+          && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180
+          && (request.resource.data.latitude != 0 || request.resource.data.longitude != 0)
+        ))
+        && (!changed.hasAny(['openingHours']) || request.resource.data.openingHours is string)
+        && (!changed.hasAny(['openingHoursStructured']) || request.resource.data.openingHoursStructured is map)
         && (
           !changed.hasAny(['paymentMethods'])
           || (
@@ -325,34 +1316,13 @@ service cloud.firestore {
         );
     }
 
-    function validBusinessClaimUpdate() {
-      let changed = request.resource.data.diff(resource.data).affectedKeys();
-
-      return signedIn()
-        && resource.data.ownerId == ''
-        && resource.data.isClaimed != true
-        && request.resource.data.ownerId == uid()
-        && request.resource.data.createdBy == resource.data.createdBy
-        && changed.hasOnly([
-          'ownerId',
-          'isClaimed',
-          'claimedBy',
-          'claimedAt',
-          'claimEmail',
-          'updatedAt'
-        ])
-        && (
-          !changed.hasAny(['claimEmail'])
-          || !('claimEmail' in request.resource.data)
-        );
-    }
-
     function validServiceRequestCustomerUpdate() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
 
       return signedIn()
         && resource.data.customerId == uid()
         && request.resource.data.customerId == resource.data.customerId
+        && validServiceRequestImageUrls(request.resource.data)
         && changed.hasOnly([
           'title',
           'description',
@@ -369,6 +1339,7 @@ service cloud.firestore {
           'scheduleText',
           'status',
           'isActive',
+          'imageUrls',
           'expiresAt',
           'closedAt',
           'acceptedBusinessId',
@@ -376,8 +1347,19 @@ service cloud.firestore {
         ]);
     }
 
+    function validServiceRequestImageUrls(data) {
+      return !('imageUrls' in data)
+        || (
+          data.imageUrls is list
+          && data.imageUrls.size() <= 3
+          && (data.imageUrls.size() < 1 || data.imageUrls[0] is string)
+          && (data.imageUrls.size() < 2 || data.imageUrls[1] is string)
+          && (data.imageUrls.size() < 3 || data.imageUrls[2] is string)
+        );
+    }
+
     function validNewMarketplaceServiceRequest() {
-      return isNotBanned()
+      return isRegisteredNotBanned()
         && request.resource.data.customerId == uid()
         && request.resource.data.status == 'open'
         && request.resource.data.isActive == true
@@ -392,6 +1374,7 @@ service cloud.firestore {
         && request.resource.data.createdAt is timestamp
         && request.resource.data.expiresAt is timestamp
         && request.resource.data.expiresAt > request.time
+        && validServiceRequestImageUrls(request.resource.data)
         && request.resource.data.keys().hasOnly([
           'customerId',
           'category',
@@ -406,6 +1389,7 @@ service cloud.firestore {
           'approxLongitude',
           'status',
           'isActive',
+          'imageUrls',
           'createdAt',
           'updatedAt',
           'expiresAt'
@@ -421,7 +1405,7 @@ service cloud.firestore {
     }
 
     function validLegacyAvailabilityServiceRequest() {
-      return isNotBanned()
+      return isRegisteredNotBanned()
         && request.resource.data.customerId == uid()
         && request.resource.data.status == 'open'
         && request.resource.data.keys().hasOnly([
@@ -463,7 +1447,7 @@ service cloud.firestore {
     }
 
     function validServiceRequestOfferCreate(requestId, businessId) {
-      return isNotBanned()
+      return isRegisteredNotBanned()
         && canManageBusinessServices(businessId)
         && serviceRequestOpenForOffers(requestId)
         && businessAcceptsRequestOffers(businessId)
@@ -479,6 +1463,7 @@ service cloud.firestore {
           'serviceId',
           'serviceName',
           'priceText',
+          'proposedScheduleText',
           'message',
           'status',
           'createdAt',
@@ -487,7 +1472,7 @@ service cloud.firestore {
     }
 
     function validServiceRequestOfferProviderUpdate(requestId, businessId) {
-      return isNotBanned()
+      return isRegisteredNotBanned()
         && resource.data.businessId == businessId
         && request.resource.data.businessId == businessId
         && canManageBusinessServices(businessId)
@@ -505,6 +1490,7 @@ service cloud.firestore {
           'serviceId',
           'serviceName',
           'priceText',
+          'proposedScheduleText',
           'message',
           'status',
           'createdAt',
@@ -514,7 +1500,7 @@ service cloud.firestore {
 
     function validServiceRequestOfferCustomerUpdate(requestId) {
       let requestDoc = get(/databases/$(database)/documents/serviceRequests/$(requestId));
-      return signedIn()
+      return registeredUser()
         && requestDoc.data.customerId == uid()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'status',
@@ -561,12 +1547,6 @@ service cloud.firestore {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
 
       return (
-        canAccessBusinessWorkspace(resource.data.businessId)
-        && changed.hasOnly(['status', 'completedAt'])
-        && resource.data.status == 'confirmed'
-        && request.resource.data.status in ['completed', 'cancelled_by_business']
-      )
-      || (
         canAccessBooking(resource)
         && changed.hasOnly(['unreadForCustomer', 'unreadForBusiness'])
       );
@@ -576,11 +1556,44 @@ service cloud.firestore {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let attendeePath = /databases/$(database)/documents/opportunities/$(opportunityId)/attendees/$(uid());
 
-      return isNotBanned()
-        && changed.hasOnly(['attendeeCount'])
+      return changed.hasOnly(['attendeeCount'])
+        && isRegisteredNotBanned()
         && request.resource.data.attendeeCount == resource.data.attendeeCount + 1
         && !exists(attendeePath)
         && existsAfter(attendeePath);
+    }
+
+    function validOpportunityCommentCountIncrement() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+
+      return changed.hasOnly(['commentCount'])
+        && isRegisteredNotBanned()
+        && resource.data.isActive == true
+        && (
+          !('organisationId' in resource.data)
+          || canReadOpportunityData(resource.data)
+        )
+        && request.resource.data.commentCount == resource.data.commentCount + 1;
+    }
+
+    function validChallengeEntryCommentCountDecrement(opportunityId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let entryPath =
+        /databases/$(database)/documents/opportunities/$(opportunityId)/entries/$(uid());
+      let commentPath =
+        /databases/$(database)/documents/opportunities/$(opportunityId)/comments/$(get(entryPath).data.commentId);
+
+      return changed.hasOnly(['commentCount'])
+        && isRegisteredNotBanned()
+        && canReadOpportunityData(resource.data)
+        && request.resource.data.commentCount == resource.data.commentCount - 1
+        && exists(entryPath)
+        && !existsAfter(entryPath)
+        && get(entryPath).data.commentId is string
+        && exists(commentPath)
+        && !existsAfter(commentPath)
+        && get(commentPath).data.userId == uid()
+        && get(commentPath).data.isChallengeEntry == true;
     }
 
     function validActivityPayload(userId) {
@@ -603,15 +1616,24 @@ service cloud.firestore {
 
     function validServiceRequestInterestUpdate() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let existingBusinessIds = (
+        'interestedBusinessIds' in resource.data
+        && resource.data.interestedBusinessIds is list
+      ) ? resource.data.interestedBusinessIds : [];
 
       return changed.hasOnly([
-          'status',
           'interestedBusinessIds',
           'lastInterestedBusinessId',
           'updatedAt'
         ])
+        && resource.data.status == 'open'
+        && resource.data.isActive == true
         && request.resource.data.lastInterestedBusinessId is string
         && canManageBusinessServices(request.resource.data.lastInterestedBusinessId)
+        && request.resource.data.interestedBusinessIds is list
+        && !(request.resource.data.lastInterestedBusinessId in existingBusinessIds)
+        && request.resource.data.interestedBusinessIds.hasAll(existingBusinessIds)
+        && request.resource.data.interestedBusinessIds.size() == existingBusinessIds.size() + 1
         && request.resource.data.interestedBusinessIds.hasAll([
           request.resource.data.lastInterestedBusinessId
         ]);
@@ -642,28 +1664,28 @@ service cloud.firestore {
     }
 
     match /activityDaily/{day}/users/{userId} {
-      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
-      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
+      allow create: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityPayload(userId);
+      allow update: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
     match /activityWeekly/{week}/users/{userId} {
-      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
-      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
+      allow create: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityPayload(userId);
+      allow update: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
     match /activityMonthly/{month}/users/{userId} {
-      allow create: if isOwner(userId) && isNotBanned() && validActivityPayload(userId);
-      allow update: if isOwner(userId) && isNotBanned() && validActivityRefresh(userId);
+      allow create: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityPayload(userId);
+      allow update: if isRegisteredOwner(userId) && isRegisteredNotBanned() && validActivityRefresh(userId);
       allow read: if isAdmin();
       allow delete: if false;
     }
 
     match /reports/{reportId} {
-      allow create: if isNotBanned()
+      allow create: if isRegisteredNotBanned()
         && request.resource.data.reporterUserId == uid()
         && request.resource.data.status == 'open';
       allow read, update: if isAdmin();
@@ -671,84 +1693,156 @@ service cloud.firestore {
     }
 
     match /shares/{shareId} {
-      allow create: if isNotBanned()
-        && (!('userId' in request.resource.data) || request.resource.data.userId == uid());
+      allow create: if (
+          registeredUser()
+          && isRegisteredNotBanned()
+          && (!('userId' in request.resource.data) || request.resource.data.userId == uid())
+        )
+        || (
+          signedIn()
+          && !registeredUser()
+          && !('userId' in request.resource.data)
+        );
       allow read, update, delete: if isAdmin();
     }
 
     match /users/{userId} {
-      allow get: if signedIn();
+      allow get: if registeredUser();
       allow list: if isAdmin();
       allow create: if validUserCreate(userId);
-      allow update: if isAdmin() || validUserProfileUpdate(userId);
+      allow update: if (isAdmin() && noPrivateUserFieldsChanged())
+        || validUserProfileUpdate(userId);
       allow delete: if false;
 
+      match /devices/{deviceId} {
+        allow read: if isRegisteredOwner(userId);
+        allow create: if isRegisteredOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'token',
+            'platform',
+            'createdAt',
+            'updatedAt'
+          ])
+          && request.resource.data.token is string
+          && request.resource.data.token.size() > 20
+          && request.resource.data.token.size() <= 4096
+          && request.resource.data.platform in [
+            'android', 'ios', 'macos', 'windows', 'linux'
+          ]
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.updatedAt == request.time;
+        allow update: if isRegisteredOwner(userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'platform',
+            'updatedAt'
+          ])
+          && request.resource.data.token == resource.data.token
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.platform in [
+            'android', 'ios', 'macos', 'windows', 'linux'
+          ]
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isRegisteredOwner(userId);
+      }
+
+      match /private/{privateId} {
+        allow get: if privateId == 'access' && isRegisteredOwner(userId);
+        allow list, create, update, delete: if false;
+      }
+
       match /notifications/{notificationId} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow update: if isAdmin() || (isOwner(userId) && validNotificationReadUpdate());
-        allow delete: if isOwner(userId) || isAdmin();
+        allow read: if isRegisteredOwner(userId) || isAdmin();
+        allow update: if isAdmin() || (isRegisteredOwner(userId) && validNotificationReadUpdate());
+        allow delete: if isRegisteredOwner(userId) || isAdmin();
         allow create: if false;
       }
 
       match /preferences/{preferenceId} {
         allow read: if isOwner(userId) || isAdmin();
-        allow create, update: if isOwner(userId)
+        allow create, update: if isRegisteredOwner(userId)
           && preferenceId == 'notifications'
           && validNotificationPreferences();
         allow delete: if false;
       }
 
       match /savedOpportunities/{savedId} {
-        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
+        allow read, create, update, delete: if isRegisteredOwner(userId) && isRegisteredNotBanned();
       }
 
       match /savedBusinesses/{businessId} {
-        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
+        allow read, create, update, delete: if isRegisteredOwner(userId) && isRegisteredNotBanned();
       }
 
       match /businessPreferences/{businessId} {
-        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+        allow read, create, update, delete: if isRegisteredOwner(userId) || isAdmin();
       }
 
       match /blockedUsers/{blockedId} {
-        allow read, create, update, delete: if isOwner(userId) && isNotBanned();
+        allow read, create, update, delete: if isRegisteredOwner(userId) && isRegisteredNotBanned();
       }
 
       match /followers/{followerId} {
         allow read: if signedIn();
-        allow create, delete: if signedIn() && (followerId == uid() || isOwner(userId) || isAdmin());
+        allow create: if isRegisteredOwner(followerId)
+          && request.resource.data.userId == followerId
+          && request.resource.data.keys().hasOnly([
+            'userId',
+            'userName',
+            'photoUrl',
+            'createdAt'
+          ]);
+        allow delete: if registeredUser()
+          && (followerId == uid() || isOwner(userId) || isAdmin());
         allow update: if false;
       }
 
       match /following/{followingId} {
         allow read: if signedIn();
-        allow create, delete: if isOwner(userId) || isAdmin();
+        allow create, delete: if isRegisteredOwner(userId) || isAdmin();
         allow update: if false;
       }
 
       match /reviews/{reviewId} {
         allow read: if signedIn();
-        allow create: if isOwner(reviewId) && isNotBanned();
-        allow update, delete: if isOwner(reviewId) || isAdmin();
+        allow create, update: if false; // Reviews and rating totals are committed by the verified callable.
+        allow delete: if isAdmin();
+      }
+
+      match /{historyCollection}/{recordId} {
+        allow read: if historyCollection in ['nearbyCommunityAlertReports', 'nearbyCommunityAlertAreas', 'notificationDailyCaps']
+          && isRegisteredOwner(userId);
+        allow write: if false;
+      }
+
+      match /organisationRoles/{organisationId} {
+        allow read: if isRegisteredOwner(userId) || isAdmin();
+        allow write: if false;
       }
 
       match /{document=**} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow write: if false;
+        allow read, write: if false; // Private and supported user subcollections have explicit rules above.
       }
     }
 
     match /businesses/{businessId} {
       allow read: if signedIn();
-      allow create: if isNotBanned()
-        && request.resource.data.createdBy == uid()
+      allow create: if !request.resource.data.keys().hasAny([
+          'claimEmail', 'claimCode', 'claimToken', 'claimSecret'
+        ])
         && (
-          request.resource.data.ownerId == uid()
-          || request.resource.data.ownerId == ''
+          validModeratorSeededListingCreate()
+          || (
+            isRegisteredNotBanned()
+            && request.resource.data.createdBy == uid()
+            && !hasModeratorListingFields(request.resource.data)
+            && (
+              request.resource.data.ownerId == uid()
+              || request.resource.data.ownerId == ''
+            )
+          )
         );
       allow update: if isAdmin()
-        || validBusinessProfileUpdate(businessId)
-        || validBusinessClaimUpdate();
+        || validBusinessProfileUpdate(businessId);
       allow delete: if isAdmin() || isBusinessOwner(businessId);
 
       match /entitlements/{docId} {
@@ -758,16 +1852,16 @@ service cloud.firestore {
 
       match /services/{serviceId} {
         allow read: if signedIn();
-        allow create: if canManageBusinessServices(businessId) && isNotBanned();
+        allow create: if canManageBusinessServices(businessId) && isRegisteredNotBanned();
         allow update: if canManageBusinessServices(businessId)
-          && isNotBanned()
+          && isRegisteredNotBanned()
           && noSecuritySensitiveFieldsChanged();
-        allow delete: if canManageBusinessServices(businessId) && isNotBanned();
+        allow delete: if canManageBusinessServices(businessId) && isRegisteredNotBanned();
       }
 
       match /staff/{staffId} {
-        allow read: if signedIn();
-        allow create: if isNotBanned()
+        allow read: if canAccessBusinessWorkspace(businessId) || isAdmin();
+        allow create: if isRegisteredNotBanned()
           && (
             (
               staffId == uid()
@@ -775,53 +1869,170 @@ service cloud.firestore {
             )
             || isBusinessOwnerOrCreator(businessId)
           );
-        allow update: if isBusinessOwnerOrCreator(businessId) && isNotBanned();
+        allow update: if isBusinessOwnerOrCreator(businessId) && isRegisteredNotBanned();
         allow delete: if isBusinessOwner(businessId) && notRestricted(businessId);
 
         match /weeklyAvailability/{weekday} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
 
         match /dateOverrides/{dateId} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
 
         match /dayBlocks/{blockId} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
 
         match /timeBlocks/{blockId} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
 
         match /availableSlots/{slotId} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
 
         match /{document=**} {
           allow read: if signedIn();
-          allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+          allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
         }
       }
 
       match /dayBlocks/{blockId} {
         allow read: if signedIn();
-        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
       }
 
       match /timeBlocks/{blockId} {
         allow read: if signedIn();
-        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
       }
 
       match /blockedTimes/{blockId} {
         allow read: if signedIn();
-        allow write: if isBusinessOwner(businessId) && notRestricted(businessId);
+        allow write: if registeredUser() && isBusinessOwner(businessId) && notRestricted(businessId);
+      }
+    }
+
+    // Public compatibility metadata only; all configuration changes are server-managed.
+    match /releaseConfig/{configId} {
+      allow get: if configId == 'clients';
+      allow list, write: if false;
+    }
+
+    match /businessClaimSecrets/{businessId} {
+      allow read, write: if false;
+    }
+
+    match /organisations/{organisationId} {
+      allow read: if signedIn()
+        && (
+          isAdmin()
+          || resource.data.isActive == true
+          || isOrganisationDataOwnerOrAdmin(resource.data)
+          || isOrganisationManager(organisationId)
+        );
+      allow create: if validModeratorSeededListingCreate()
+        || validSelfServiceOrganisationCreate();
+      allow update: if isAdmin()
+        || validOrganisationOwnerUpdate(organisationId);
+      allow delete: if isAdmin();
+
+      match /groups/{groupId} {
+        allow get: if signedIn() && (
+          (resource.data.get('visibility', '') == 'public' && !hasExplicitDiscoveryPrivacy(resource.data))
+          || isOrganisationOrGroupManager(organisationId, groupId) || isGroupMember(organisationId, groupId) || isAdmin()
+        );
+        allow list: if signedIn() && (
+          resource.data.discoveryVisibility == 'public'
+          || isOrganisationManager(organisationId)
+          || resource.data.leaderUserIds.hasAny([uid()])
+          || isGroupMember(organisationId, groupId) || isAdmin()
+        );
+        allow create: if validGroupDiscoveryWrite() && validGroupCreate(organisationId);
+        allow update: if validGroupDiscoveryWrite() && (
+          validGroupMemberCountAdjustment(organisationId, groupId)
+          || validGroupUpdate(organisationId, groupId) || validGroupLeaderUpdate(organisationId, groupId) || isAdmin()
+        );
+        allow delete: if isAdmin() || isOrganisationManager(organisationId);
+
+        match /members/{userId} {
+          allow get: if isOwner(userId)
+            || isOrganisationOrGroupManager(organisationId, groupId)
+            || isAdmin();
+          allow list: if isOrganisationOrGroupManager(organisationId, groupId)
+            || isAdmin();
+          allow create: if validOpenGroupMemberCreate(
+              organisationId,
+              groupId,
+              userId
+            )
+            || validManagerMemberWrite(organisationId, groupId);
+          allow update: if validMemberLeave(userId)
+            || validManagerMemberWrite(organisationId, groupId)
+            || isAdmin();
+          allow delete: if false;
+        }
+
+        match /joinRequests/{requesterId} {
+          allow get: if isOwner(requesterId)
+            || isOrganisationOrGroupManager(organisationId, groupId)
+            || isAdmin();
+          allow list: if isOrganisationOrGroupManager(organisationId, groupId)
+            || isAdmin();
+          allow create: if validJoinRequestCreate(
+            organisationId,
+            groupId,
+            requesterId
+          );
+          allow update: if validJoinRequestReview(organisationId, groupId)
+            || isAdmin();
+          allow delete: if false;
+        }
+      }
+
+      match /members/{userId} {
+        allow get: if isOwner(userId)
+          || isOrganisationManager(organisationId)
+          || isAdmin();
+        allow list: if isOrganisationManager(organisationId)
+          || (
+            'userId' in resource.data
+            && resource.data.userId == uid()
+          )
+          || isAdmin();
+        allow create, update: if validDerivedOrganisationMembership(organisationId, userId);
+        allow delete: if false;
+      }
+
+      match /invitations/{invitationId} {
+        allow read: if isOrganisationManager(organisationId) || isAdmin();
+        allow create, update, delete: if false;
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if canReadOrganisationAnnouncement(organisationId);
+        allow create, update, delete: if false;
+
+        match /reads/{userId} {
+          allow read: if isOwner(userId)
+            && canReadOrganisationAnnouncementData(
+              organisationId,
+              organisationAnnouncement(organisationId, announcementId).data
+            );
+          allow create, update: if isOwner(userId)
+            && canReadOrganisationAnnouncementData(
+              organisationId,
+              organisationAnnouncement(organisationId, announcementId).data
+            )
+            && request.resource.data.userId == userId;
+          allow delete: if false;
+        }
       }
     }
 
@@ -847,57 +2058,118 @@ service cloud.firestore {
     }
 
     match /opportunities/{opportunityId} {
-      allow read: if signedIn()
-        && (resource.data.isActive == true || resource.data.createdBy == uid() || isAdmin());
-      allow create: if isNotBanned()
-        && request.resource.data.createdBy == uid();
-      allow update: if isAdmin()
+      allow get: if canReadOpportunityData(resource.data);
+      allow list: if canListOpportunityData(resource.data);
+      allow create: if validActivityDiscoveryWrite() && (validModeratorSeededListingCreate()
+        || validOrganisationLinkedOpportunityCreate()
+        || validStandaloneCommunityChallengeCreate()
+        || validBusinessHostedCommunityChallengeCreate()
+        || validStandaloneOpportunityCreate());
+      allow update: if validActivityDiscoveryWrite() && (validActivityJoinUpdate(opportunityId)
+        || validOpportunityCommentCountIncrement()
+        || validChallengeEntryCommentCountDecrement(opportunityId)
+        || isAdmin()
         || (
-          isNotBanned()
+          isRegisteredNotBanned()
           && (resource.data.createdBy == uid() || resource.data.organiserId == uid())
           && noSecuritySensitiveFieldsChanged()
         )
-        || validActivityJoinUpdate(opportunityId);
+        || validOrganisationLinkedOpportunityUpdate());
       allow delete: if isAdmin()
-        || (signedIn() && (resource.data.createdBy == uid() || resource.data.organiserId == uid()));
+        || (
+          registeredUser()
+          && (
+            resource.data.createdBy == uid()
+            || resource.data.organiserId == uid()
+            || (
+              ('organisationId' in resource.data)
+              && resource.data.organisationId is string
+              && isOrganisationOwnerOrAdmin(resource.data.organisationId)
+            )
+          )
+        );
 
       match /comments/{commentId} {
-        allow read: if signedIn();
-        allow create: if isNotBanned()
-          && request.resource.data.userId == uid();
+        allow read: if canReadOpportunityData(opportunity(opportunityId).data);
+        allow create: if validOpportunityCommentCreate(opportunityId, commentId);
         allow update: if isAdmin()
           || (
-            isNotBanned()
+            isRegisteredNotBanned()
             && resource.data.userId == uid()
-            && noSecuritySensitiveFieldsChanged()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text'])
           );
         allow delete: if isAdmin()
-          || (isNotBanned() && resource.data.userId == uid());
+          || (isRegisteredNotBanned() && resource.data.userId == uid());
+      }
+
+      match /entries/{userId} {
+        allow get: if isOwner(userId)
+          || isOpportunityManager(opportunityId)
+          || isAdmin();
+        allow list: if isOpportunityManager(opportunityId) || isAdmin();
+        allow create: if validChallengeEntryCreate(opportunityId, userId);
+        allow update: if false;
+        allow delete: if isAdmin()
+          || (isRegisteredNotBanned() && isOwner(userId));
       }
 
       match /attendees/{userId} {
-        allow read: if signedIn();
-        allow create, delete: if isOwner(userId) && isNotBanned();
+        allow read: if canReadOpportunityData(opportunity(opportunityId).data);
+        allow create: if isRegisteredOwner(userId) && isRegisteredNotBanned()
+          && canReadOpportunityData(opportunity(opportunityId).data)
+          && opportunity(opportunityId).data.isActive == true
+          && request.resource.data.userId == userId;
+        allow delete: if isRegisteredOwner(userId) && isRegisteredNotBanned();
         allow update: if false;
       }
 
-      match /{document=**} {
-        allow read: if signedIn();
-        allow write: if isAdmin();
+      match /followers/{followerId} {
+        allow get: if isOwner(followerId)
+          || isOpportunityManager(opportunityId);
+        allow list: if isOpportunityManager(opportunityId);
+        allow create, update, delete: if false;
       }
+
+      match /followRequests/{requesterId} {
+        allow get: if isOwner(requesterId)
+          || isOpportunityManager(opportunityId);
+        allow list: if isOpportunityManager(opportunityId);
+        allow create, update, delete: if false;
+      }
+
+      match /announcements/{announcementId} {
+        allow read: if canReadOpportunityAnnouncement(opportunityId);
+        allow create, update, delete: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /listingClaims/{claimId} {
+      allow read: if isAdmin()
+        || (registeredUser() && resource.data.claimantUserId == uid());
+      allow create: if validListingClaimCreate();
+      allow update: if isAdmin() || validClaimantCancelClaim();
+      allow delete: if false;
+    }
+
+    match /moderatorListingMetadata/{metadataId} {
+      allow read, write: if isAdmin();
     }
 
     match /serviceRequests/{requestId} {
       allow read: if signedIn();
       allow create: if validNewMarketplaceServiceRequest()
         || validLegacyAvailabilityServiceRequest();
-      allow update: if isNotBanned()
+      allow update: if isRegisteredNotBanned()
         && (
           validServiceRequestCustomerUpdate()
           || validServiceRequestInterestUpdate()
         );
       allow delete: if isAdmin()
-        || (signedIn() && resource.data.customerId == uid());
+        || (registeredUser() && resource.data.customerId == uid());
 
       match /offers/{businessId} {
         allow read: if isAdmin()
@@ -912,10 +2184,17 @@ service cloud.firestore {
 
     match /communityHelpPosts/{postId} {
       allow read: if signedIn()
-        && (resource.data.isActive == true || resource.data.createdBy == uid() || isAdmin());
-      allow create: if isNotBanned()
+        && (
+          resource.data.isActive == true
+          || resource.data.createdBy == uid()
+          || communityHelpOperationalOwnerId(resource.data) == uid()
+          || isAdmin()
+        );
+      allow create: if isAdmin()
+        || (
+        isRegisteredNotBanned()
         && request.resource.data.createdBy == uid()
-        && request.resource.data.status in ['active', 'missing', 'looking_for_owner', 'open']
+        && request.resource.data.status == 'active'
         && request.resource.data.isActive == true
         && request.resource.data.allowsPayment == false
         && request.resource.data.keys().hasAll([
@@ -965,7 +2244,12 @@ service cloud.firestore {
           'discoveryRadiusMiles',
           'timing',
           'eventDateText',
+          'observedDateOnly',
+          'observedAt',
+          'lastSeenAt',
+          'foundAt',
           'itemCategory',
+          'petType',
           'keywords',
           'collectionDetails',
           'photoUrl',
@@ -976,11 +2260,6 @@ service cloud.firestore {
           'renewalCount',
           'expiryReminderAt',
           'expiryReminderStatus',
-          'lastRenewedAt',
-          'resolvedAt',
-          'resolvedBy',
-          'resolvedReason',
-          'closingUpdate',
           'isActive',
           'createdAt',
           'expiresAt'
@@ -1004,6 +2283,11 @@ service cloud.firestore {
         && request.resource.data.approxLongitude is number
         && request.resource.data.discoveryRadiusMiles is number
         && request.resource.data.itemCategory is string
+        && (!('observedDateOnly' in request.resource.data) || request.resource.data.observedDateOnly is bool)
+        && (!('petType' in request.resource.data) || request.resource.data.petType is string)
+        && (!('observedAt' in request.resource.data) || request.resource.data.observedAt is timestamp)
+        && (!('lastSeenAt' in request.resource.data) || request.resource.data.lastSeenAt is timestamp)
+        && (!('foundAt' in request.resource.data) || request.resource.data.foundAt is timestamp)
         && request.resource.data.keywords is list
         && request.resource.data.lifecycleKind in [
           'lost_pet',
@@ -1014,21 +2298,35 @@ service cloud.firestore {
         && request.resource.data.renewalCount == 0
         && request.resource.data.expiryReminderAt is timestamp
         && request.resource.data.expiryReminderStatus == 'pending'
+        && request.resource.data.createdAt == request.time
         && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
         && !request.resource.data.keys().hasAny([
+          'createdByModerator',
+          'communityAdded',
+          'ownerId',
+          'claimStatus',
+          'claimedBy',
+          'claimedAt',
+          'claimReviewedBy',
+          'claimReviewedAt',
           'budget',
           'price',
           'priceCents',
           'bids',
           'businessId',
           'serviceId'
-        ]);
+        ]));
       allow update: if isAdmin()
         || (
-          isNotBanned()
-          && resource.data.createdBy == uid()
+          isRegisteredNotBanned()
+          && communityHelpOperationalOwnerId(resource.data) == uid()
           && request.resource.data.createdBy == resource.data.createdBy
           && request.resource.data.allowsPayment == false
+          && (
+            validCommunityHelpOwnerResolve()
+            || validCommunityHelpOwnerRenewal()
+          )
           && !request.resource.data.keys().hasAny([
             'budget',
             'price',
@@ -1039,7 +2337,10 @@ service cloud.firestore {
           ])
         );
       allow delete: if isAdmin()
-        || (signedIn() && resource.data.createdBy == uid());
+        || (
+          registeredUser()
+          && communityHelpOperationalOwnerId(resource.data) == uid()
+        );
 
       match /responses/{responseId} {
         allow read: if signedIn()
@@ -1048,10 +2349,15 @@ service cloud.firestore {
             || resource.data.responderId == uid()
             || resource.data.postOwnerId == uid()
           );
-        allow create: if isNotBanned()
+        allow create: if isRegisteredNotBanned()
           && request.resource.data.responderId == uid()
+          && communityHelpOperationalOwnerId(
+            get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data
+          ) != ''
           && request.resource.data.postOwnerId ==
-            get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.createdBy
+            communityHelpOperationalOwnerId(
+              get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data
+            )
           && request.resource.data.status == 'open'
           && request.resource.data.keys().hasAll([
             'postId',
@@ -1078,8 +2384,9 @@ service cloud.firestore {
       }
 
       match /followers/{followerId} {
-        allow get: if isOwner(followerId) || isAdmin();
-        allow list: if false;
+        allow get: if isRegisteredOwner(followerId) || isAdmin();
+        allow list: if isRegisteredOwner(resource.data.userId)
+          && resource.data.notificationState == 'active';
         allow create, update, delete: if false;
       }
 
@@ -1087,7 +2394,9 @@ service cloud.firestore {
         allow read: if signedIn()
           && (
             get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.isActive == true
-            || get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data.createdBy == uid()
+            || communityHelpOperationalOwnerId(
+              get(/databases/$(database)/documents/communityHelpPosts/$(postId)).data
+            ) == uid()
             || isAdmin()
           );
         allow write: if false;
@@ -1095,9 +2404,12 @@ service cloud.firestore {
     }
 
     match /communityAlertSubscriptions/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if isNotBanned() && validCommunityAlertSubscription(userId);
-      allow delete: if isOwner(userId) || isAdmin();
+      allow read: if isRegisteredOwner(userId);
+      allow create: if isRegisteredNotBanned()
+        && validCommunityAlertSubscriptionCreate(userId);
+      allow update: if isRegisteredNotBanned()
+        && validCommunityAlertSubscriptionUpdate(userId);
+      allow delete: if isRegisteredOwner(userId);
     }
 
     match /communityAlertCampaigns/{campaignId} {
@@ -1105,7 +2417,7 @@ service cloud.firestore {
       allow write: if false;
 
       match /recipients/{recipientId} {
-        allow read: if isOwner(recipientId) || isAdmin();
+        allow read: if isRegisteredOwner(recipientId) || isAdmin();
         allow write: if false;
       }
     }
@@ -1118,7 +2430,7 @@ service cloud.firestore {
           || canManageBusinessAvailability(resource.data.businessId)
           || isAdmin()
         );
-      allow create: if isNotBanned()
+      allow create: if isRegisteredNotBanned()
         && request.resource.data.businessOwnerId == uid()
         && request.resource.data.businessId is string
         && canManageBusinessAvailability(request.resource.data.businessId)
@@ -1127,7 +2439,7 @@ service cloud.firestore {
         && request.resource.data.isActive == true;
       allow update: if isAdmin()
         || (
-          isNotBanned()
+          isRegisteredNotBanned()
           && canManageBusinessAvailability(resource.data.businessId)
           && request.resource.data.businessOwnerId == resource.data.businessOwnerId
           && request.resource.data.businessId == resource.data.businessId
@@ -1135,7 +2447,7 @@ service cloud.firestore {
         );
       allow delete: if isAdmin()
         || (
-          isNotBanned()
+          isRegisteredNotBanned()
           && canManageBusinessAvailability(resource.data.businessId)
         );
     }
@@ -1149,7 +2461,13 @@ service cloud.firestore {
     }
 
     match /{path=**}/attendees/{userId} {
-      allow read: if signedIn();
+      allow read: if isRegisteredOwner(resource.data.userId);
+    }
+
+    match /{path=**}/followers/{followerId} {
+      allow list: if isRegisteredOwner(resource.data.userId)
+        && resource.data.notificationState == 'active'
+        && resource.data.postId > '';
     }
 
     match /{document=**} {

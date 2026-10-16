@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 
 String safeText(dynamic value, String fallback) {
   if (value == null) return fallback;
@@ -14,16 +15,58 @@ String safeInitial(dynamic value) {
 
 String formatPrice(dynamic value) {
   if (value == null) {
-    return '£0.00';
+    return 'Price on request';
   }
 
-  final pence = value is num
-      ? value.toDouble()
-      : double.tryParse('$value') ?? 0;
+  final pence = value is num ? value.toDouble() : double.tryParse('$value');
+
+  if (pence == null || pence <= 0) {
+    return 'Price on request';
+  }
 
   final pounds = pence / 100;
 
   return '£${pounds.toStringAsFixed(2)}';
+}
+
+String businessCoverImageUrl(Map<String, dynamic> businessData) {
+  for (final value in [
+    businessData['coverPhoto'],
+    businessData['bannerImageUrl'],
+    businessData['bannerUrl'],
+  ]) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isNotEmpty) return text;
+  }
+
+  for (final key in ['photoURLs', 'galleryUrls']) {
+    final value = businessData[key];
+    if (value is Iterable) {
+      for (final item in value) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty) return text;
+      }
+    }
+  }
+
+  final imageUrl = businessData['imageUrl']?.toString().trim() ?? '';
+  if (imageUrl.isNotEmpty) return imageUrl;
+
+  return '';
+}
+
+List<String> businessPhotoUrls(Map<String, dynamic> businessData) {
+  final urls = <String>[];
+  for (final key in ['photoURLs', 'galleryUrls']) {
+    final value = businessData[key];
+    if (value is Iterable) {
+      for (final item in value) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty) urls.add(text);
+      }
+    }
+  }
+  return urls;
 }
 
 String formatSlotTime(dynamic value) {
@@ -79,11 +122,16 @@ List<String> resolvePaymentMethods(Map<String, dynamic> businessData) {
   }
 
   List<String> filterMethods(Iterable methods) {
-    final resolved = methods.map((e) => e.toString().trim()).where((e) {
-      return e.isNotEmpty && (e != 'stripe' || stripeReady());
-    }).toList();
+    final resolved = <String>[];
 
-    return resolved.isEmpty ? ['cash'] : resolved;
+    for (final method in methods) {
+      final normalised = method.toString().trim().toLowerCase();
+      if (normalised.isEmpty || resolved.contains(normalised)) continue;
+      if (normalised == 'stripe' && !stripeReady()) continue;
+      resolved.add(normalised);
+    }
+
+    return resolved;
   }
 
   final paymentMethods = businessData['paymentMethods'];
@@ -98,5 +146,31 @@ List<String> resolvePaymentMethods(Map<String, dynamic> businessData) {
     return filterMethods([paymentMethod]);
   }
 
-  return ['cash'];
+  return [];
+}
+
+String paymentMethodLabel(String method) {
+  switch (method.trim().toLowerCase()) {
+    case 'stripe':
+      return 'Card & Apple Pay';
+    case 'bank_transfer':
+      return 'Bank transfer';
+    case 'cash':
+      return 'Cash';
+    default:
+      return method.trim().isEmpty ? 'Payment to be arranged' : method.trim();
+  }
+}
+
+IconData paymentMethodIcon(String method) {
+  switch (method.trim().toLowerCase()) {
+    case 'stripe':
+      return Icons.credit_card_outlined;
+    case 'bank_transfer':
+      return Icons.account_balance_outlined;
+    case 'cash':
+      return Icons.payments_outlined;
+    default:
+      return Icons.payment_outlined;
+  }
 }

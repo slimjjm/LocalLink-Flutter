@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import 'register_screen.dart';
 
+@visibleForTesting
+bool isValidPasswordResetEmail(String email) {
+  return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.trim());
+}
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.onAuthenticated});
+
+  final Future<void> Function()? onAuthenticated;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -60,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (!mounted) return;
 
-      Navigator.pushReplacementNamed(context, '/');
+      await _completeAuthentication();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -86,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (!mounted) return;
 
-      Navigator.pushReplacementNamed(context, '/');
+      await _completeAuthentication();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -105,13 +113,135 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (!mounted) return;
 
-      Navigator.pushReplacementNamed(context, '/');
+      await _completeAuthentication();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         error = 'Apple sign-in could not be completed. Please try again.';
       });
     }
+  }
+
+  Future<void> _completeAuthentication() async {
+    final pendingAction = widget.onAuthenticated;
+    if (pendingAction == null) {
+      Navigator.pushReplacementNamed(context, '/');
+      return;
+    }
+
+    Navigator.pop(context);
+    await pendingAction();
+  }
+
+  Future<void> forgotPassword() async {
+    final emailControllerForReset = TextEditingController(
+      text: emailController.text.trim(),
+    );
+
+    final submitted = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        String? validationError;
+        bool sending = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> submit() async {
+              final email = emailControllerForReset.text.trim();
+              if (!isValidPasswordResetEmail(email)) {
+                setDialogState(() {
+                  validationError = 'Enter a valid email address.';
+                });
+                return;
+              }
+
+              setDialogState(() {
+                sending = true;
+                validationError = null;
+              });
+
+              try {
+                await authService.sendPasswordResetEmail(email: email);
+                if (context.mounted) Navigator.pop(context, email);
+              } on FirebaseAuthException catch (error) {
+                if (error.code == 'user-not-found') {
+                  if (context.mounted) Navigator.pop(context, email);
+                  return;
+                }
+
+                if (!context.mounted) return;
+                setDialogState(() {
+                  sending = false;
+                  validationError =
+                      'We could not send reset instructions just now. Please check your connection and try again.';
+                });
+              } catch (_) {
+                if (!context.mounted) return;
+                setDialogState(() {
+                  sending = false;
+                  validationError =
+                      'We could not send reset instructions just now. Please check your connection and try again.';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: const Text('Reset password'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Enter your email address and we will send password reset instructions if an account exists.',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailControllerForReset,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) {
+                      if (!sending) submit();
+                    },
+                    decoration: InputDecoration(
+                      labelText: 'Email address',
+                      errorText: validationError,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: sending ? null : () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: sending ? null : submit,
+                  child: sending
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Send reset link'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    emailControllerForReset.dispose();
+
+    if (submitted == null || !mounted) return;
+
+    emailController.text = submitted;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          "If an account exists for that email address, we've sent password reset instructions.",
+        ),
+      ),
+    );
   }
 
   @override
@@ -195,6 +325,7 @@ class _LoginScreenState extends State<LoginScreen>
                               if (!isLoading) login();
                             },
                             onSignIn: login,
+                            onForgotPassword: forgotPassword,
                             onSignInWithApple: signInWithApple,
                             onSignInWithGoogle: signInWithGoogle,
                           ),
@@ -206,7 +337,9 @@ class _LoginScreenState extends State<LoginScreen>
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => const RegisterScreen(),
+                                  builder: (_) => RegisterScreen(
+                                    onAuthenticated: widget.onAuthenticated,
+                                  ),
                                 ),
                               );
                             },
@@ -282,9 +415,9 @@ class _LogoHero extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  AppColors.primary.withOpacity(.16),
-                  AppColors.primary.withOpacity(.06),
-                  AppColors.background.withOpacity(0),
+                  AppColors.primary.withValues(alpha: .16),
+                  AppColors.primary.withValues(alpha: .06),
+                  AppColors.background.withValues(alpha: 0),
                 ],
                 stops: const [.0, .42, 1],
               ),
@@ -297,7 +430,7 @@ class _LogoHero extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(.08),
+                  color: AppColors.primary.withValues(alpha: .08),
                   blurRadius: 44,
                   offset: const Offset(0, 22),
                 ),
@@ -323,6 +456,7 @@ class _LoginCard extends StatelessWidget {
   final VoidCallback onPasswordVisibilityChanged;
   final VoidCallback onPasswordSubmitted;
   final VoidCallback onSignIn;
+  final VoidCallback onForgotPassword;
   final VoidCallback onSignInWithApple;
   final VoidCallback onSignInWithGoogle;
 
@@ -335,6 +469,7 @@ class _LoginCard extends StatelessWidget {
     required this.onPasswordVisibilityChanged,
     required this.onPasswordSubmitted,
     required this.onSignIn,
+    required this.onForgotPassword,
     required this.onSignInWithApple,
     required this.onSignInWithGoogle,
   });
@@ -345,12 +480,12 @@ class _LoginCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.card.withOpacity(.82),
+        color: AppColors.card.withValues(alpha: .82),
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: AppColors.card.withOpacity(.7)),
+        border: Border.all(color: AppColors.card.withValues(alpha: .7)),
         boxShadow: [
           BoxShadow(
-            color: AppColors.shadow.withOpacity(.7),
+            color: AppColors.shadow.withValues(alpha: .7),
             blurRadius: 28,
             offset: const Offset(0, 16),
           ),
@@ -396,6 +531,14 @@ class _LoginCard extends StatelessWidget {
                   size: 21,
                 ),
               ),
+            ),
+          ),
+
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: isLoading ? null : onForgotPassword,
+              child: const Text('Forgot password?'),
             ),
           ),
 
@@ -449,7 +592,7 @@ class _PrimaryButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(isLoading ? 0 : .2),
+            color: AppColors.primary.withValues(alpha: isLoading ? 0 : .2),
             blurRadius: 22,
             offset: const Offset(0, 12),
           ),
@@ -480,7 +623,7 @@ class _PrimaryButton extends StatelessWidget {
               colors: [
                 isLoading
                     ? AppColors.disabled
-                    : AppColors.primary.withOpacity(.94),
+                    : AppColors.primary.withValues(alpha: .94),
                 isLoading ? AppColors.disabled : AppColors.primary,
               ],
             ),
@@ -646,9 +789,9 @@ class _ErrorBox extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.error.withOpacity(.08),
+        color: AppColors.error.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.error.withOpacity(.24)),
+        border: Border.all(color: AppColors.error.withValues(alpha: .24)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

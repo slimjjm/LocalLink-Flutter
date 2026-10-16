@@ -1,14 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../services/business_access_service.dart';
 import '../theme/app_colors.dart';
-import 'add_service_screen.dart';
-import 'business_onboarding_screen.dart';
-import 'business_post_availability_gate_screen.dart';
+import 'create_organisation_screen.dart';
 import 'create_opportunity_screen.dart';
-import 'customer_service_request_screen.dart';
-import 'post_availability_screen.dart';
-import 'post_service_request_screen.dart';
 
 class CreateChoiceScreen extends StatelessWidget {
   const CreateChoiceScreen({super.key});
@@ -20,62 +14,10 @@ class CreateChoiceScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _openOfferService(BuildContext context) async {
-    final business = await BusinessAccessService.loadLinkedBusiness();
-
-    if (!context.mounted) return;
-
-    if (business != null && business.exists) {
-      final result = await Navigator.push<AddServiceResult>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AddServiceScreen(businessId: business.id),
-        ),
-      );
-
-      if (!context.mounted) return;
-
-      if (result?.nextStep == AddServiceNextStep.shareNow) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PostAvailabilityScreen(
-              businessId: result!.businessId,
-              initialServiceId: result.serviceId,
-            ),
-          ),
-        );
-      }
-
-      return;
-    }
-
+  void _openOrganisation(BuildContext context) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const BusinessOnboardingScreen()),
-    );
-  }
-
-  void _openAvailableTime(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const BusinessPostAvailabilityGateScreen(),
-      ),
-    );
-  }
-
-  void _openRequest(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const PostServiceRequestScreen()),
-    );
-  }
-
-  void _openServiceRequest(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CustomerServiceRequestScreen()),
+      MaterialPageRoute(builder: (_) => const CreateOrganisationScreen()),
     );
   }
 
@@ -111,55 +53,21 @@ class CreateChoiceScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 22),
-          const _CreateSectionTitle('Services'),
-          _CreateChoiceCard(
-            icon: Icons.manage_search_outlined,
-            title: 'Request a service',
-            subtitle: 'Tell local providers what you need.',
-            color: AppColors.serviceGreen,
-            onTap: () => _openServiceRequest(context),
-          ),
-          const SizedBox(height: 14),
-          _CreateChoiceCard(
-            icon: Icons.design_services_outlined,
-            title: 'Offer a service',
-            subtitle: 'Let local people book what you offer.',
-            color: AppColors.serviceGreen,
-            onTap: () => _openOfferService(context),
-          ),
-          const SizedBox(height: 14),
-          _CreateChoiceCard(
-            icon: Icons.campaign_outlined,
-            title: 'Share a service time',
-            subtitle: 'Publish a bookable opening for one of your services.',
-            color: AppColors.serviceGreen,
-            onTap: () => _openAvailableTime(context),
-          ),
-          const SizedBox(height: 24),
           const _CreateSectionTitle('Activities'),
           _CreateChoiceCard(
             icon: Icons.groups_2_outlined,
-            title: 'Host an activity',
-            subtitle: 'Create a meetup, class, club or local event.',
+            title: 'Activity or event',
+            subtitle: 'Something happening locally',
             color: AppColors.activityBlue,
             onTap: () => _openActivity(context),
           ),
-          const SizedBox(height: 24),
-          const _CreateSectionTitle('Community'),
-          _CreateChoiceCard(
-            icon: Icons.manage_search_outlined,
-            title: 'Lost / found',
-            subtitle: 'Ask neighbours about a lost pet, keys or found item.',
-            color: AppColors.primary,
-            onTap: () => _openRequest(context),
-          ),
           const SizedBox(height: 14),
           _CreateChoiceCard(
-            icon: Icons.card_giftcard_outlined,
-            title: 'Free items',
-            subtitle: 'Offer or ask for neighbour-to-neighbour free items.',
-            color: AppColors.primary,
-            onTap: () => _openRequest(context),
+            icon: Icons.account_tree_outlined,
+            title: 'Group or organisation',
+            subtitle: 'Something you run regularly',
+            color: AppColors.activityBlue,
+            onTap: () => _openOrganisation(context),
           ),
         ],
       ),

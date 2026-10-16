@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'customer_booking_detail_screen.dart';
+import '../services/booking_visibility_service.dart';
 import '../widgets/booking_status_chip.dart';
 
 class CustomerBookingsScreen extends StatelessWidget {
@@ -18,16 +19,6 @@ class CustomerBookingsScreen extends StatelessWidget {
     return '${date.day}/${date.month}/${date.year} '
         '${date.hour.toString().padLeft(2, '0')}:'
         '${date.minute.toString().padLeft(2, '0')}';
-  }
-
-  // =====================================================
-  // IS ACTIVE BOOKING
-  // =====================================================
-
-  bool isActiveBooking(String status) {
-    return status == 'confirmed' ||
-        status == 'pending_payment' ||
-        status == 'pending_business_confirmation';
   }
 
   // =====================================================
@@ -62,6 +53,7 @@ class CustomerBookingsScreen extends StatelessWidget {
           }
 
           final docs = snapshot.data!.docs;
+          final now = DateTime.now();
 
           if (docs.isEmpty) {
             return const Center(
@@ -72,17 +64,13 @@ class CustomerBookingsScreen extends StatelessWidget {
           final upcoming = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
 
-            final status = data['status'] ?? '';
-
-            return isActiveBooking(status);
+            return isActiveCustomerBooking(data, now);
           }).toList();
 
           final past = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
 
-            final status = data['status'] ?? '';
-
-            return !isActiveBooking(status);
+            return !isActiveCustomerBooking(data, now);
           }).toList();
 
           return ListView(
@@ -148,7 +136,7 @@ class CustomerBookingsScreen extends StatelessWidget {
 
     final staffName = data['staffName'] ?? 'Team member';
 
-    final status = data['status'] ?? 'unknown';
+    final status = bookingDisplayStatus(data, DateTime.now());
 
     final startTime = (data['startDate'] ?? data['startTime']) as Timestamp?;
 

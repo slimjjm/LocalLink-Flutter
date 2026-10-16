@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../screens/opportunity_detail_screen.dart';
+import '../services/local_discovery_filters.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/local_link_design_tokens.dart';
 import '../utils/distance_helper.dart';
+import 'local_link_image.dart';
 import 'local_link_surface_card.dart';
 
 class FeaturedCard extends StatelessWidget {
@@ -21,6 +24,7 @@ class FeaturedCard extends StatelessWidget {
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('opportunities')
+              .where('discoveryVisibility', isEqualTo: 'public')
               .where('isActive', isEqualTo: true)
               .snapshots(),
           builder: (context, snapshot) {
@@ -33,6 +37,12 @@ class FeaturedCard extends StatelessWidget {
 
             for (final doc in snapshot.data!.docs) {
               final data = doc.data() as Map<String, dynamic>;
+              if (!LocalDiscoveryFilters.isActivityDiscoverable(
+                data,
+                now: DateTime.now(),
+              )) {
+                continue;
+              }
 
               double score = 0;
 
@@ -103,7 +113,7 @@ class FeaturedCard extends StatelessWidget {
                 );
               },
               padding: const EdgeInsets.all(0),
-              radius: 18,
+              radius: LocalLinkRadius.lg,
               elevated: true,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -133,14 +143,14 @@ class FeaturedCard extends StatelessWidget {
                                   color: AppColors.primary.withValues(
                                     alpha: 0.11,
                                   ),
-                                  borderRadius: BorderRadius.circular(999),
+                                  borderRadius: BorderRadius.circular(
+                                    LocalLinkRadius.pill,
+                                  ),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'FEATURED',
-                                  style: TextStyle(
+                                  style: LocalLinkTextStyles.status.copyWith(
                                     color: AppColors.primary,
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w900,
                                   ),
                                 ),
                               ),
@@ -157,11 +167,8 @@ class FeaturedCard extends StatelessWidget {
                             data['title'] ?? '',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.charcoal,
+                            style: LocalLinkTextStyles.cardTitle.copyWith(
                               fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              height: 1.08,
                             ),
                           ),
                           const SizedBox(height: 9),
@@ -192,7 +199,9 @@ class FeaturedCard extends StatelessWidget {
                             padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                             decoration: BoxDecoration(
                               color: AppColors.charcoal,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(
+                                LocalLinkRadius.sm,
+                              ),
                             ),
                             child: Row(
                               children: [
@@ -211,7 +220,9 @@ class FeaturedCard extends StatelessWidget {
                                   height: 28,
                                   decoration: BoxDecoration(
                                     color: Colors.white.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(8),
+                                    borderRadius: BorderRadius.circular(
+                                      LocalLinkRadius.xs,
+                                    ),
                                   ),
                                   child: const Icon(
                                     Icons.arrow_forward_rounded,
@@ -280,93 +291,12 @@ class _FeaturedImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (photoUrl.isNotEmpty) {
-      return SizedBox.expand(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              photoUrl,
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return _FeaturedFallback(category: category);
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return _FeaturedFallback(category: category);
-              },
-            ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Color(0x22000000)],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return _FeaturedFallback(category: category);
-  }
-}
-
-class _FeaturedFallback extends StatelessWidget {
-  final String category;
-
-  const _FeaturedFallback({required this.category});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox.expand(
-      child: Container(
-        decoration: const BoxDecoration(color: AppColors.surface),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -22,
-              top: -28,
-              child: _SoftCircle(size: 132, color: AppColors.primary),
-            ),
-            Positioned(
-              left: 18,
-              bottom: 18,
-              child: Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: const Icon(
-                  Icons.local_activity_outlined,
-                  color: AppColors.primary,
-                  size: 28,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 92,
-              right: 18,
-              bottom: 22,
-              child: Text(
-                category.isEmpty ? 'Local discovery' : category,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.charcoal,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return LocalLinkImage(
+      imageUrl: photoUrl,
+      aspectRatio: 112 / 176,
+      fallbackIcon: Icons.local_activity_outlined,
+      accentColor: AppColors.primary,
+      semanticLabel: category.isEmpty ? 'Featured activity' : category,
     );
   }
 }
@@ -383,41 +313,18 @@ class _FeaturedMeta extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(LocalLinkRadius.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: AppColors.textMuted),
-          const SizedBox(width: 5),
+          const SizedBox(width: LocalLinkSpacing.xxs),
           Text(
             label,
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
+            style: LocalLinkTextStyles.metadata.copyWith(fontSize: 12),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SoftCircle extends StatelessWidget {
-  final double size;
-  final Color color;
-
-  const _SoftCircle({required this.size, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        shape: BoxShape.circle,
       ),
     );
   }

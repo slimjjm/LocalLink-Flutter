@@ -8,6 +8,7 @@ class NotificationPreferences {
   static const activityUpdates = 'activityUpdates';
   static const serviceBookingUpdates = 'serviceBookingUpdates';
   static const reminders = 'reminders';
+  static const businessSetupReminders = 'businessSetupReminders';
   static const localDiscovery = 'localDiscovery';
   // Legacy key kept so older preference documents continue to read safely.
   static const communityAlertsNearby = 'communityAlertsNearby';
@@ -20,6 +21,7 @@ class NotificationPreferences {
     activityUpdates: true,
     serviceBookingUpdates: true,
     reminders: true,
+    businessSetupReminders: true,
     localDiscovery: false,
     communityAlertsNearby: false,
   };
