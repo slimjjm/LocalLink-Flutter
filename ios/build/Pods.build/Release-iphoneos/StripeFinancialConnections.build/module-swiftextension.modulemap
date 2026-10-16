@@ -1,4 +1,0 @@
-
-module StripeFinancialConnections.Swift {
-  header "StripeFinancialConnections-Swift.h"
-}

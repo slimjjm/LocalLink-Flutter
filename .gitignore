@@ -44,3 +44,48 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 lib/config/app_secrets.dart
+ios/Flutter/StripeLive.xcconfig
+
+# Local deployment caches (keep firebase.json and wrangler.toml tracked).
+/.firebase/
+/.wrangler/
+
+# Native build output and Xcode intermediate caches.
+/android/build/
+/ios/build/
+/macos/build/
+/linux/build/
+/windows/build/
+**/XCBuildData/
+**/PIFCache/
+**/DerivedData/
+**/.gradle/
+
+# Downloaded JavaScript dependencies; retain package manifests and lockfiles.
+node_modules/
+
+# Local release binaries and private signing material.
+*.ipa
+*.aab
+*.apk
+*.xcarchive/
+*.dSYM/
+*.dSYM.zip
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+
+# Local environment values and temporary files; retain example templates.
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.template
+!.env.*.template
+*.tmp
+*.temp
+*~

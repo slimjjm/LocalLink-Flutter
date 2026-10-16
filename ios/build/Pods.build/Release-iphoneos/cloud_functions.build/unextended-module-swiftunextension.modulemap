@@ -1,4 +1,0 @@
-
-module cloud_functions.__Swift {
-  exclude header "cloud_functions-Swift.h"
-}

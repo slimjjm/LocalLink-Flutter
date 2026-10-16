@@ -1,4 +1,0 @@
-
-module GTMAppAuth.Swift {
-  header "GTMAppAuth-Swift.h"
-}

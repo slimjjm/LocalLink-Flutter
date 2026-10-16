@@ -1,4 +1,0 @@
-
-module StripeCore.Swift {
-  header "StripeCore-Swift.h"
-}

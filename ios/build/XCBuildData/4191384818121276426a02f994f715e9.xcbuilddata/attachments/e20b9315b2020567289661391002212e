@@ -1,4 +1,0 @@
-
-module FirebaseFunctions.Swift {
-  header "FirebaseFunctions-Swift.h"
-}

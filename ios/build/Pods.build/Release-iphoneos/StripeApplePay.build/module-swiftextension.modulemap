@@ -1,4 +1,0 @@
-
-module StripeApplePay.Swift {
-  header "StripeApplePay-Swift.h"
-}
